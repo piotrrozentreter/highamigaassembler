@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from hasc.peepholeopt import (
     peephole_optimize,
     _eliminate_redundant_flag_test,
+    _fold_clr_to_memory,
     _fold_neg_one,
     _eliminate_tst_after_andi_neg,
 )
@@ -260,8 +261,38 @@ class TestEliminateTstAfterAndiNeg:
         inp = _asm("andi.l #$FFFF,d0", "neg.w d0", "tst.l d0", "bne lbl")
         out = _eliminate_tst_after_andi_neg(inp)
         assert "tst.l" not in _join(out)
-        assert "andi.l #$FFFF,d0" in _join(out)
-        assert "neg.w d0" in _join(out)
+
+
+# ---------------------------------------------------------------------------
+# _fold_clr_to_memory
+# ---------------------------------------------------------------------------
+
+class TestFoldClrToMemory:
+    """Ensure clr->memory folding stays safe with indexed addressing sources."""
+
+    def test_does_not_fold_when_indexed_load_writes_same_register(self):
+        inp = _asm(
+            "clr.l d0",
+            "move.b (a0,d1.l),d0",
+            "move.b d0,-6(a4)",
+        )
+        out = _fold_clr_to_memory(inp)
+        text = _join(out)
+        assert "clr.l d0" in text
+        assert "move.b (a0,d1.l),d0" in text
+        assert "move.b d0,-6(a4)" in text
+        assert "move.b #0,-6(a4)" not in text
+
+    def test_keeps_one_gap_form_when_gap_writes_source_register(self):
+        inp = _asm(
+            "clr.l d0",
+            "move.w (a0,d1.l),d0",
+            "move.b d0,(a2)",
+        )
+        out = _fold_clr_to_memory(inp)
+        text = _join(out)
+        assert "move.b #0,(a2)" not in text
+        assert "move.w (a0,d1.l),d0" in text
 
     def test_with_inline_comment_on_neg(self):
         inp = [

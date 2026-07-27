@@ -1,4 +1,5 @@
 import re
+import dataclasses
 
 from . import peepholeopt
 from . import ast
@@ -33,6 +34,7 @@ class CodeGen:
         self.push_stack = []  # Track PUSH/POP register lists
         self.reg_alloc = RegisterAllocator(locked_regs=self.locked_regs)  # Register allocation manager with locked regs
         self.loop_stack = []  # Stack of (continue_label, end_label) for nested loops
+        self.dbra_depth = 0  # Nesting depth of active dbra-counter loops (RepeatLoop / fast-path ForLoop); they share d7
 
     def _fail(self, message: str):
         """Abort codegen with a clear, user-facing error."""
@@ -2073,6 +2075,155 @@ class CodeGen:
         
         return code
 
+    def _try_emit_scc_bool_assign(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
+        """Fast path for  if <comparison> { var = 1 } else { var = 0 }  (and the 0/1-swapped
+        form). Rather than emitting a branchy if/else, this delegates to a synthetic
+        `var = <comparison>` (or its logical negation) assignment - _emit_expr already
+        lowers relational BinOps to a branchless cmp+Scc+andi+neg sequence, so this reuses
+        that exact (unsigned-aware, constant-folding-aware) logic instead of duplicating it.
+        Returns True if the fast path was used (code already emitted)."""
+        if not stmt.else_body:
+            return False
+        then_body = stmt.then_body
+        else_body = stmt.else_body
+        if len(then_body) != 1 or len(else_body) != 1:
+            return False
+
+        def _bool_literal_assign(s):
+            """Return (target_name, literal_value) if s is the statement `name = 0` or `name = 1`."""
+            if not isinstance(s, ast.Assign) or s.is_deref:
+                return None
+            if not isinstance(s.target, str):
+                return None  # Exclude ArrayAccess/MemberAccess targets
+            value = self._normalize_expr(s.expr)
+            if not isinstance(value, ast.Number) or value.value not in (0, 1):
+                return None
+            return (s.target, value.value)
+
+        then_info = _bool_literal_assign(then_body[0])
+        else_info = _bool_literal_assign(else_body[0])
+        if not then_info or not else_info:
+            return False
+
+        then_var, then_val = then_info
+        else_var, else_val = else_info
+        if then_var != else_var or {then_val, else_val} != {0, 1}:
+            return False
+
+        cond = self._normalize_expr(stmt.cond)
+        if not isinstance(cond, ast.BinOp):
+            return False
+
+        # then=1/else=0 -> use the condition as-is; then=0/else=1 -> use its negation.
+        # Negating a relational operator is a plain operator swap (no operand reordering
+        # needed), so this reuses _emit_expr's existing comparison lowering unchanged -
+        # including its unsigned-aware Scc selection and constant-folding fast paths.
+        invert_map = {'==': '!=', '!=': '==', '<': '>=', '<=': '>', '>': '<=', '>=': '<'}
+        if cond.op not in invert_map:
+            return False  # Not a simple relational comparison (&&, ||, arithmetic, ...)
+
+        value_expr = cond if then_val == 1 else ast.BinOp(invert_map[cond.op], cond.left, cond.right)
+
+        synthetic_assign = ast.Assign(target=then_var, expr=value_expr, is_deref=False)
+        self._emit_stmt(synthetic_assign, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
+        return True
+
+    def _dbra_loop_enter(self, indent):
+        """Reserve d7 for a dbra loop counter (RepeatLoop or the ForLoop fast path below).
+        d7 is the single register conventionally reserved compiler-wide for dbra counters
+        (see RegisterAllocator), so a loop nested inside another active dbra loop must
+        save/restore the outer counter around its own use. Returns True when nested; pass
+        the same value to _dbra_loop_exit so it knows whether to restore it."""
+        nested = self.dbra_depth > 0
+        if nested:
+            self.emit(indent + "move.l d7,-(a7)  ; save outer loop counter (nested dbra loop)")
+        self.dbra_depth += 1
+        return nested
+
+    def _dbra_loop_exit(self, indent, nested):
+        """Release the d7 reservation acquired by _dbra_loop_enter."""
+        self.dbra_depth -= 1
+        if nested:
+            self.emit(indent + "move.l (a7)+,d7  ; restore outer loop counter")
+
+    def _for_body_blocks_dbra(self, node, var_name):
+        """Conservatively detect whether `node` (a loop-body statement/expression, or a
+        list thereof) rules out the DBcc counter fast path for loop variable `var_name`.
+
+        Blocks the fast path when:
+        - `var_name` appears as an identifier anywhere in the subtree (VarRef, an
+          assignment target, an inline-asm `@var_name` substitution, etc.), checked via
+          whole-word text matching over every string field. This is a superset of exact
+          identifier matches, so it can only over-block (safe), never miss a real use.
+        - A macro call is present - macro bodies can reference caller-scope variables by
+          name (non-hygienic substitution) without that name appearing in the call's own
+          arguments, so a hidden reference cannot be ruled out statically.
+
+        Note: some comparison operators (`==`, `!=`, `<`) are left by the parser as raw,
+        un-normalized Lark parse trees until a codegen expression emitter normalizes them
+        on the fly (see _normalize_expr); `>`, `<=`, `>=` are eagerly converted to BinOp
+        at parse time. This walker runs *before* any such emitter, so it must normalize
+        every node itself - and, since normalize_expr does not cover every possible Lark
+        Tree shape, also fall back to recursing into a raw Tree's children directly.
+        Skipping this would silently miss real references (e.g. `if (j == 2)`), so both
+        steps are required for correctness, not just style.
+        """
+        if node is None:
+            return False
+        node = self._normalize_expr(node)
+        if isinstance(node, ast.MacroCall):
+            return True
+        if isinstance(node, str):
+            return re.search(rf'\b{re.escape(var_name)}\b', node) is not None
+        if isinstance(node, (list, tuple)):
+            return any(self._for_body_blocks_dbra(item, var_name) for item in node)
+        if hasattr(node, 'data') and hasattr(node, 'children'):
+            # Leftover raw Lark Tree that normalize_expr didn't convert - recurse into
+            # its children directly rather than risk silently missing a reference.
+            return any(self._for_body_blocks_dbra(child, var_name) for child in node.children)
+        if dataclasses.is_dataclass(node) and not isinstance(node, type):
+            return any(
+                self._for_body_blocks_dbra(getattr(node, f.name), var_name)
+                for f in dataclasses.fields(node)
+            )
+        return False
+
+    def _for_loop_dbra_count(self, stmt):
+        """Return the number of iterations if `stmt` (a ForLoop) can be compiled to a
+        single DBcc counter loop, or None if the general compare/increment path must be
+        used instead.
+
+        Requires: start/end/step all fold to compile-time integer constants; step != 0;
+        the direction (sign of step) actually reaches end from start in >=1 steps; the
+        total iteration count fits DBcc's 0..65535 counter range; and the loop variable
+        is never referenced in the body (see _for_body_blocks_dbra) - DBcc only counts
+        down in d7 and never materializes the loop variable's actual value anywhere.
+        """
+        if self._for_body_blocks_dbra(stmt.body, stmt.var):
+            return None
+
+        start_const, start_val = self._fold_constant(self._normalize_expr(stmt.start))
+        end_const, end_val = self._fold_constant(self._normalize_expr(stmt.end))
+        step_const, step_val = self._fold_constant(self._normalize_expr(stmt.step))
+        if not (start_const and end_const and step_const):
+            return None
+        if step_val == 0:
+            return None  # General path emits the "infinite loop" diagnostic for this.
+
+        if step_val > 0:
+            if end_val < start_val:
+                return None  # Zero iterations; degenerate, let the general path handle it.
+            count = (end_val - start_val) // step_val + 1
+        else:
+            if end_val > start_val:
+                return None
+            count = (start_val - end_val) // (-step_val) + 1
+
+        if count < 1 or count > 65536:
+            return None  # Outside DBcc's representable 16-bit counter range.
+
+        return count
+
     def _emit_stmt(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
         """Emit a single statement within a procedure."""
         if isinstance(stmt, ast.VarDecl):
@@ -2576,6 +2727,11 @@ class CodeGen:
         elif isinstance(stmt, ast.CallStmt):
             self._emit_call_stmt(stmt, params, locals_info, indent, frame_reg=frame_reg)
         elif isinstance(stmt, ast.If):
+            # Fast path: branchless boolean assignment (var = <comparison> ? 1 : 0) via Scc.
+            if stmt.else_body and self._try_emit_scc_bool_assign(
+                    stmt, params, locals_info, proc, indent, is_void, frame_reg=frame_reg):
+                return
+
             # Emit if statement with conditional branch
             end_label = self._next_label("endif")
             else_label = self._next_label("else") if stmt.else_body else end_label
@@ -2692,6 +2848,29 @@ class CodeGen:
             start_label = self._next_label("for")
             end_label = self._next_label("endfor")
             cont_label = self._next_label("forcont")
+
+            # Fast path: when start/end/step are compile-time constants and the loop
+            # variable is never referenced in the body, the whole loop collapses to a
+            # single dbra counter - no per-iteration load/compare/increment/store needed.
+            dbra_count = self._for_loop_dbra_count(stmt)
+            if dbra_count is not None:
+                self.loop_stack.append((cont_label, end_label))
+
+                nested = self._dbra_loop_enter(indent)
+                self.emit(indent + f"; for {stmt.var} = ... -> dbra counter, {dbra_count} iteration(s) ({stmt.var} unused in body)")
+                self.emit(indent + f"move.l #{dbra_count - 1},d7")
+                self.emit(f"{start_label}:")
+
+                for s in stmt.body:
+                    self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
+
+                self.emit(f"{cont_label}:")
+                self.emit(indent + f"dbra d7,{start_label}")
+                self.emit(f"{end_label}:")
+                self._dbra_loop_exit(indent, nested)
+
+                self.loop_stack.pop()
+                return
             
             # Push loop context for break/continue
             # Continue should jump to the increment step, not the start
@@ -2785,6 +2964,7 @@ class CodeGen:
             
             # Decrement by 1 for dbra (it counts from N-1 down to 0)
             self.emit(indent + "subq.l #1,d0")
+            nested = self._dbra_loop_enter(indent)
             self.emit(indent + "move.l d0,d7")
             
             # Loop label
@@ -2800,6 +2980,7 @@ class CodeGen:
             # dbra d7,start_label: decrement d7 and branch if not -1
             self.emit(indent + f"dbra d7,{start_label}")
             self.emit(f"{end_label}:")
+            self._dbra_loop_exit(indent, nested)
             
             # Pop loop context
             self.loop_stack.pop()
@@ -3281,6 +3462,7 @@ class CodeGen:
                         # Reset push stack and register allocator for each procedure
                         self.push_stack = []
                         self.reg_alloc.reset()
+                        self.dbra_depth = 0
                         
                         # Choose frame register (for frame pointer preservation across calls)
                         frame_reg = self._choose_frame_register()

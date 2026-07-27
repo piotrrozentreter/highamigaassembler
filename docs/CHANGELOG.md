@@ -6,6 +6,24 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Branchless Scc boolean assignment** and **DBcc counter-loop** codegen fast paths
+  (see `docs/CODEGEN_SCC_DBCC_TIPS.md`):
+  - `if <comparison> { v = 1 } else { v = 0 }` (and the 0/1-swapped form) now compiles
+    to a branchless `cmp`+`Scc`+`andi`+`neg` sequence instead of a branchy if/else with
+    labels. Applies to `==`, `!=`, `<`, `<=`, `>`, `>=`, including unsigned comparisons;
+    falls back to the normal branchy path for any other pattern (different assignment
+    targets per branch, non-0/1 literals, multi-statement branches, etc.).
+  - `for i = start to end [by step] { body }` compiles to a single `dbra` instruction
+    when `start`/`end`/`step` are compile-time constants and the loop variable `i` is
+    never read or written in the body (including via macro expansion or an inline-asm
+    `@i` substitution) - eliminating the per-iteration load/compare/increment/store
+    entirely. Loops nested inside another active `dbra`-based loop (`for` or `repeat`)
+    automatically save/restore the shared `d7` counter register around the inner loop.
+  - New example `examples/scc_dbcc_optimization_test.has` demonstrates both fast paths
+    and their general-path fallback cases.
+  - New tests in `tests/test_scc_dbcc_codegen.py` cover both optimizations end-to-end
+    and unit-test the loop-variable-usage analysis directly.
+
 - **BOB mirror APIs** in `lib/bob.s`:
   - Added `MirrorBobHorizontally(handle) -> int`.
   - Added `MirrorBobVertically(handle) -> int`.

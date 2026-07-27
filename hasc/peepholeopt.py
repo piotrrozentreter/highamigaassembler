@@ -303,11 +303,17 @@ def _extract_modified_regs(instruction):
     # Match destination operand patterns
     # Format: op src,dest or op dest
     
-    # Two-operand instructions: dest is after comma
-    m = re.match(r"\s*\w+(\.\w)?\s+[^,]+,([da]\d+)", instruction)
+    # Two-operand instructions: destination is after the LAST comma.
+    # This must handle indexed addressing forms like "(a0,d1.l),d0" where
+    # a naive first-comma split would incorrectly treat d1 as destination.
+    m = re.match(r"\s*\w+(?:\.\w+)?\s+(.+)$", instruction)
     if m:
-        modified.add(m.group(2))
-        return modified
+        operands = m.group(1).strip()
+        if ',' in operands:
+            dest = operands.rsplit(',', 1)[1].strip()
+            if re.fullmatch(r"[da]\d+", dest):
+                modified.add(dest)
+                return modified
     
     # Single-operand instructions that modify
     single_ops = ['clr', 'neg', 'not', 'addq', 'subq', 'asl', 'asr', 'lsl', 'lsr', 'rol', 'ror']
