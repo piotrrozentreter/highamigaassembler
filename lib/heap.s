@@ -9,7 +9,7 @@
 
 HEAP_BLOCK_FREE         EQU 0
 HEAP_BLOCK_OCCUPIED     EQU 1
-HEAP_MEMORY             EQU $1fffc ; total heap size in bytes (even, longword aligned)
+HEAP_MEMORY             EQU ($1fffc+50*1024); total heap size in bytes (even, longword aligned)
 NULL                    EQU 0
 
     ; Blitter-visible scratch/background buffers are allocated from this heap

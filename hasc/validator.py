@@ -152,7 +152,6 @@ class Validator:
                             else:
                                 self.extern_funcs[code_item.name] = []
                     elif isinstance(code_item, ast.MacroDef):
-                        # Store macro signature (params list)
                         if code_item.name in self.macros:
                             self.errors.append(f"Macro '{code_item.name}' already defined")
                         else:
@@ -426,6 +425,38 @@ class Validator:
             # Fall-through: validate individual statement semantics
             self._validate_stmt(stmt, symbols, proc)
 
+    def _normalized_rettype(self, proc):
+        """Normalize a procedure return type to lowercase text, or None if unknown."""
+        raw = getattr(proc, 'rettype', None)
+        if raw is None:
+            return None
+
+        if isinstance(raw, str):
+            text = raw.strip().lower()
+            return text or None
+
+        value = getattr(raw, 'value', None)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            return text or None
+
+        # Defensive fallback for parser edge-cases that return singleton containers.
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                if isinstance(item, str):
+                    text = item.strip().lower()
+                    if text:
+                        return text
+                nested_value = getattr(item, 'value', None)
+                if isinstance(nested_value, str):
+                    text = nested_value.strip().lower()
+                    if text:
+                        return text
+            return None
+
+        text = str(raw).strip().lower()
+        return text or None
+
     def _validate_stmt(self, stmt, symbols, proc):
         """Validate a statement."""
         if isinstance(stmt, ast.VarDecl):
@@ -479,8 +510,8 @@ class Validator:
             if stmt.expr:
                 self._validate_expr(stmt.expr, symbols, proc)
             # Check if return type matches procedure return type
-            rettype = (proc.rettype or '').strip().lower()
-            if stmt.expr is None and rettype != 'void':
+            rettype = self._normalized_rettype(proc)
+            if stmt.expr is None and rettype not in (None, 'void'):
                 self.warnings.append(
                     f"In proc '{proc.name}': Empty return in non-void function"
                 )

@@ -3081,6 +3081,8 @@ class CodeGen:
         elif isinstance(stmt, ast.Continue):
             if not self.loop_stack:
                 self._fail("continue statement outside of loop (should have been caught by validator)")
+            cont_label, _ = self.loop_stack[-1]
+            self.emit(indent + f"bra {cont_label}")
         elif isinstance(stmt, ast.ExprStmt):
             # Expression statement - emit code for the expression if it has side effects
             # (like i++ or i--)

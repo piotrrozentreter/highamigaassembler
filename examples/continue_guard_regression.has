@@ -1,0 +1,78 @@
+// Regression test: continue in a for loop must branch past the loop body.
+// Regression class: "continue falls through to body instead of jumping to loop increment"
+// Root cause: ast.Continue handler in codegen was missing the bra instruction.
+//
+// Repro A: Single guard in for loop - inactive slot skip must skip body write.
+// Repro B: Chained guards - multiple continue checks must all skip body.
+// Repro C: continue inside while loop must jump to condition re-check.
+
+code test:
+
+    // --- Repro A: Single guard in for loop ---
+    // Sum 0..9, skipping even indices: 1+3+5+7+9 = 25
+    proc test_for_continue_guard() -> int {
+        var i:int;
+        var sum:int;
+        sum = 0;
+
+        for i = 0 to 9
+        {
+            if (i % 2 == 0)
+            {
+                continue;   // Must branch to increment, not fall through to body
+            }
+            sum = sum + i;
+        }
+
+        if (sum != 25) { return -1; }
+        return 0;
+    }
+
+    // --- Repro B: Chained continue guards ---
+    // Sum 0..9, skipping even indices AND index 3: 1+5+7+9 = 22
+    proc test_for_chained_continue() -> int {
+        var i:int;
+        var sum:int;
+        sum = 0;
+
+        for i = 0 to 9
+        {
+            if (i % 2 == 0) { continue; }
+            if (i == 3)     { continue; }
+            sum = sum + i;
+        }
+
+        if (sum != 22) { return -10; }
+        return 0;
+    }
+
+    // --- Repro C: continue in while loop ---
+    // Sum 0..9, skipping i==5: 0+1+2+3+4+6+7+8+9 = 40
+    proc test_while_continue() -> int {
+        var i:int;
+        var sum:int;
+        sum = 0;
+        i = 0;
+
+        while (i < 10)
+        {
+            if (i == 5)
+            {
+                i = i + 1;
+                continue;   // Must jump to condition check, not fall through
+            }
+            sum = sum + i;
+            i = i + 1;
+        }
+
+        if (sum != 40) { return -20; }
+        return 0;
+    }
+
+    // Entry wrapper: returns 0 if all repros pass (result goes in d0 per ABI)
+    proc run_all() -> int {
+        var ra:int = test_for_continue_guard();
+        var rb:int = test_for_chained_continue();
+        var rc:int = test_while_continue();
+        return ra | rb | rc;
+    }
