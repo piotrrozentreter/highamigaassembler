@@ -2960,6 +2960,15 @@ class CodeGen:
                 for sub in str(l).splitlines():
                     self.emit(sub if sub.startswith(indent) else indent + sub)
             self.emit(indent + f"move{suffix} d0,{-offset}({frame_reg})")
+
+            dynamic_step = not isinstance(stmt.step, ast.Number)
+            if dynamic_step:
+                # Evaluate the initial step once so first-iteration bound checks can
+                # select ascending vs descending termination correctly.
+                code = self._emit_expr(stmt.step, params, locals_info, "d2", target_type=vtype, frame_reg=frame_reg)
+                for l in code:
+                    for sub in str(l).splitlines():
+                        self.emit(sub if sub.startswith(indent) else indent + sub)
             
             # Loop label
             self.emit(f"{start_label}:")
@@ -2971,23 +2980,29 @@ class CodeGen:
                 for sub in str(l).splitlines():
                     self.emit(sub if sub.startswith(indent) else indent + sub)
             
-            # Compare and branch based on loop direction
-            # CRITICAL FIX: Handle direction-aware loop termination (ascending vs descending)
-            # Determine direction at compile time if step is a constant
+            # Compare and branch based on loop direction.
+            # For dynamic steps, use d2 (cached step value) to pick direction at runtime.
             branch_instr = "bgt"  # Default: ascending (var > end)
-            
-            if isinstance(stmt.step, ast.Number):
+            if dynamic_step:
+                self.emit(indent + f"cmp{suffix} #0,d2")
+                self.emit(indent + f"beq {end_label}")
+                self.emit(indent + f"blt {end_label}_desc")
+                self.emit(indent + f"cmp{suffix} d1,d0")
+                self.emit(indent + f"bgt {end_label}")
+                self.emit(indent + f"bra {start_label}_body")
+                self.emit(f"{end_label}_desc:")
+                self.emit(indent + f"cmp{suffix} d1,d0")
+                self.emit(indent + f"blt {end_label}")
+                self.emit(f"{start_label}_body:")
+            elif isinstance(stmt.step, ast.Number):
                 step_val = stmt.step.value
                 if step_val == 0:
                     self._fail(f"For-loop with zero step creates infinite loop (step={step_val})")
                 elif step_val < 0:
                     # Descending loop: use blt (branch if var < end)
                     branch_instr = "blt"
-            # else: dynamic step at runtime - for now use ascending (conservative fallback)
-            # TODO: emit runtime sign check to branch to ascending/descending paths
-            
-            self.emit(indent + f"cmp{suffix} d1,d0")
-            self.emit(indent + f"{branch_instr} {end_label}")
+                self.emit(indent + f"cmp{suffix} d1,d0")
+                self.emit(indent + f"{branch_instr} {end_label}")
             
             # Emit loop body
             for s in stmt.body:
@@ -2997,12 +3012,18 @@ class CodeGen:
             self.emit(f"{cont_label}:")
 
             # Increment var by step
-            code = self._emit_expr(stmt.step, params, locals_info, "d1", target_type=vtype, frame_reg=frame_reg)
-            for l in code:
-                for sub in str(l).splitlines():
-                    self.emit(sub if sub.startswith(indent) else indent + sub)
+            if dynamic_step:
+                code = self._emit_expr(stmt.step, params, locals_info, "d2", target_type=vtype, frame_reg=frame_reg)
+                for l in code:
+                    for sub in str(l).splitlines():
+                        self.emit(sub if sub.startswith(indent) else indent + sub)
+            else:
+                code = self._emit_expr(stmt.step, params, locals_info, "d1", target_type=vtype, frame_reg=frame_reg)
+                for l in code:
+                    for sub in str(l).splitlines():
+                        self.emit(sub if sub.startswith(indent) else indent + sub)
             self.emit(indent + f"move{suffix} {-offset}({frame_reg}),d0")
-            self.emit(indent + f"add{suffix} d1,d0")
+            self.emit(indent + f"add{suffix} {'d2' if dynamic_step else 'd1'},d0")
             self.emit(indent + f"move{suffix} d0,{-offset}({frame_reg})")
             
             # Jump back to loop start
