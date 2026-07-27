@@ -26,6 +26,9 @@ def peephole_optimize(lines):
         optimized = _optimize_branch_to_branch(optimized)
         optimized = _fold_constant_shifts(optimized)
         optimized = _optimize_indexed_addressing(optimized)
+        optimized = _fold_neg_one(optimized)
+        optimized = _eliminate_tst_after_andi_neg(optimized)
+        optimized = _eliminate_redundant_flag_test(optimized)
         
         if len(optimized) < prev_len:
             changed = True
@@ -598,6 +601,192 @@ def _fold_clr_to_memory(lines):
                                         optimized.append(f"{indent}move{size} #0,{dest}{comment3}")
                                         i += 3
                                         continue
+
+        optimized.append(lines[i])
+        i += 1
+
+    return optimized
+
+
+# ---------------------------------------------------------------------------
+# New optimizations – condition evaluation & constant folding (2025 plan)
+# ---------------------------------------------------------------------------
+
+def _is_v_zero_long_flag_setter(base, reg):
+    """Return True if *base* sets Z/N flags for *reg* with V=0, C=0 via a long-word operation.
+
+    On 68000, the following long-word instructions always set V=0 and C=0, with
+    Z and N reflecting the result held in *reg* after the instruction:
+      - move.l  src, reg   (register load)
+      - moveq   #n, reg
+      - and.l / andi.l     src, reg
+      - or.l  / ori.l      src, reg
+      - eor.l / eori.l     src, reg
+      - not.l  reg
+      - ext.l  reg
+      - clr.l  reg
+      - move.l reg, <dest> (register store - reg itself unchanged, CCR set based on reg)
+
+    Instructions that may set V!=0 (add, sub, neg, mul ...) are deliberately
+    excluded to keep every case safe for bge / blt / bgt / ble as well.
+    """
+    # Two-operand long-word V=0 setters writing to reg as destination
+    m = re.match(
+        r"\s*(move\.l|and\.l|andi\.l|or\.l|ori\.l|eor\.l|eori\.l)\s+[^,]+,\s*"
+        + re.escape(reg) + r"$",
+        base,
+    )
+    if m:
+        return True
+
+    # moveq (always long, always V=0)
+    m = re.match(r"\s*moveq\s+#-?\d+,\s*" + re.escape(reg) + r"$", base)
+    if m:
+        return True
+
+    # Single-operand long-word V=0 setters
+    m = re.match(r"\s*(not\.l|ext\.l|clr\.l)\s+" + re.escape(reg) + r"$", base)
+    if m:
+        return True
+
+    # move.l reg, <dest>  - reg is the SOURCE; reg is unchanged; CCR reflects reg; V=0
+    m = re.match(r"\s*move\.l\s+" + re.escape(reg) + r",\s*(\S+)$", base)
+    if m and m.group(1) != reg:          # guard against move.l d0,d0 (no-op)
+        return True
+
+    return False
+
+
+def _eliminate_redundant_flag_test(lines):
+    """Remove ``tst.l dN`` or ``cmp.l #0,dN`` when the immediately preceding
+    instruction already sets the same Z/N/V=0/C=0 flags for *dN*.
+
+    This handles the common codegen pattern::
+
+        move.l -4(a4),d0   ; sets V=0, N, Z for d0
+        tst.l d0            ; <-- redundant, removed
+        beq endif1
+
+    and the store-then-compare pattern::
+
+        move.l d0,-4(a4)   ; CCR based on d0, V=0
+        cmp.l #0,d0         ; <-- redundant, removed
+        bge endif21
+
+    Only long-word V=0 setters are considered so that the optimisation is safe
+    for all conditional-branch types (beq, bne, bmi, bpl, bge, ble, bgt, blt).
+    """
+    optimized = []
+    i = 0
+
+    while i < len(lines):
+        if i + 1 < len(lines):
+            base1 = lines[i].split(";", 1)[0].rstrip()
+            base2 = lines[i + 1].split(";", 1)[0].rstrip()
+
+            # Detect tst.l dN or cmp.l #0,dN on the *next* line
+            m_tst = re.match(r"\s*tst\.l\s+(d\d+)$", base2)
+            m_cmp = re.match(r"\s*cmp\.l\s+#0,\s*(d\d+)$", base2)
+
+            target_reg = None
+            if m_tst:
+                target_reg = m_tst.group(1)
+            elif m_cmp:
+                target_reg = m_cmp.group(1)
+
+            if target_reg and _is_v_zero_long_flag_setter(base1, target_reg):
+                # Preceding instruction already set the required flags.
+                # Emit the flag-setter line and skip the tst/cmp line.
+                optimized.append(lines[i])
+                i += 2
+                continue
+
+        optimized.append(lines[i])
+        i += 1
+
+    return optimized
+
+
+def _fold_neg_one(lines):
+    """Fold ``moveq #N,dX ; neg.l dX``  ->  ``moveq #-N,dX``.
+
+    On 68000, the code generator sometimes emits a constant load followed by
+    ``neg.l`` to produce negative literals (e.g. ``moveq #1,d1; neg.l d1``
+    for the value -1).  Folding eliminates the ``neg.l`` instruction.
+
+    If the negated value falls outside the moveq range (-128...127) the result
+    is emitted as ``move.l #value,dX`` instead.
+    """
+    optimized = []
+    i = 0
+
+    while i < len(lines):
+        if i + 1 < len(lines):
+            base1 = lines[i].split(";", 1)[0].rstrip()
+            base2 = lines[i + 1].split(";", 1)[0].rstrip()
+            comment1 = (";" + lines[i].split(";", 1)[1]) if ";" in lines[i] else ""
+
+            m1 = re.match(r"(\s*)moveq\s+#(-?\d+),\s*(d\d+)$", base1)
+            if m1:
+                indent, val_str, reg = m1.groups()
+                m2 = re.match(r"\s*neg\.l\s+" + re.escape(reg) + r"$", base2)
+                if m2:
+                    result = -int(val_str)
+                    if -128 <= result <= 127:
+                        optimized.append(f"{indent}moveq #{result},{reg}{comment1}")
+                    else:
+                        optimized.append(f"{indent}move.l #{result},{reg}{comment1}")
+                    i += 2  # skip the neg.l
+                    continue
+
+        optimized.append(lines[i])
+        i += 1
+
+    return optimized
+
+
+def _eliminate_tst_after_andi_neg(lines):
+    """Remove ``tst.l dN`` following ``andi.l #$FF,dN; neg.b dN`` (or the
+    word-width equivalent ``andi.l #$FFFF,dN; neg.w dN``).
+
+    After ``andi.l #$FF,dN`` the upper 24 bits of *dN* are guaranteed zero.
+    ``neg.b dN`` then toggles the byte between $00 and $01 while leaving the
+    upper bytes at zero.  Because the long-word value is either $00000000 or
+    $00000001, the Z flag set by ``neg.b`` already reflects the full 32-bit
+    result, making the subsequent ``tst.l dN`` redundant.
+
+    The same reasoning applies to ``andi.l #$FFFF,dN; neg.w dN``.
+    """
+    optimized = []
+    i = 0
+
+    while i < len(lines):
+        if i + 2 < len(lines):
+            base1 = lines[i].split(";", 1)[0].rstrip()
+            base2 = lines[i + 1].split(";", 1)[0].rstrip()
+            base3 = lines[i + 2].split(";", 1)[0].rstrip()
+
+            # Match: andi.l #$FF,dN  or  andi.l #$FFFF,dN
+            m1 = re.match(r"\s*andi\.l\s+#\$FF(FF)?,\s*(d\d+)$", base1)
+            if m1:
+                word_mode = m1.group(1) is not None   # True -> #$FFFF / neg.w
+                reg = m1.group(2)
+                expected_neg = "neg.w" if word_mode else "neg.b"
+
+                # Match: neg.b dN  (byte) or neg.w dN  (word)
+                m2 = re.match(
+                    r"\s*" + re.escape(expected_neg) + r"\s+" + re.escape(reg) + r"$",
+                    base2,
+                )
+                if m2:
+                    # Match: tst.l dN
+                    m3 = re.match(r"\s*tst\.l\s+" + re.escape(reg) + r"$", base3)
+                    if m3:
+                        # Emit andi and neg, skip the redundant tst.l
+                        optimized.append(lines[i])
+                        optimized.append(lines[i + 1])
+                        i += 3
+                        continue
 
         optimized.append(lines[i])
         i += 1
