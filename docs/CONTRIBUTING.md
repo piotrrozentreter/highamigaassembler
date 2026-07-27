@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the HAS (High Assembler) project!
 
 ## Project Status
 
-**Version 0.6 - In Constant Development**
+**Version 0.7 - In Constant Development**
 
 This compiler is actively being developed. We welcome contributions, bug reports, and suggestions.
 
@@ -130,6 +130,10 @@ Explain the problem this commit solves and why this approach was chosen.
 
    # Or compile all root examples in a loop
    for f in examples/*.has; do python -m hasc.cli "$f" -o /tmp/test.s || exit 1; done
+
+   # VBCC interop regression wrappers
+   ./scripts/test_vbcc_interop.sh
+   ./scripts/test_vbcc_interop.ps1
    ```
 
 4. **Update Documentation**:
@@ -145,7 +149,7 @@ Explain the problem this commit solves and why this approach was chosen.
 
 ### Areas Needing Help
 
-Current focus areas (Version 0.6):
+Current focus areas (Version 0.7):
 
 #### High Priority
 - **Test Suite**: Automated testing framework
