@@ -101,6 +101,18 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - Added validator diagnostics for invalid extern register signatures:
   - duplicate register assignments in a single `extern func` signature
   - reserved register usage (`a6`, `a7`) in `extern func` params
+- **68000 even-address alignment in the BSS section emitter**: a byte-sized reservation
+  (`ds.b`) immediately followed by a word/long reservation could previously place the
+  word/long variable on an odd address, which triggers a 68000 address error at runtime.
+  The BSS emitter now tracks the running byte offset per section and inserts an `even`
+  directive only when a word/long variable (or a struct containing any word/long field)
+  would otherwise start at an odd address.
+- **Removed redundant `even` directives in the DATA section emitter**: it previously
+  emitted `even` unconditionally before every single variable regardless of whether it
+  was needed. It now uses the same offset-tracking logic as the BSS fix above, so
+  byte-only data and already-aligned word/long data no longer get a pointless `even`.
+  Generated assembly is unaffected in correctness, only smaller/cleaner. No HAS syntax
+  changes.
 
 #### GUI Widget Library (`lib/gui.s` / `lib/gui.i`)
 - **`DrawButton(x, y, w, h, bg, border, label, tc)`**: Clickable button gadget with centred label.

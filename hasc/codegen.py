@@ -3206,6 +3206,36 @@ class CodeGen:
         Ensures proper alignment: word fields to 2-byte boundary, long fields to 4-byte boundary."""
         return codegen_utils.struct_size_and_offsets(struct_var)
 
+    def _struct_needs_even_align(self, struct_var: ast.StructVarDecl) -> bool:
+        """True if the struct contains any word/long field. Fields are laid out
+        relative to the struct's own start, so if any field needs an even address
+        the struct's label itself must start on an even address too (68000 word/
+        long accesses require an even address; byte accesses do not)."""
+        _, offsets = self._struct_size_and_offsets(struct_var)
+        return any(getattr(field, 'size_suffix', None) in ('w', 'l') for field, _off in offsets)
+
+    def _data_var_needs_even_align(self, var) -> bool:
+        """Return True if a data-section variable's label must start at an even
+        address on the 68000 (word/long data). Byte-only data has no alignment
+        requirement. Mirrors the same "unsuffixed size defaults to long" rule the
+        data-section emitter below uses when actually emitting dc.b/w/l."""
+        if isinstance(var, ast.StructVarDecl):
+            return self._struct_needs_even_align(var)
+        if var.is_array and var.dimensions and not var.values:
+            # Uninitialized data-section arrays are reserved with ds.b (raw bytes)
+            # regardless of declared element size - see emitter below - so no
+            # alignment is actually needed for that reservation.
+            return False
+        return (var.size or 'l') in ('w', 'l')
+
+    def _bss_var_needs_even_align(self, var) -> bool:
+        """Return True if a bss-section variable's label must start at an even
+        address on the 68000. Mirrors the "size_suffix defaults to long" rule the
+        bss-section emitter below uses for its ds.x directives."""
+        if isinstance(var, ast.StructVarDecl):
+            return self._struct_needs_even_align(var)
+        return (var.size_suffix or 'l') in ('w', 'l')
+
     def _fold_constant(self, expr):
         """Attempt to fold a constant expression at compile time.
         Returns (is_constant, value) where is_constant is True if expr can be folded."""
@@ -3347,6 +3377,11 @@ class CodeGen:
                 self.emit(indent + f"XDEF {pub}")
         
         # Emit sections in order of appearance
+        # Track running byte offsets per (name, section_type) so alignment decisions
+        # remain correct if a section is reopened/continued later in self.module.items
+        # (matches vasm's behavior of appending to an existing same-named SECTION).
+        data_section_offsets = {}
+        bss_section_offsets = {}
         for item in self.module.items:
             if isinstance(item, ast.DataSection):
                 ds = item
@@ -3355,11 +3390,17 @@ class CodeGen:
                 section_type = "data_c" if ds.is_chip else "data"
                 self.emit(indent + f"SECTION {ds.name},{section_type}")
                 # Emit variables (skip constants)
+                data_offset = data_section_offsets.get((ds.name, section_type), 0)
                 for var in ds.variables:
                     if isinstance(var, ast.ConstDecl):
                         continue  # Constants don't generate assembly
-                    # Ensure word alignment
-                    self.emit(indent + "even")
+                    # Word/long data requires an even address on the 68000; byte-only
+                    # data has no alignment requirement. Only emit "even" when this
+                    # variable actually needs it AND the running offset is currently odd
+                    # (avoids emitting a redundant "even" before every single variable).
+                    if self._data_var_needs_even_align(var) and (data_offset % 2):
+                        self.emit(indent + "even")
+                        data_offset += 1
                     self.emit(f"{var.name}:")
                     if isinstance(var, ast.StructVarDecl):
                         struct_size, offsets = self._struct_size_and_offsets(var)
@@ -3369,6 +3410,7 @@ class CodeGen:
                             for dim in var.dimensions:
                                 count *= dim
                         total_bytes = struct_size * count
+                        data_offset += total_bytes
                         init_vals = var.init_values or []
                         size_map = {'b': 1, 'w': 2, 'l': 4}
                         suffix_map = {'b': 'b', 'w': 'w', 'l': 'l'}
@@ -3411,7 +3453,8 @@ class CodeGen:
                         if var.is_array and var.dimensions:
                             # Array initialization
                             if var.values:
-                                suffix = ast.size_suffix(ast.type_size('byte') if var.size == 'b' else (2 if var.size == 'w' else 4))
+                                elem_size = 1 if var.size == 'b' else (2 if var.size == 'w' else 4)
+                                suffix = ast.size_suffix(elem_size)
                                 # Properly quote string values in the array
                                 formatted_values = []
                                 for v in var.values:
@@ -3421,30 +3464,39 @@ class CodeGen:
                                         formatted_values.append(str(v))
                                 values_str = ",".join(formatted_values)
                                 self.emit(indent + f"dc{suffix} {values_str}")
+                                data_offset += sum(len(v) if isinstance(v, str) else elem_size for v in var.values)
                             else:
                                 total_size = 1
                                 for dim in var.dimensions:
                                     total_size *= dim
                                 self.emit(indent + f"ds.b {total_size}  ; array")
+                                data_offset += total_size
                         elif var.values:
+                            elem_size = 1 if var.size == 'b' else (2 if var.size == 'w' else 4)
                             size_suffix = '.' + (var.size or 'l')
                             for val in var.values:
                                 if isinstance(val, str):
                                     self.emit(indent + f"dc.b \"{val}\"")
                                 else:
                                     self.emit(indent + f"dc{size_suffix} {val}")
+                            data_offset += sum(len(val) if isinstance(val, str) else elem_size for val in var.values)
                         else:
                             if isinstance(var.value, str):
                                 if var.size != 'b':
                                     self.emit(indent + f"; WARNING: string literal with non-byte size, defaulting to dc.b")
                                 self.emit(indent + f"dc.b \"{var.value}\"")
+                                data_offset += len(var.value)
                             else:
                                 if var.size == 'b':
                                     self.emit(indent + f"dc.b {var.value}")
+                                    data_offset += 1
                                 elif var.size == 'w':
                                     self.emit(indent + f"dc.w {var.value}")
+                                    data_offset += 2
                                 else:
                                     self.emit(indent + f"dc.l {var.value}")
+                                    data_offset += 4
+                data_section_offsets[(ds.name, section_type)] = data_offset
             elif isinstance(item, ast.BssSection):
                 bs = item
                 self.emit("")
@@ -3452,10 +3504,17 @@ class CodeGen:
                 section_type = "bss_c" if bs.is_chip else "bss"
                 self.emit(indent + f"SECTION {bs.name},{section_type}")
                 # Emit variables (skip constants)
+                bss_offset = bss_section_offsets.get((bs.name, section_type), 0)
                 for var in bs.variables:
                     if isinstance(var, ast.ConstDecl):
                         continue  # Constants don't generate assembly
-                    elif isinstance(var, ast.StructVarDecl):
+                    # Word/long reservations require an even address on the 68000;
+                    # byte-only reservations have no alignment requirement. Only
+                    # emit "even" when needed AND the running offset is odd.
+                    if self._bss_var_needs_even_align(var) and (bss_offset % 2):
+                        self.emit(indent + "even")
+                        bss_offset += 1
+                    if isinstance(var, ast.StructVarDecl):
                         struct_size, offsets = self._struct_size_and_offsets(var)
                         count = 1
                         if var.dimensions:
@@ -3474,6 +3533,7 @@ class CodeGen:
                         if isinstance(count, int):
                             total_bytes = struct_size * count
                             self.emit(f"{var.name}: ds.b {total_bytes}  ; struct size={struct_size}, count={count}")
+                            bss_offset += total_bytes
                         else:
                             # CRITICAL FIX: Raise hard error instead of silent degradation
                             # Unresolved symbolic dimensions must be fixed by user (e.g., add const declaration)
@@ -3500,6 +3560,7 @@ class CodeGen:
                         total_bytes = int(var.size) if var.size else 0
                         count = total_bytes // elem_size if total_bytes else 1
                         self.emit(f"{var.name}: ds.{size_suffix} {count}  ; array {var.dimensions}")
+                        bss_offset += count * elem_size
                     elif var.size:
                         # Handle size specified as: name: bytes OR name.suffix: count
                         size_suffix = var.size_suffix or 'l'  # default to long
@@ -3515,10 +3576,14 @@ class CodeGen:
                             count = total_bytes // elem_size if total_bytes else 1
                         
                         self.emit(f"{var.name}: ds.{size_suffix} {count}  ; {var.size} {('elements' if var.size_suffix else 'bytes')}")
+                        bss_offset += count * elem_size
                     else:
                         size_suffix = var.size_suffix or 'l'  # default to long
+                        elem_size = 1 if size_suffix == 'b' else (2 if size_suffix == 'w' else 4)
                         count = 1
                         self.emit(f"{var.name}: ds.{size_suffix} {count}")
+                        bss_offset += count * elem_size
+                bss_section_offsets[(bs.name, section_type)] = bss_offset
             elif isinstance(item, ast.CodeSection):
                 cs = item
                 self.emit("")
