@@ -598,10 +598,8 @@ class CodeGen:
                 code.append(f"    lea {name},a0")
                 # Evaluate index into d1 (support only 1D for now)
                 if len(base.indices) != 1:
-                    code.append(f"    ; WARNING: only 1D array-of-struct supported for {name}")
-                    idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                else:
-                    idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
+                    self._fail(f"Only 1D array indexing supported for structs; '{name}' has {len(base.indices)} dimensions")
+                idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
                 code.extend(idx_code)
                 # Scale index by stride
                 if stride and (stride & (stride - 1)) == 0:
@@ -832,8 +830,7 @@ class CodeGen:
                     col_val = expr.indices[1].value
                     
                     if col_count is None:
-                        code.append(f"    ; WARNING: could not determine column count for {name}")
-                        col_count = 10  # fallback
+                        self._fail(f"Cannot determine column count for 2D array '{name}' - declare with explicit dimensions like 'int[3][5]'")
                     
                     offset = (row_val * col_count + col_val) * elem_bytes
                     size_suffix = ast.size_suffix(elem_bytes)
@@ -862,8 +859,7 @@ class CodeGen:
                         # Calculate offset: row * col_count + col
                         code.append(f"    mulu.w #{col_count},d2  ; row * col_count")
                     else:
-                        code.append(f"    ; WARNING: could not determine column count for {name}")
-                        code.append(f"    mulu.w #10,d2  ; placeholder col_count")
+                        self._fail(f"Cannot determine column count for 2D array '{name}'; declare with explicit dimensions like 'int[3][5]' or use 1D arrays")
                     
                     code.append(f"    add.l d1,d2   ; + col")
                     
@@ -1463,8 +1459,8 @@ class CodeGen:
                                 else:
                                     return [f"    lea {off}(a6),{reg_left}"]
                             else:
-                                # Defensive fallback
-                                return [f"    ; WARNING: unresolved stack param {name}", f"    move.l #0,{reg_left}"]
+                                # This should not happen - validator should catch undefined variables
+                                self._fail(f"Internal error: unresolved stack parameter '{name}' in address-of operator")
                     else:
                         # Check locals
                         local_info = next((l for l in locals_info if l[0] == name), None)
@@ -1483,7 +1479,8 @@ class CodeGen:
                             else:
                                 return [f"    lea {name},{reg_left}"]
                         else:
-                            return [f"    ; WARNING: unresolved variable {name}", f"    move.l #0,{reg_left}"]
+                            # This should not happen - validator should catch undefined variables
+                            self._fail(f"Internal error: unresolved variable '{name}' in address-of operator")
             elif expr.op == '*':
                 # Dereference operator: load value from pointer
                 # Pointers must be in address registers for addressing modes
@@ -1838,8 +1835,8 @@ class CodeGen:
                     else:
                         lines.append(f"{indent}move.l {-offset}({frame_reg}),-(a7)")
                 else:
-                    lines.append(f"{indent}; WARNING: unresolved offset for {name}")
-                    lines.append(f"{indent}move.l #0,-(a7)")
+                    # This should not happen - validator should catch undefined variables
+                    self._fail(f"Internal error: unresolved offset for variable '{name}' in function call argument")
                 return lines
             
             # Check if it's a parameter (for address register parameters that aren't saved)
@@ -1890,10 +1887,8 @@ class CodeGen:
                 else:
                     lines.append(f"{indent}move.l {name},-(a7)")
                 return lines
-            # Fallback: unresolved variable
-            lines.append(f"{indent}; WARNING: unresolved variable {name}")
-            lines.append(f"{indent}move.l #0,-(a7)")
-            return lines
+            # This should not happen - validator should catch undefined variables
+            self._fail(f"Internal error: unresolved variable '{name}' in function call argument (not found in locals, globals, constants, or parameters)")
 
         # Fallback: evaluate into d0 then push.
         code = self._emit_expr(arg, params, locals_info, "d0", "d1", frame_reg=frame_reg)
@@ -2319,7 +2314,7 @@ class CodeGen:
                                 self.emit(sub if sub.startswith(indent) else indent + sub)
                         self.emit(indent + f"move{suffix} d0,{self._frame_offset(offset, frame_reg)}")
                 else:
-                    self.emit(indent + f"; warning: local variable {stmt.name} not found in locals_info")
+                    self._fail(f"Internal error: local variable '{stmt.name}' not found in locals_info (variable resolution failure)")
             # VarDecl without initialization is just a declaration, already accounted for in frame
         elif isinstance(stmt, ast.Assign):
             target = stmt.target
@@ -2635,8 +2630,7 @@ class CodeGen:
                         if name in self.array_dims and len(self.array_dims[name]['dims']) >= 2:
                             cols = self.array_dims[name]['dims'][1]
                         if cols is None:
-                            self.emit(indent + f"; WARNING: unknown column count for {name}")
-                            cols = 10
+                            self._fail(f"Cannot determine column count for 2D array '{name}' - must declare with explicit dimensions like 'int[3][5]'")
                         self.emit(indent + f"mulu.w #{cols},d2")
                         self.emit(indent + f"add.l d1,d2")
                         if shift_amount > 0:
@@ -2797,8 +2791,8 @@ class CodeGen:
                 reglist = "/".join(reversed(regs))
                 self.emit(indent + f"movem.l (a7)+,{reglist}")
             else:
-                # This should be caught by validator, but emit error comment
-                self.emit(indent + "; ERROR: POP() without matching PUSH()")
+                # This should be caught by validator
+                self._fail("POP() without matching PUSH() - unbalanced register save/restore")
         elif isinstance(stmt, ast.CallStmt):
             self._emit_call_stmt(stmt, params, locals_info, indent, frame_reg=frame_reg)
         elif isinstance(stmt, ast.If):
@@ -2954,8 +2948,7 @@ class CodeGen:
             # Find loop variable in locals
             local_info = next((l for l in locals_info if l[0] == stmt.var), None)
             if not local_info:
-                self.emit(indent + f"; ERROR: loop variable {stmt.var} not found")
-                return
+                self._fail(f"Loop variable '{stmt.var}' not found in local variables (should have been caught by validator)")
             
             name, vtype, offset = local_info
             size = ast.type_size(vtype) if vtype else 4
@@ -2986,7 +2979,7 @@ class CodeGen:
             if isinstance(stmt.step, ast.Number):
                 step_val = stmt.step.value
                 if step_val == 0:
-                    self.emit(indent + "; ERROR: for-loop step is zero (infinite loop)")
+                    self._fail(f"For-loop with zero step creates infinite loop (step={step_val})")
                 elif step_val < 0:
                     # Descending loop: use blt (branch if var < end)
                     branch_instr = "blt"
@@ -3061,16 +3054,12 @@ class CodeGen:
             self.loop_stack.pop()
         elif isinstance(stmt, ast.Break):
             if not self.loop_stack:
-                self.emit(indent + "; ERROR: break outside loop")
-            else:
-                _, end_label = self.loop_stack[-1]
-                self.emit(indent + f"bra {end_label}")
+                self._fail("break statement outside of loop (should have been caught by validator)")
+            _, end_label = self.loop_stack[-1]
+            self.emit(indent + f"bra {end_label}")
         elif isinstance(stmt, ast.Continue):
             if not self.loop_stack:
-                self.emit(indent + "; ERROR: continue outside loop")
-            else:
-                continue_label, _ = self.loop_stack[-1]
-                self.emit(indent + f"bra {continue_label}")
+                self._fail("continue statement outside of loop (should have been caught by validator)")
         elif isinstance(stmt, ast.ExprStmt):
             # Expression statement - emit code for the expression if it has side effects
             # (like i++ or i--)
@@ -3093,7 +3082,7 @@ class CodeGen:
                 self._emit_call_stmt(call_stmt, params, locals_info, indent, frame_reg=frame_reg)
             else:
                 # Neither macro nor function - this should have been caught by validator
-                self.emit(indent + f"; ERROR: undefined macro or function '{stmt.name}'")
+                self._fail(f"Undefined macro or function '{stmt.name}' (should have been caught by validator)")
         elif isinstance(stmt, ast.PythonStmt):
             # Python directive: execute Python code at compile time
             try:
@@ -3160,9 +3149,9 @@ class CodeGen:
                                                         # CRITICAL FIX: Pass frame_reg through to generated statements
                                                         self._emit_stmt(stmt_item, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
             except Exception as e:
-                self.emit(indent + f"; ERROR in @python execution: {str(e)}")
+                self._fail(f"@python directive execution failed: {str(e)}")
         else:
-            self.emit(indent + f"; unsupported stmt: {stmt}")
+            self._fail(f"Unsupported statement type: {type(stmt).__name__}")
 
     def _emit_add_immediate(self, indent, reg, value):
         """Emit ADD instruction with immediate value.
@@ -3241,10 +3230,8 @@ class CodeGen:
             for r in regs_to_save:
                 # Defensive: never emit move.l None,-(a7)
                 if r is None or r == 'None':
-                    self.emit(indent + f"; WARNING: unresolved register for param, cannot save")
-                    self.emit(indent + f"move.l #0,-(a7)")
-                else:
-                    self.emit(indent + f"move.l {r},-(a7)")
+                    self._fail(f"Internal error: unresolved register for parameter in call to '{stmt.name}' - cannot save to stack")
+                self.emit(indent + f"move.l {r},-(a7)")
 
             for idx, p in reversed(stack_params):
                 if idx < len(stmt.args):
@@ -3266,16 +3253,13 @@ class CodeGen:
                 reg = p.register
                 if reg == 'None':
                     reg = None
-                # Defensive: reg should be a string or None (for stack params)
+                # Validate register is a string or None (for stack params)
                 if reg is not None and not isinstance(reg, str):
-                    self.emit(indent + f"; WARNING: param {p.name} has invalid register: {reg}")
+                    self._fail(f"Internal error: parameter '{p.name}' has invalid register type: {type(reg).__name__}")
                 if reg:
-                    assert isinstance(reg, str), f"Parameter {p.name} register is not a string: {reg}"
                     self.emit(indent + f"; param {p.name}: {p.ptype} in {reg}")
                 elif reg is None:
                     self.emit(indent + f"; param {p.name}: {p.ptype} on stack")
-                else:
-                    self.emit(indent + f"; ERROR: param {p.name} has unexpected register value: {reg}")
 
             self.emit(indent + f"jsr {stmt.name}")
 
@@ -3286,10 +3270,8 @@ class CodeGen:
             for r in reversed(regs_to_save):
                 # Defensive: never emit move.l (a7)+,None
                 if r is None or r == 'None':
-                    self.emit(indent + f"; WARNING: unresolved register for param, cannot restore")
-                    self.emit(indent + f"move.l (a7)+,d0  ; fallback to d0")
-                else:
-                    self.emit(indent + f"move.l (a7)+,{r}")
+                    self._fail(f"Internal error: unresolved register for parameter in call to '{stmt.name}' - cannot restore from stack")
+                self.emit(indent + f"move.l (a7)+,{r}")
         else:
             for arg in reversed(stmt.args):
                 code = self._emit_push_arg(arg, params, locals_info, indent, frame_reg=frame_reg)
@@ -3425,7 +3407,7 @@ class CodeGen:
                         else:
                             if isinstance(var.value, str):
                                 if var.size != 'b':
-                                    self.emit(indent + f"; WARNING: string literal with non-byte size, defaulting to dc.b")
+                                    self._fail(f"String literal cannot be stored in {var.size}-byte field (only 1-byte .b fields are supported)")
                                 self.emit(indent + f"dc.b \"{var.value}\"")
                             else:
                                 if var.size == 'b':
@@ -3453,9 +3435,8 @@ class CodeGen:
                                 if isinstance(dim, str) and dim in self.constants:
                                     count *= self.constants[dim]
                                 elif isinstance(dim, str):
-                                    # Try to emit a reference (vasm might resolve it)
-                                    self.emit(f"; WARNING: unresolved dimension name '{dim}' in struct {var.name}")
-                                    count = f"{count} * {dim}"  # String will be used in assembly
+                                    # Unresolved dimension - this is an error
+                                    self._fail(f"Unresolved dimension name '{dim}' in array size for '{var.name}' (should have been caught by validator)")
                                 else:
                                     count *= dim
                         # If count is a string, we need to emit it as an expression
