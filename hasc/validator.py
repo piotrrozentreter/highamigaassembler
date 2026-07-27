@@ -479,11 +479,12 @@ class Validator:
             if stmt.expr:
                 self._validate_expr(stmt.expr, symbols, proc)
             # Check if return type matches procedure return type
-            if stmt.expr is None and proc.rettype != 'void':
+            rettype = (proc.rettype or '').strip().lower()
+            if stmt.expr is None and rettype != 'void':
                 self.warnings.append(
                     f"In proc '{proc.name}': Empty return in non-void function"
                 )
-            elif stmt.expr is not None and proc.rettype == 'void':
+            elif stmt.expr is not None and rettype == 'void':
                 self.warnings.append(
                     f"In proc '{proc.name}': Return with value in void function"
                 )

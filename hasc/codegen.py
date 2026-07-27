@@ -1521,6 +1521,7 @@ class CodeGen:
             if isinstance(expr.operand, ast.VarRef):
                 name = expr.operand.name
                 local_info = next((l for l in locals_info if l[0] == name), None)
+                param_obj = next((p for p in params if p.name == name), None)
                 if local_info:
                     _, vtype, offset = local_info
                     size = ast.type_size(vtype) if vtype else 4
@@ -1529,6 +1530,28 @@ class CodeGen:
                     code.append(f"    move{suffix} {-offset}({frame_reg}),{reg_left}")
                     # Increment at memory location
                     code.append(f"    add{suffix} #1,{-offset}({frame_reg})")
+                elif param_obj:
+                    reg = param_obj.register
+                    if reg == 'None':
+                        reg = None
+                    if reg:
+                        # Register parameter (typically address register)
+                        if reg != reg_left:
+                            code.append(f"    move.l {reg},{reg_left}")
+                        code.append(f"    add.l #1,{reg}")
+                    else:
+                        # Stack parameter
+                        stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                        if param_obj in stack_params:
+                            idx = stack_params.index(param_obj)
+                            off = 8 + 4 * idx
+                            param_type = param_obj.ptype if param_obj.ptype else 'long'
+                            param_size = ast.type_size(param_type) if param_type else 4
+                            param_suffix = ast.size_suffix(param_size)
+                            code.append(f"    move{param_suffix} {off}(a6),{reg_left}")
+                            code.append(f"    add{param_suffix} #1,{off}(a6)")
+                        else:
+                            self._fail(f"Unresolved stack parameter '{name}' in post-increment expression")
                 elif name in self.globals:
                     # Global variable post-increment
                     gsize = self.globals.get(name, 'l')
@@ -1553,6 +1576,7 @@ class CodeGen:
             if isinstance(expr.operand, ast.VarRef):
                 name = expr.operand.name
                 local_info = next((l for l in locals_info if l[0] == name), None)
+                param_obj = next((p for p in params if p.name == name), None)
                 if local_info:
                     _, vtype, offset = local_info
                     size = ast.type_size(vtype) if vtype else 4
@@ -1561,6 +1585,26 @@ class CodeGen:
                     code.append(f"    move{suffix} {-offset}({frame_reg}),{reg_left}")
                     # Decrement at memory location
                     code.append(f"    sub{suffix} #1,{-offset}({frame_reg})")
+                elif param_obj:
+                    reg = param_obj.register
+                    if reg == 'None':
+                        reg = None
+                    if reg:
+                        if reg != reg_left:
+                            code.append(f"    move.l {reg},{reg_left}")
+                        code.append(f"    sub.l #1,{reg}")
+                    else:
+                        stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                        if param_obj in stack_params:
+                            idx = stack_params.index(param_obj)
+                            off = 8 + 4 * idx
+                            param_type = param_obj.ptype if param_obj.ptype else 'long'
+                            param_size = ast.type_size(param_type) if param_type else 4
+                            param_suffix = ast.size_suffix(param_size)
+                            code.append(f"    move{param_suffix} {off}(a6),{reg_left}")
+                            code.append(f"    sub{param_suffix} #1,{off}(a6)")
+                        else:
+                            self._fail(f"Unresolved stack parameter '{name}' in post-decrement expression")
                 elif name in self.globals:
                     # Global variable post-decrement
                     gsize = self.globals.get(name, 'l')
@@ -1584,6 +1628,7 @@ class CodeGen:
             if isinstance(expr.operand, ast.VarRef):
                 name = expr.operand.name
                 local_info = next((l for l in locals_info if l[0] == name), None)
+                param_obj = next((p for p in params if p.name == name), None)
                 if local_info:
                     _, vtype, offset = local_info
                     size = ast.type_size(vtype) if vtype else 4
@@ -1592,6 +1637,26 @@ class CodeGen:
                     code.append(f"    add{suffix} #1,{-offset}({frame_reg})")
                     # Load new value into reg_left (result)
                     code.append(f"    move{suffix} {-offset}({frame_reg}),{reg_left}")
+                elif param_obj:
+                    reg = param_obj.register
+                    if reg == 'None':
+                        reg = None
+                    if reg:
+                        code.append(f"    add.l #1,{reg}")
+                        if reg != reg_left:
+                            code.append(f"    move.l {reg},{reg_left}")
+                    else:
+                        stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                        if param_obj in stack_params:
+                            idx = stack_params.index(param_obj)
+                            off = 8 + 4 * idx
+                            param_type = param_obj.ptype if param_obj.ptype else 'long'
+                            param_size = ast.type_size(param_type) if param_type else 4
+                            param_suffix = ast.size_suffix(param_size)
+                            code.append(f"    add{param_suffix} #1,{off}(a6)")
+                            code.append(f"    move{param_suffix} {off}(a6),{reg_left}")
+                        else:
+                            self._fail(f"Unresolved stack parameter '{name}' in pre-increment expression")
                 elif name in self.globals:
                     # Global variable pre-increment
                     gsize = self.globals.get(name, 'l')
@@ -1613,6 +1678,7 @@ class CodeGen:
             if isinstance(expr.operand, ast.VarRef):
                 name = expr.operand.name
                 local_info = next((l for l in locals_info if l[0] == name), None)
+                param_obj = next((p for p in params if p.name == name), None)
                 if local_info:
                     _, vtype, offset = local_info
                     size = ast.type_size(vtype) if vtype else 4
@@ -1621,6 +1687,26 @@ class CodeGen:
                     code.append(f"    sub{suffix} #1,{-offset}({frame_reg})")
                     # Load new value into reg_left (result)
                     code.append(f"    move{suffix} {-offset}({frame_reg}),{reg_left}")
+                elif param_obj:
+                    reg = param_obj.register
+                    if reg == 'None':
+                        reg = None
+                    if reg:
+                        code.append(f"    sub.l #1,{reg}")
+                        if reg != reg_left:
+                            code.append(f"    move.l {reg},{reg_left}")
+                    else:
+                        stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                        if param_obj in stack_params:
+                            idx = stack_params.index(param_obj)
+                            off = 8 + 4 * idx
+                            param_type = param_obj.ptype if param_obj.ptype else 'long'
+                            param_size = ast.type_size(param_type) if param_type else 4
+                            param_suffix = ast.size_suffix(param_size)
+                            code.append(f"    sub{param_suffix} #1,{off}(a6)")
+                            code.append(f"    move{param_suffix} {off}(a6),{reg_left}")
+                        else:
+                            self._fail(f"Unresolved stack parameter '{name}' in pre-decrement expression")
                 elif name in self.globals:
                     # Global variable pre-decrement
                     gsize = self.globals.get(name, 'l')

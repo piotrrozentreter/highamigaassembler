@@ -6,6 +6,10 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **VBCC interop test wrappers**:
+  - Added `scripts/test_vbcc_interop.sh` and `scripts/test_vbcc_interop.ps1` as direct entrypoints for the vbcc interop test suite.
+  - This provides a consistent cross-platform command surface for contributor and CI-style interop checks.
+
 - **Branchless Scc boolean assignment** and **DBcc counter-loop** codegen fast paths
   (see `docs/CODEGEN_SCC_DBCC_TIPS.md`):
   - `if <comparison> { v = 1 } else { v = 0 }` (and the 0/1-swapped form) now compiles
@@ -55,6 +59,10 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Added end-to-end example `examples/editbox_demo.has`.
 
 ### Changed
+
+- **Parameter increment/decrement codegen semantics**:
+  - Pre/post `++` and `--` on procedure parameters now preserve parameter storage semantics for both stack and `__reg(...)`-annotated extern-style register parameters.
+  - This aligns generated code with expected mutation behavior when parameter-backed lvalues are used in update expressions.
 
 - **Documentation drift cleanup** across README and docs:
   - Updated README project structure to match current `hasc/` and `tools/` layout.

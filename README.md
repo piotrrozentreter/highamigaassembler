@@ -1,6 +1,6 @@
 # HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.6
+**Version:** 0.7
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -259,6 +259,16 @@ python -m hasc.cli program.has -o program.s
 ./scripts/build.sh program.s program.o program.exe
 ```
 
+### Run VBCC Interop Tests
+
+```bash
+# Linux/macOS
+./scripts/test_vbcc_interop.sh
+
+# Windows PowerShell
+./scripts/test_vbcc_interop.ps1
+```
+
 ## 🏗️ Project Structure
 
 ```
@@ -515,7 +525,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.6** - Active Development
+**Version 0.7** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 
