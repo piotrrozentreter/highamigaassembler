@@ -3,7 +3,6 @@ import dataclasses
 
 from . import peepholeopt
 from . import ast
-from .register_allocator import RegisterAllocator
 from . import codegen_utils
 from .macro_expander import MacroExpander
 from .asm_substitution import substitute_asm_vars
@@ -32,7 +31,6 @@ class CodeGen:
         self.strict_word_arith = self._build_strict_word_arith(module)
         self.label_counter = 0
         self.push_stack = []  # Track PUSH/POP register lists
-        self.reg_alloc = RegisterAllocator(locked_regs=self.locked_regs)  # Register allocation manager with locked regs
         self.loop_stack = []  # Stack of (continue_label, end_label) for nested loops
         self.dbra_depth = 0  # Nesting depth of active dbra-counter loops (RepeatLoop / fast-path ForLoop); they share d7
 
@@ -352,15 +350,6 @@ class CodeGen:
         - Recursively normalizes children.
         """
         return codegen_utils.normalize_expr(expr)
-    
-    def _with_reg_alloc(self, reg_type='data', preferred=None):
-        """Context manager helper for automatic register allocation and cleanup.
-        Usage: reg, code = self._alloc_reg('data', 'd0')
-        """
-        if reg_type == 'data':
-            return self.reg_alloc.allocate_data(preferred)
-        else:
-            return self.reg_alloc.allocate_addr(preferred)
 
     def _analyze_proc(self, proc: ast.Proc):
         # collect params and locals; params are now Param objects
@@ -3545,9 +3534,8 @@ class CodeGen:
                         # top-level call in a code section
                         self._emit_call_stmt(it, [], [], indent, frame_reg="a6")
                     elif isinstance(it, ast.Proc):
-                        # Reset push stack and register allocator for each procedure
+                        # Reset push stack for each procedure
                         self.push_stack = []
-                        self.reg_alloc.reset()
                         self.dbra_depth = 0
                         
                         # Choose frame register (for frame pointer preservation across calls)
