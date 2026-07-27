@@ -893,6 +893,16 @@ class ASTBuilder(Transformer):
         if self.print_debug:
             print(f"[DEBUG] for_stmt: var={var} start={start} end={end} step={step} body={body}", file=sys.stderr)
         return ast.ForLoop(var=var, start=start, end=end, step=step, body=body)
+
+    def eq(self, items):
+        return ast.BinOp(op='==', left=items[0], right=items[1])
+
+    def ne(self, items):
+        return ast.BinOp(op='!=', left=items[0], right=items[1])
+
+    def lt(self, items):
+        return ast.BinOp(op='<', left=items[0], right=items[1])
+
     def le(self, items):
         return ast.BinOp(op='<=', left=items[0], right=items[1])
 

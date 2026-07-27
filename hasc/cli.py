@@ -6,7 +6,7 @@ from . import reachability
 import os
 from lark.exceptions import LarkError, UnexpectedInput, UnexpectedToken, UnexpectedCharacters
 
-_internal_versiojn = "0.7"
+_internal_version = "0.7"
 
 # Read version from VERSION file
 def _get_version():
@@ -16,9 +16,9 @@ def _get_version():
             for line in f:
                 if line.startswith("Version"):
                     return line.split()[-1].strip()
-        return _internal_versiojn
+        return _internal_version
     except:
-        return _internal_versiojn
+        return _internal_version
 
 __version__ = _get_version()
 __author__ = "Piotr Rozentreter"

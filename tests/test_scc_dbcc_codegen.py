@@ -301,10 +301,8 @@ code test:
         assert "cmp" in asm  # General bound-check path retained
 
     def test_var_used_only_via_eq_comparison_falls_back(self):
-        """Regression test: `==`, `!=`, and `<` are left by the parser as raw,
-        un-normalized Lark Trees (unlike `>`, `<=`, `>=`, which become BinOp eagerly).
-        The eligibility walker must normalize before inspecting, or it silently misses
-        the reference and wrongly fast-paths a loop whose variable is actually read."""
+        """Regression test: loops that read the counter via `==` must never
+        use the dbra fast path, regardless of parser/normalization internals."""
         src = """
 code test:
     proc for_used_via_eq(dummy: int) -> int {
@@ -406,6 +404,42 @@ code test:
 """
         asm = proc_body(compile_src(src), "for_zero_iters")
         assert "dbra" not in asm
+
+    def test_dynamic_step_emits_runtime_direction_checks(self):
+        src = """
+code test:
+    proc for_dynamic_step(dummy: int) -> int {
+        var sum: int = 0;
+        var i: int = 0;
+        var step: int = -1;
+        for i = 3 to 0 by step {
+            sum = sum + i;
+        }
+        return sum;
+    }
+"""
+        asm = proc_body(compile_src(src), "for_dynamic_step")
+        assert "dbra" not in asm
+        assert "cmp.l #0,d2" in asm
+        assert re.search(r"\bbeq\s+endfor\d+\b", asm)
+        assert re.search(r"\bblt\s+endfor\d+_desc\b", asm)
+        assert re.search(r"\bbgt\s+endfor\d+\b", asm)
+        assert re.search(r"\bblt\s+endfor\d+\b", asm)
+
+    def test_dynamic_step_uses_d2_for_increment(self):
+        src = """
+code test:
+    proc for_dynamic_step_add(dummy: int) -> int {
+        var i: int = 0;
+        var step: int = 2;
+        for i = 0 to 4 by step {
+            i = i + 1;
+        }
+        return i;
+    }
+"""
+        asm = proc_body(compile_src(src), "for_dynamic_step_add")
+        assert "add.l d2,d0" in asm
 
     def test_boundary_65536_iterations_uses_dbra(self):
         """for i = 0 to 65535 (unused): exactly 65536 iterations, the DBcc limit."""
