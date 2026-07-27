@@ -333,6 +333,7 @@ def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False) -> 
         asm += f"; Converted from line-interleaved IFF format to pure planar layout\n"
         asm += f"; Converted from {Path(iff_path).name}\n"
         asm += f"\tSECTION bobs,DATA_C\n"
+        asm += f"\tCNOP\t0,4\n"
         asm += f"\tXDEF\t{out_label}\n"
         asm += f"\tXDEF\t{out_label}_palette\n"
         asm += f"\n; HAM6 base palette (16 colors)\n"

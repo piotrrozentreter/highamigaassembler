@@ -60,6 +60,21 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Changed
 
+- **Longword alignment for every emitted section**:
+  - Code generation now emits `cnop 0,4` immediately after every `SECTION` directive
+    (`data`/`data_c`, `bss`/`bss_c`, `code`/`code_c`), guaranteeing the first label in
+    each section starts on a 4-byte boundary regardless of linking order.
+  - This is in addition to the existing per-variable `even` alignment already emitted
+    for word/long data and bss variables.
+  - Extended the same convention to the standalone asset-generator tools
+    (`tools/bob_importer.py`, `tools/c64_font_converter.py`, `tools/frame_merger.py`,
+    `tools/iff_importer.py`, `tools/sprite_importer.py`,
+    `tools/texturepacker_atlas_importer.py`, `tools/tile_importer.py`): every
+    `SECTION` directive they emit is now immediately followed by `CNOP 0,4`.
+  - Fixed `tools/frame_merger.py` to strip the redundant per-file `CNOP` line from
+    each input frame file when consolidating multiple frame files under one merged
+    `SECTION` (it already stripped the per-file `SECTION`/`XDEF` lines the same way).
+
 - **Parameter increment/decrement codegen semantics**:
   - Pre/post `++` and `--` on procedure parameters now preserve parameter storage semantics for both stack and `__reg(...)`-annotated extern-style register parameters.
   - This aligns generated code with expected mutation behavior when parameter-backed lvalues are used in update expressions.
@@ -101,6 +116,18 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - Added validator diagnostics for invalid extern register signatures:
   - duplicate register assignments in a single `extern func` signature
   - reserved register usage (`a6`, `a7`) in `extern func` params
+- **68000 even-address alignment in the BSS section emitter**: a byte-sized reservation
+  (`ds.b`) immediately followed by a word/long reservation could previously place the
+  word/long variable on an odd address, which triggers a 68000 address error at runtime.
+  The BSS emitter now tracks the running byte offset per section and inserts an `even`
+  directive only when a word/long variable (or a struct containing any word/long field)
+  would otherwise start at an odd address.
+- **Removed redundant `even` directives in the DATA section emitter**: it previously
+  emitted `even` unconditionally before every single variable regardless of whether it
+  was needed. It now uses the same offset-tracking logic as the BSS fix above, so
+  byte-only data and already-aligned word/long data no longer get a pointless `even`.
+  Generated assembly is unaffected in correctness, only smaller/cleaner. No HAS syntax
+  changes.
 
 #### GUI Widget Library (`lib/gui.s` / `lib/gui.i`)
 - **`DrawButton(x, y, w, h, bg, border, label, tc)`**: Clickable button gadget with centred label.

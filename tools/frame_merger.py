@@ -62,6 +62,7 @@ def merge_assembly_frames(pattern: str, output_file: str, leave_palette_label: O
     output_lines.append("; Merged from multiple frame files")
     output_lines.append("")
     output_lines.append("	SECTION bobs,DATA_C")
+    output_lines.append("	CNOP	0,4")
     
     # Collect all XDEF labels and add them
     if xdef_labels:
@@ -95,6 +96,10 @@ def merge_assembly_frames(pattern: str, output_file: str, leave_palette_label: O
             if 'SECTION' in line:
                 in_section = True
                 skip_section_declaration = True
+                continue
+            
+            # Skip CNOP alignment directive (we already emit our own after the merged SECTION)
+            if 'CNOP' in line:
                 continue
             
             # Skip XDEF (we've collected these already)

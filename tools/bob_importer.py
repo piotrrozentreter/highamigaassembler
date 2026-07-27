@@ -84,6 +84,7 @@ def export_bob_asm(png_path: str, out_label: str, planes: int = 5, use_dither: b
     lines.append(f"; Row-interleaved format: {planes} bitplanes, original width={w}px, converted width={conv_w}px ({chunks} chunks)")
     lines.append(f"; Layout: For each image row (0..{conv_h-1}): plane0 row, plane1 row, ... plane{planes-1} row")
     lines.append(f"\tSECTION bobs,DATA_C")
+    lines.append(f"\tCNOP\t0,4")
     lines.append(f"\tXDEF\t{out_label}, {data_label}, {mask_label}, {palette_label}")
 
     data_label = f"{out_label}_data"
@@ -309,6 +310,7 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
     lines.append(f"; Row-interleaved format: {planes} bitplanes, original width={w}px, converted width={conv_w}px ({chunks} chunks)")
     lines.append(f"; Layout: For each image row (0..{conv_h-1}): plane0 row, plane1 row, ... plane{planes-1} row")
     lines.append(f"\tSECTION bobs,DATA_C")
+    lines.append(f"\tCNOP\t0,4")
     lines.append(f"\tXDEF\t{out_label}, {data_label}, {mask_label}, {palette_label}")
 
     lines.append(f"{palette_label}:")

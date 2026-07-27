@@ -78,6 +78,7 @@ def export_tileset_asm(png_path: str, out_label: str, tile_width: int = 8, tile_
     lines.append(f"; Tile-by-tile row-interleaved format: {planes} bitplanes, tile size={tile_width}x{tile_height}, {num_tiles_x}x{num_tiles_y} tiles")
     lines.append(f"; Layout: For each tile, for each row (y=0..{tile_height-1}): plane0, plane1, ..., plane{planes-1} bytes")
     lines.append(f"\tSECTION tileset,DATA_C")
+    lines.append(f"\tCNOP\t0,4")
     lines.append(f"\tXDEF\t{out_label}")
     
     # Generate tileset data
