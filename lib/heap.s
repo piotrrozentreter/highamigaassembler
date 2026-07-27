@@ -15,6 +15,7 @@ NULL                    EQU 0
     ; Blitter-visible scratch/background buffers are allocated from this heap
     ; (via bob.s), so keep it in CHIP RAM on machines with FAST RAM.
     SECTION heap_data,bss_c
+    even
 
 heap_start:
     ds.b HEAP_MEMORY

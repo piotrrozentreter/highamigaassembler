@@ -1,4 +1,3 @@
-	EVEN
 ;**************************************************
 ;*    ----- Protracker V2.3B Playroutine -----	  *
 ;**************************************************
@@ -125,8 +124,6 @@ AUDLC		equ	0
 AUDLEN		equ	4
 AUDPER		equ	6
 AUDVOL		equ	8
-
-	even
 
 	include "ptplayer.i"
 
@@ -426,6 +423,7 @@ mt_TimerBInt:
 	rte
 
 mt_dmaon:
+	even
 	dc.w	$8000
 TB_toggle:
 	dc.b	0
@@ -893,6 +891,7 @@ found_sfx_ch:
 	bra	set_sfx
 
 channel_offsets:
+	even
 	dc.w	0*n_sizeof,1*n_sizeof,2*n_sizeof,3*n_sizeof
 
 channelsfx:
@@ -1516,6 +1515,7 @@ mt_playvoice:
 	bra	set_len_start
 
 mult30tab:
+	even
 	dc.w	0*30,1*30,2*30,3*30,4*30,5*30,6*30,7*30
 	dc.w	8*30,9*30,10*30,11*30,12*30,13*30,14*30,15*30
 	dc.w	16*30,17*30,18*30,19*30,20*30,21*30,22*30,23*30
@@ -3111,6 +3111,7 @@ mt_timerval:
 	ds.l	1
 mt_oldtimers:
 	ds.b	4
+	even
 mt_Lev6Int:
 	ds.l	1
 mt_Lev6Ena:
@@ -3148,17 +3149,20 @@ mt_Enable:
 	ds.b	1
 
 	xdef	_mt_E8Trigger
+	even
 _mt_E8Trigger:
 mt_E8Trigger:
 	ds.b	1
 
 	ifnd	MINIMAL
 	xdef	_mt_MusicChannels
+	even
 _mt_MusicChannels:
 mt_MusicChannels:
 	ds.b	1
 
 	xdef	_mt_SongEnd
+	even
 _mt_SongEnd:
 mt_SongEnd:
 	ds.b	1
@@ -3201,16 +3205,20 @@ mt_data:
 	ds.b	mt_Enable
 	xdef	_mt_Enable
 _mt_Enable:
+	even
 	ds.b	1
 	xdef	_mt_E8Trigger
 _mt_E8Trigger:
+	even
 	ds.b	1
 	ifnd	MINIMAL
 	xdef	_mt_MusicChannels
 _mt_MusicChannels:
+	even
 	ds.b	1
 	xdef	_mt_SongEnd
 _mt_SongEnd:
+	even
 	ds.b	1
 	endc	; !MINIMAL
 
