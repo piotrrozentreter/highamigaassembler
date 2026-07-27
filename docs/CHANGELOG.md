@@ -60,6 +60,21 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Changed
 
+- **Longword alignment for every emitted section**:
+  - Code generation now emits `cnop 0,4` immediately after every `SECTION` directive
+    (`data`/`data_c`, `bss`/`bss_c`, `code`/`code_c`), guaranteeing the first label in
+    each section starts on a 4-byte boundary regardless of linking order.
+  - This is in addition to the existing per-variable `even` alignment already emitted
+    for word/long data and bss variables.
+  - Extended the same convention to the standalone asset-generator tools
+    (`tools/bob_importer.py`, `tools/c64_font_converter.py`, `tools/frame_merger.py`,
+    `tools/iff_importer.py`, `tools/sprite_importer.py`,
+    `tools/texturepacker_atlas_importer.py`, `tools/tile_importer.py`): every
+    `SECTION` directive they emit is now immediately followed by `CNOP 0,4`.
+  - Fixed `tools/frame_merger.py` to strip the redundant per-file `CNOP` line from
+    each input frame file when consolidating multiple frame files under one merged
+    `SECTION` (it already stripped the per-file `SECTION`/`XDEF` lines the same way).
+
 - **Parameter increment/decrement codegen semantics**:
   - Pre/post `++` and `--` on procedure parameters now preserve parameter storage semantics for both stack and `__reg(...)`-annotated extern-style register parameters.
   - This aligns generated code with expected mutation behavior when parameter-backed lvalues are used in update expressions.

@@ -145,6 +145,7 @@ def export_sprite_asm(png_path: str, out_label: str, vstart: int = 0x10, vstop: 
     lines.append(f"; Hardware sprite format: 16px wide, 2 bitplanes (4 colors)")
     lines.append(f"; This data is in fast RAM (DATA) and will be copied to chip RAM by CreateSprite")
     lines.append(f"\tSECTION sprite_templates,DATA")
+    lines.append(f"\tCNOP\t0,4")
     
     # -- Palette block (Amiga 12-bit RGB, 4 colors: transparent + 3 sprite colors) --
     palette_label = f"{out_label}_palette"

@@ -3389,6 +3389,7 @@ class CodeGen:
                 # Emit SECTION directive
                 section_type = "data_c" if ds.is_chip else "data"
                 self.emit(indent + f"SECTION {ds.name},{section_type}")
+                self.emit(indent + "cnop 0,4")
                 # Emit variables (skip constants)
                 data_offset = data_section_offsets.get((ds.name, section_type), 0)
                 for var in ds.variables:
@@ -3503,6 +3504,7 @@ class CodeGen:
                 # Emit SECTION directive
                 section_type = "bss_c" if bs.is_chip else "bss"
                 self.emit(indent + f"SECTION {bs.name},{section_type}")
+                self.emit(indent + "cnop 0,4")
                 # Emit variables (skip constants)
                 bss_offset = bss_section_offsets.get((bs.name, section_type), 0)
                 for var in bs.variables:
@@ -3590,6 +3592,7 @@ class CodeGen:
                 # Emit SECTION directive
                 section_type = "code_c" if cs.is_chip else "code"
                 self.emit(indent + f"SECTION {cs.name},{section_type}")
+                self.emit(indent + "cnop 0,4")
                 # Emit procedures and asm blocks
                 for it in cs.items:
                     if isinstance(it, ast.ExternDecl):

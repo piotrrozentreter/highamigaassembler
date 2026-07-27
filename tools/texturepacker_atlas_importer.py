@@ -419,6 +419,7 @@ def write_shared_palette_file(
     lines = [
         f'; Shared palette for atlas BOBs  ({max_colors} colors, {planes} bitplanes)',
         f'\tSECTION bobs,DATA_C',
+        f'\tCNOP\t0,4',
         f'\tXDEF\t{palette_label}',
         f'{palette_label}:',
     ]
