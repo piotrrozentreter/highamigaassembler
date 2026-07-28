@@ -23,8 +23,23 @@ error_directive: "#error" STRING ";"
 pragma_directive: "#pragma" CNAME "(" pragma_args ")" ";"
 pragma_args: CNAME ("," CNAME)*
 
-const_decl: "const" CNAME "=" NUMBER ";"
-const_decl_nosemi: "const" CNAME "=" NUMBER
+const_decl: "const" CNAME "=" const_expr ";"
+const_decl_nosemi: "const" CNAME "=" const_expr
+
+// Constant expressions: compile-time arithmetic, no variables allowed
+?const_expr: const_cadd
+?const_cadd: const_cadd "+" const_cmul  -> const_expr_add
+           | const_cadd "-" const_cmul  -> const_expr_sub
+           | const_cmul
+?const_cmul: const_cmul "*" const_cunary -> const_expr_mul
+           | const_cmul "/" const_cunary -> const_expr_div
+           | const_cmul "%" const_cunary -> const_expr_mod
+           | const_cunary
+?const_cunary: "-" const_catom -> const_expr_neg
+             | const_catom
+?const_catom: NUMBER            -> const_expr_num
+            | "(" const_expr ")"
+
 
 macro_def: "macro" CNAME "(" [macro_params] ")" "{" stmt* "}"
 macro_params: CNAME ("," CNAME)*
@@ -244,17 +259,63 @@ class ASTBuilder(Transformer):
         # items is list of CNAME tokens
         return [self._val(item) for item in items]
 
+    @staticmethod
+    def _const_to_q16(value):
+        """Convert a Python float (or int) to a Q16.16 integer and return (q16_int, is_q16)."""
+        if isinstance(value, float):
+            return int(value * 65536), True
+        return value, False
+
     def const_decl(self, items):
-        """const_decl: "const" CNAME "=" NUMBER ";" """
+        """const_decl: "const" CNAME "=" const_expr ";" """
         name = self._val(items[0])
-        value = self._parse_number(self._val(items[1]))
-        return ast.ConstDecl(name=name, value=value)
+        value, is_q16 = self._const_to_q16(items[1])
+        return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
 
     def const_decl_nosemi(self, items):
-        """const_decl_nosemi: "const" CNAME "=" NUMBER """
+        """const_decl_nosemi: "const" CNAME "=" const_expr """
         name = self._val(items[0])
-        value = self._parse_number(self._val(items[1]))
-        return ast.ConstDecl(name=name, value=value)
+        value, is_q16 = self._const_to_q16(items[1])
+        return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
+
+    # --- Constant expression evaluators (compile-time folding) ---
+    # All arithmetic is performed in Python's native numeric domain:
+    # - Integer literals remain Python int throughout.
+    # - Float literals remain Python float (NOT pre-converted to Q16.16).
+    # Q16.16 conversion happens once, at const_decl / const_decl_nosemi.
+    # This ensures float*float and float/float produce correct Q16.16 results.
+
+    def const_expr_num(self, items):
+        s = self._val(items[0])
+        # Return float for float literals so downstream arithmetic stays in float domain.
+        if '.' in s:
+            return float(s)
+        return self._parse_number(s)  # int (handles 0x, $, %, decimal)
+
+    def const_expr_add(self, items):
+        return items[0] + items[1]
+
+    def const_expr_sub(self, items):
+        return items[0] - items[1]
+
+    def const_expr_mul(self, items):
+        return items[0] * items[1]
+
+    def const_expr_div(self, items):
+        if items[1] == 0:
+            raise ValueError("Division by zero in constant expression")
+        # Use true division when either operand is float so fractions are preserved.
+        if isinstance(items[0], float) or isinstance(items[1], float):
+            return items[0] / items[1]
+        return items[0] // items[1]  # integer division for pure-int constants
+
+    def const_expr_mod(self, items):
+        if items[1] == 0:
+            raise ValueError("Modulo by zero in constant expression")
+        return items[0] % items[1]
+
+    def const_expr_neg(self, items):
+        return -items[0]
 
     def proc_decl(self, items):
         name = self._val(items[0])

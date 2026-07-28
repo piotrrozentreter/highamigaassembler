@@ -388,7 +388,8 @@ class ErrorDirective:
 class ConstDecl:
     """Constant declaration: const NAME = value; """
     name: str          # Constant name
-    value: int         # Constant value (compile-time)
+    value: int         # Constant value (compile-time; Q16.16 encoded when is_q16 is True)
+    is_q16: bool = False  # True when value originated from a float literal (Q16.16 format)
 
 
 @dataclass
