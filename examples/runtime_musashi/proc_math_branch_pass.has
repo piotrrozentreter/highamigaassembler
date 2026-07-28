@@ -1,0 +1,22 @@
+// Musashi runtime test: proc call, arithmetic, and branch correctness.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_branch:
+    asm {
+        jsr run_test
+        stop #$2700
+    }
+
+    proc run_test() -> int {
+        var a: int = 20;
+        var b: int = 22;
+        var c: int = a + b;
+
+        if (c == 42) {
+            asm "move.l #1,$00100004";
+        } else {
+            asm "move.l #1,$00100000";
+        }
+
+        return c;
+    }

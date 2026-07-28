@@ -81,6 +81,38 @@ python -m hasc.cli examples/add.has -o add.s
 ./scripts/build.sh add.s add.o add
 ```
 
+### 6. Optional: Linux-Only Musashi Runtime Test Tier
+
+This tier is useful for selected tests that require real m68k runtime
+execution, not just compile/link validation.
+
+Prerequisites:
+- Linux (native or WSL)
+- C compiler (`gcc` or `clang`)
+- `vasmm68k_mot`
+
+Commands:
+
+```bash
+# Prepare pinned Musashi source
+./scripts/setup_musashi.sh
+
+# Build the local Musashi runner
+./scripts/build_musashi_runner.sh
+
+# Run selected runtime tests
+./scripts/test_runtime_musashi.sh
+```
+
+To update the pinned Musashi version later:
+
+```bash
+./scripts/update_musashi_pin.sh <git-ref>
+# example: ./scripts/update_musashi_pin.sh master
+```
+
+For full details, see [docs/MUSASHI_RUNTIME_TESTING.md](MUSASHI_RUNTIME_TESTING.md).
+
 ## Troubleshooting
 
 ### Import Error: No module named 'lark'
