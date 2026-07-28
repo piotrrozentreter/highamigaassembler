@@ -1191,7 +1191,7 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
     # Match '@python' followed by '{' ... '}'
     text3 = re.sub(r"@python\s*\{(.*?)\}", _extract_python_block, text2, flags=re.S)
     
-    from lark.exceptions import UnexpectedToken, VisitError
+    from lark.exceptions import UnexpectedInput, UnexpectedToken, VisitError
 
     def _const_name_at_line(src_text: str, line_no: int):
         if line_no is None or line_no <= 0:
@@ -1202,21 +1202,85 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
         line_text = lines[line_no - 1]
         m = re.match(r"\s*const\s+([A-Za-z_]\w*)\s*=", line_text)
         return m.group(1) if m else None
+    def _line_text(src_text: str, line_no: int):
+        if line_no is None or line_no <= 0:
+            return None
+        lines = src_text.splitlines()
+        if line_no > len(lines):
+            return None
+        return lines[line_no - 1]
+
+    def _caret_line(column: int):
+        if column is None or column <= 0:
+            return "^"
+        return " " * (column - 1) + "^"
+
+    def _hint_for_unexpected_token(e, expected):
+        tok = getattr(e, "token", None)
+        tok_type = getattr(tok, "type", "")
+        tok_val = getattr(tok, "value", "")
+        expected_set = set(expected or [])
+
+        expr_starters = {
+            "MINUS", "TILDE", "LPAR", "BANG", "AMPERSAND", "NUMBER",
+            "GETREG", "CNAME", "SETREG", "STAR", "__ANON_0", "__ANON_1"
+        }
+
+        if expected_set == {"COLON"}:
+            return "Did you forget ':' after section name?"
+
+        if tok_type == "SEMICOLON" and len(expected_set.intersection(expr_starters)) >= 4:
+            return "Missing expression after '='."
+
+        last = None
+        hist = getattr(e, "token_history", None)
+        if hist:
+            last = hist[-1]
+        last_type = getattr(last, "type", "") if last else ""
+        if tok_type == "RPAR" and last_type in {"LESSTHAN", "MORETHAN", "__ANON_4", "__ANON_5", "__ANON_6", "__ANON_7"}:
+            return "Incomplete comparison expression inside parentheses."
+
+        if tok_type == "VAR":
+            return "Top-level variable declarations are not allowed in code sections. Use data/bss or local 'var' inside a procedure."
+
+        if tok_val == "":
+            return "Unexpected end of input."
+        return None
+
+    def _format_unexpected_input(src_text: str, e):
+        line = getattr(e, "line", None)
+        column = getattr(e, "column", None)
+        token = getattr(e, "token", None)
+        token_val = getattr(token, "value", None)
+        expected = sorted(getattr(e, "expected", []) or [])
+
+        if token_val is None:
+            summary = "Unexpected end of input"
+        else:
+            summary = f"Unexpected token '{token_val}'"
+
+        if expected:
+            pretty_expected = ", ".join(expected[:8])
+            if len(expected) > 8:
+                pretty_expected += ", ..."
+            summary += f". Expected one of: {pretty_expected}"
+
+        hint = _hint_for_unexpected_token(e, expected)
+        src_line = _line_text(src_text, line)
+
+        parts = [f"Syntax error at line {line}, column {column}: {summary}"]
+        if src_line is not None:
+            parts.append(src_line)
+            parts.append(_caret_line(column))
+        if hint:
+            parts.append(f"Hint: {hint}")
+        return "\n".join(parts)
+
     parser = Lark(GRAMMAR, parser="lalr", propagate_positions=True)
     try:
            tree = parser.parse(text3)
-    except UnexpectedToken as e:
-        # Check if user is trying to declare variables in code section
-        # The error message will contain the token value in str(e)
-        error_str = str(e)
-        if 'var' in error_str.lower() and ('Expected' in error_str):
-            raise SyntaxError(
-                "Cannot declare variables in code section. "
-                "Variables must be declared in 'data' or 'bss' sections, or as local variables inside procedures.\n"
-                f"Original error: {error_str}"
-            ) from e
-        # Re-raise the original exception
-        raise
+    except UnexpectedInput as e:
+        raise SyntaxError(_format_unexpected_input(text3, e)) from e
     builder = ASTBuilder()
     try:
         module = builder.transform(tree)
