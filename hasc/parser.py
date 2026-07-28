@@ -1192,6 +1192,16 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
     text3 = re.sub(r"@python\s*\{(.*?)\}", _extract_python_block, text2, flags=re.S)
     
     from lark.exceptions import UnexpectedToken, VisitError
+
+    def _const_name_at_line(src_text: str, line_no: int):
+        if line_no is None or line_no <= 0:
+            return None
+        lines = src_text.splitlines()
+        if line_no > len(lines):
+            return None
+        line_text = lines[line_no - 1]
+        m = re.match(r"\s*const\s+([A-Za-z_]\w*)\s*=", line_text)
+        return m.group(1) if m else None
     parser = Lark(GRAMMAR, parser="lalr", propagate_positions=True)
     try:
            tree = parser.parse(text3)
@@ -1216,11 +1226,13 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
         if str(rule).startswith("const_expr_") and isinstance(original, ValueError):
             line = getattr(getattr(e.obj, "meta", None), "line", None)
             column = getattr(getattr(e.obj, "meta", None), "column", None)
+            const_name = _const_name_at_line(text3, line)
+            const_prefix = f" in const '{const_name}'" if const_name else ""
             if line is not None and column is not None:
                 raise SyntaxError(
-                    f"Constant expression error at line {line}, column {column}: {original}"
+                    f"Constant expression error{const_prefix} at line {line}, column {column}: {original}"
                 ) from original
-            raise SyntaxError(f"Constant expression error: {original}") from original
+            raise SyntaxError(f"Constant expression error{const_prefix}: {original}") from original
         raise
     
     # Step 3: Restore extracted blocks
