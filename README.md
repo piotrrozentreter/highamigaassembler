@@ -121,6 +121,7 @@ python -m hasc.cli hello.has -o hello.s
 - **[docs/PYTHON_GENERATION_TUTORIAL.md](docs/PYTHON_GENERATION_TUTORIAL.md)** - Step-by-step Python integration
 - **[docs/MUSASHI_RUNTIME_TESTING.md](docs/MUSASHI_RUNTIME_TESTING.md)** - Linux-only runtime tests with Musashi m68k emulation
 - **[docs/TERMINOLOGY.md](docs/TERMINOLOGY.md)** - Language and architecture terminology
+- **[MUSASHI_LINUX_HANDOFF.md](MUSASHI_LINUX_HANDOFF.md)** - Linux/WSL resume checklist for Musashi runtime workflow
 
 ### Implementation Details
 
