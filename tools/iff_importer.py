@@ -44,6 +44,7 @@ class ILBMImage:
         self.bitmap_data = []  # Raw planar bitmap data (decompressed)
         self.indices_by_row = []  # Converted to palette indices per row
         self.is_ham6 = False  # HAM6 Hold-And-Modify mode (6 bitplanes)
+        self.is_ham8 = False  # HAM8 Hold-And-Modify mode (8 bitplanes)
         self.camg_mode = 0  # CAMG viewport mode flags
 
 
@@ -162,6 +163,161 @@ def decode_ham6(img: ILBMImage) -> List[List[int]]:
     return indices_by_row
 
 
+def decode_ham_rgb_rows(img: ILBMImage) -> List[List[Tuple[int, int, int]]]:
+    """Decode HAM6 or HAM8 bitmap data into RGB rows."""
+    bytes_per_row = ((img.width + 15) // 16) * 2
+    row_size = img.planes * bytes_per_row
+
+    if img.is_ham6:
+        data_bits = 4
+        mode_shift = 4
+        palette_shift = 4
+        palette_limit = 16
+    elif img.is_ham8:
+        data_bits = 6
+        mode_shift = 6
+        palette_shift = 2
+        palette_limit = 64
+    else:
+        raise IFFParseError("HAM decode requested for a non-HAM image")
+
+    data_mask = (1 << data_bits) - 1
+    rows = []
+
+    for y in range(img.height):
+        row_offset = y * row_size
+        r = 0
+        g = 0
+        b = 0
+        row_pixels = []
+
+        for x in range(img.width):
+            byte_index = x // 8
+            bit_index = 7 - (x % 8)
+            ham_value = 0
+
+            for plane in range(img.planes):
+                plane_offset = row_offset + (plane * bytes_per_row) + byte_index
+                if plane_offset < len(img.bitmap_data):
+                    byte_val = img.bitmap_data[plane_offset]
+                    bit = (byte_val >> bit_index) & 1
+                    ham_value |= (bit << plane)
+
+            mode = (ham_value >> mode_shift) & 0x3
+            value = ham_value & data_mask
+
+            if mode == 0:
+                if value < min(palette_limit, len(img.palette)):
+                    pr, pg, pb = img.palette[value]
+                    r = pr >> palette_shift
+                    g = pg >> palette_shift
+                    b = pb >> palette_shift
+            elif mode == 1:
+                b = value
+            elif mode == 2:
+                r = value
+            elif mode == 3:
+                g = value
+
+            row_pixels.append((r, g, b))
+
+        rows.append(row_pixels)
+
+    return rows
+
+
+def encode_ham6_from_rgb(rows_rgb: List[List[Tuple[int, int, int]]], base_palette: List[Tuple[int, int, int]]) -> List[List[int]]:
+    """Approximate HAM6 codes from RGB rows using a 16-color base palette."""
+    height = len(rows_rgb)
+    width = len(rows_rgb[0]) if height else 0
+    codes = [[0] * width for _ in range(height)]
+
+    for y in range(height):
+        current_r = 0
+        current_g = 0
+        current_b = 0
+
+        for x in range(width):
+            target_r6, target_g6, target_b6 = rows_rgb[y][x]
+            target_r = target_r6 >> 2
+            target_g = target_g6 >> 2
+            target_b = target_b6 >> 2
+
+            best_error = 1 << 30
+            best_code = 0
+            best_state = (current_r, current_g, current_b)
+
+            for index, (pal_r, pal_g, pal_b) in enumerate(base_palette):
+                error = (pal_r - target_r) * (pal_r - target_r)
+                error += (pal_g - target_g) * (pal_g - target_g)
+                error += (pal_b - target_b) * (pal_b - target_b)
+                if error < best_error:
+                    best_error = error
+                    best_code = index
+                    best_state = (pal_r, pal_g, pal_b)
+
+            candidate_r = current_r
+            candidate_g = current_g
+            candidate_b = target_b
+            error = (candidate_r - target_r) * (candidate_r - target_r)
+            error += (candidate_g - target_g) * (candidate_g - target_g)
+            error += (candidate_b - target_b) * (candidate_b - target_b)
+            if error < best_error:
+                best_error = error
+                best_code = 0x10 | target_b
+                best_state = (candidate_r, candidate_g, candidate_b)
+
+            candidate_r = target_r
+            candidate_g = current_g
+            candidate_b = current_b
+            error = (candidate_r - target_r) * (candidate_r - target_r)
+            error += (candidate_g - target_g) * (candidate_g - target_g)
+            error += (candidate_b - target_b) * (candidate_b - target_b)
+            if error < best_error:
+                best_error = error
+                best_code = 0x20 | target_r
+                best_state = (candidate_r, candidate_g, candidate_b)
+
+            candidate_r = current_r
+            candidate_g = target_g
+            candidate_b = current_b
+            error = (candidate_r - target_r) * (candidate_r - target_r)
+            error += (candidate_g - target_g) * (candidate_g - target_g)
+            error += (candidate_b - target_b) * (candidate_b - target_b)
+            if error < best_error:
+                best_error = error
+                best_code = 0x30 | target_g
+                best_state = (candidate_r, candidate_g, candidate_b)
+
+            codes[y][x] = best_code
+            current_r, current_g, current_b = best_state
+
+    return codes
+
+
+def ham6_codes_to_planar(codes: List[List[int]]) -> bytes:
+    """Pack HAM6 control codes into pure planar 6-bitplane layout."""
+    height = len(codes)
+    width = len(codes[0]) if height else 0
+    bytes_per_row = ((width + 15) // 16) * 2
+    plane_size = bytes_per_row * height
+    planar = bytearray(plane_size * 6)
+
+    for y in range(height):
+        row_offset = y * bytes_per_row
+        for x in range(width):
+            code = codes[y][x] & 0x3F
+            byte_index = x // 8
+            bit_index = 7 - (x % 8)
+            mask = 1 << bit_index
+            for plane in range(6):
+                if (code >> plane) & 1:
+                    plane_offset = plane * plane_size + row_offset + byte_index
+                    planar[plane_offset] |= mask
+
+    return bytes(planar)
+
+
 def parse_iff_ilbm(iff_path: str) -> ILBMImage:
     """Parse an IFF ILBM file and return image data."""
     img = ILBMImage()
@@ -238,7 +394,10 @@ def parse_iff_ilbm(iff_path: str) -> ILBMImage:
                     img.camg_mode = struct.unpack('>I', chunk_data[0:4])[0]
                     # Check for HAM6 mode (0x800 = HOLDNMODIFY)
                     if img.camg_mode & 0x800:
-                        img.is_ham6 = True
+                        if img.planes >= 8:
+                            img.is_ham8 = True
+                        else:
+                            img.is_ham6 = True
                 
             elif chunk_id == b'BODY':
                 # Bitmap data (may be compressed)
@@ -313,7 +472,7 @@ def ilbm_to_indices(img: ILBMImage) -> List[List[int]]:
     return indices_by_row
 
 
-def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False) -> str:
+def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False, ham6: bool = False) -> str:
     """Export IFF ILBM file to assembly format.
     
     For HAM6 images: outputs raw 61,440 bytes suitable for ShowPicture()
@@ -324,8 +483,44 @@ def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False) -> 
     # Parse IFF file
     img = parse_iff_ilbm(iff_path)
     
-    # Check if this is a HAM6 image
-    if img.is_ham6:
+    # Check if this is a HAM image
+    if img.is_ham6 or (ham6 and img.is_ham8):
+        if img.is_ham8 and ham6:
+            rows_rgb = decode_ham_rgb_rows(img)
+            base_palette = []
+            for i in range(16):
+                if i < len(img.palette):
+                    r, g, b = img.palette[i]
+                    base_palette.append((r >> 4, g >> 4, b >> 4))
+                else:
+                    base_palette.append((0, 0, 0))
+
+            asm = f"; HAM6 picture data for mode 2 (320x256, 6 bitplanes, 61440 bytes)\n"
+            asm += f"; Converted from HAM8 source to HAM6 planar layout\n"
+            asm += f"; Converted from {Path(iff_path).name}\n"
+            asm += f"\tSECTION bobs,DATA_C\n"
+            asm += f"\tCNOP\t0,4\n"
+            asm += f"\tXDEF\t{out_label}\n"
+            asm += f"\tXDEF\t{out_label}_palette\n"
+            asm += f"\n; HAM6 base palette (16 colors)\n"
+            asm += f"{out_label}_palette:\n"
+
+            for i, (r, g, b) in enumerate(base_palette):
+                amiga_color = ((r & 15) << 8) | ((g & 15) << 4) | (b & 15)
+                asm += f"\tDC.W\t${amiga_color:03X}\t; COLOR{i}\n"
+
+            asm += f"\n; Bitmap data (61440 bytes, planar layout)\n"
+            asm += f"{out_label}:\n"
+
+            planar_data = ham6_codes_to_planar(encode_ham6_from_rgb(rows_rgb, base_palette))
+            for i in range(0, len(planar_data), 16):
+                chunk = planar_data[i:i+16]
+                hex_bytes = ','.join(f'${b:02X}' for b in chunk)
+                asm += f"\tDC.B\t{hex_bytes}\n"
+
+            asm += f"\teven\n"
+            return asm
+
         # For HAM6: output bitplane data in PLANAR format + palette
         # IFF stores line-interleaved (row 0 plane 0, row 0 plane 1, ..., row 1 plane 0, ...)
         # But hardware with modulo=0 expects pure planar (all plane 0, then all plane 1, ...)
@@ -417,7 +612,7 @@ def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False) -> 
         return asm
 
 
-def import_iff_to_include(iff_path: str, label_prefix: str = 'bob', force: bool = False, out_dir: Optional[str] = None, add_word: bool = False):
+def import_iff_to_include(iff_path: str, label_prefix: str = 'bob', force: bool = False, out_dir: Optional[str] = None, add_word: bool = False, ham6: bool = False):
     """Import IFF ILBM file and generate BOB assembly include.
     
     Args:
@@ -468,9 +663,9 @@ def import_iff_to_include(iff_path: str, label_prefix: str = 'bob', force: bool 
     img = parse_iff_ilbm(str(p))
     
     if regenerate or force:
-        asm = export_iff_as_bob(str(p), label, add_word=add_word)
+        asm = export_iff_as_bob(str(p), label, add_word=add_word, ham6=ham6)
         with open(out_file, 'w', encoding='utf-8') as f:
-            if img.is_ham6:
+            if img.is_ham6 or (ham6 and img.is_ham8):
                 f.write('; HAM6 picture data - use with SetGraphicsMode(2) and ShowPicture()\n')
             else:
                 f.write('; Auto-generated bob include from IFF ILBM\n')
@@ -483,7 +678,8 @@ def import_iff_to_include(iff_path: str, label_prefix: str = 'bob', force: bool 
     meta = {
         'width': img.width,
         'height': img.height,
-        'color_type': 'ham6' if img.is_ham6 else 'iff_ilbm',
+        'color_type': 'ham6' if img.is_ham6 or (ham6 and img.is_ham8) else 'iff_ilbm',
+        'ham6_conversion': bool(ham6 and img.is_ham8),
         'palette_imported': not img.is_ham6,
         'palette_size': len(img.palette),
         'has_transparent': img.transparent_color is not None,
@@ -513,6 +709,7 @@ if __name__ == '__main__':
     parser.add_argument('--label-prefix', type=str, default='bob', help='Label prefix for generated symbols')
     parser.add_argument('--outdir', type=str, default=None, help='Directory to write generated include files')
     parser.add_argument('--add-word', action='store_true', help='Add an extra 16-px word to converted width')
+    parser.add_argument('--ham6', action='store_true', help='Convert HAM8 source images to HAM6 planar output')
     parser.add_argument('--force', action='store_true', help='Force regeneration even if up-to-date')
     
     args = parser.parse_args()
@@ -523,7 +720,8 @@ if __name__ == '__main__':
             args.label_prefix,
             force=args.force,
             out_dir=args.outdir,
-            add_word=args.add_word
+            add_word=args.add_word,
+            ham6=args.ham6
         )
         print(result)
     except Exception as e:
