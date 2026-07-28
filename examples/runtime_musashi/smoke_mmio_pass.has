@@ -1,0 +1,8 @@
+// Musashi runtime smoke test: direct MMIO PASS write.
+// PASS MMIO: 0x00100004
+
+code runtime_smoke:
+    asm {
+        move.l #1,$00100004
+        stop #$2700
+    }

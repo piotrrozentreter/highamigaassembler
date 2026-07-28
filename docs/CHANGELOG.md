@@ -6,6 +6,23 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Linux-only Musashi runtime-test scaffolding** for selected execution tests:
+  - Added pinned Musashi lock file: `tools/musashi.lock`.
+  - Added Linux scripts:
+    - `scripts/setup_musashi.sh` (clone + checkout pinned Musashi ref)
+    - `scripts/build_musashi_runner.sh` (build local host runner)
+    - `scripts/test_runtime_musashi.sh` (compile/assemble/execute selected runtime tests)
+    - `scripts/update_musashi_pin.sh` (refresh lock to an exact new commit)
+  - Added host runner source: `tools/musashi_runner/has_musashi_runner.c`.
+  - Added selected runtime smoke examples and manifest:
+    - `examples/runtime_musashi/smoke_mmio_pass.has`
+    - `examples/runtime_musashi/proc_math_branch_pass.has`
+    - `tests/runtime_musashi_manifest.txt`
+  - Added optional pytest wrapper: `tests/test_runtime_musashi.py`.
+  - Added documentation: `docs/MUSASHI_RUNTIME_TESTING.md`.
+  - This tier is explicitly Linux-only for now and intended for on-demand runtime
+    emulation checks, while existing parser/codegen/link tests remain unchanged.
+
 - **VBCC interop test wrappers**:
   - Added `scripts/test_vbcc_interop.sh` and `scripts/test_vbcc_interop.ps1` as direct entrypoints for the vbcc interop test suite.
   - This provides a consistent cross-platform command surface for contributor and CI-style interop checks.

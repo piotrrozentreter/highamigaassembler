@@ -119,6 +119,7 @@ python -m hasc.cli hello.has -o hello.s
 - **[docs/SHIFT_OPERATORS.md](docs/SHIFT_OPERATORS.md)** - Shift operation details
 - **[docs/PYTHON_INTEGRATION.md](docs/PYTHON_INTEGRATION.md)** - Using Python for code generation
 - **[docs/PYTHON_GENERATION_TUTORIAL.md](docs/PYTHON_GENERATION_TUTORIAL.md)** - Step-by-step Python integration
+- **[docs/MUSASHI_RUNTIME_TESTING.md](docs/MUSASHI_RUNTIME_TESTING.md)** - Linux-only runtime tests with Musashi m68k emulation
 - **[docs/TERMINOLOGY.md](docs/TERMINOLOGY.md)** - Language and architecture terminology
 
 ### Implementation Details
@@ -268,6 +269,21 @@ python -m hasc.cli program.has -o program.s
 # Windows PowerShell
 ./scripts/test_vbcc_interop.ps1
 ```
+
+### Run Selected Runtime Tests With Musashi (Linux only)
+
+```bash
+# Linux/WSL only
+./scripts/test_runtime_musashi.sh
+
+# Optional pytest wrapper
+python -m pytest tests/test_runtime_musashi.py -v
+```
+
+This runtime tier is intentionally optional and focused on selected execution
+tests that need CPU emulation. See
+`docs/MUSASHI_RUNTIME_TESTING.md` for the MMIO pass/fail protocol and the
+pinned-update workflow.
 
 ## 🏗️ Project Structure
 
