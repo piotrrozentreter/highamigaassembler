@@ -1215,6 +1215,54 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
             return "^"
         return " " * (column - 1) + "^"
 
+    def _pretty_token_name(tok_name: str):
+        token_labels = {
+            "COLON": "':'",
+            "SEMICOLON": "';'",
+            "COMMA": "','",
+            "LPAR": "'('",
+            "RPAR": "')'",
+            "LBRACE": "'{'",
+            "RBRACE": "'}'",
+            "LSQB": "'['",
+            "RSQB": "']'",
+            "EQUAL": "'='",
+            "LESSTHAN": "'<'",
+            "MORETHAN": "'>'",
+            "CNAME": "identifier",
+            "NUMBER": "number",
+            "STRING": "string literal",
+            "GETREG": "'GetReg'",
+            "SETREG": "'SetReg'",
+            "AMPERSAND": "'&'",
+            "BANG": "'!'",
+            "TILDE": "'~'",
+            "MINUS": "'-'",
+            "STAR": "'*'",
+            "VAR": "'var'",
+            "PROC": "'proc'",
+            "DATA": "'data'",
+            "BSS": "'bss'",
+            "CODE": "'code'",
+            "__ANON_0": "'++'",
+            "__ANON_1": "'--'",
+            "__ANON_4": "'=='",
+            "__ANON_5": "'!='",
+            "__ANON_6": "'<='",
+            "__ANON_7": "'>='",
+        }
+        return token_labels.get(tok_name, tok_name.lower())
+
+    def _pretty_expected(expected):
+        pretty = []
+        seen = set()
+        for tok_name in expected:
+            label = _pretty_token_name(tok_name)
+            if label not in seen:
+                seen.add(label)
+                pretty.append(label)
+        return pretty
+
     def _hint_for_unexpected_token(e, expected):
         tok = getattr(e, "token", None)
         tok_type = getattr(tok, "type", "")
@@ -1231,6 +1279,15 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
 
         if tok_type == "SEMICOLON" and len(expected_set.intersection(expr_starters)) >= 4:
             return "Missing expression after '='."
+
+        if "SEMICOLON" in expected_set and tok_type in {"VAR", "RETURN", "IF", "WHILE", "FOR", "REPEAT", "CNAME"}:
+            return "Missing ';' at the end of the previous statement."
+
+        if tok_type == "LBRACE" and "RPAR" in expected_set:
+            return "Missing ')' before '{'."
+
+        if tok_val in {None, ""} and "RBRACE" in expected_set:
+            return "Missing closing '}' for a block."
 
         last = None
         hist = getattr(e, "token_history", None)
@@ -1253,15 +1310,16 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
         token = getattr(e, "token", None)
         token_val = getattr(token, "value", None)
         expected = sorted(getattr(e, "expected", []) or [])
+        pretty_expected_tokens = _pretty_expected(expected)
 
         if token_val is None:
             summary = "Unexpected end of input"
         else:
             summary = f"Unexpected token '{token_val}'"
 
-        if expected:
-            pretty_expected = ", ".join(expected[:8])
-            if len(expected) > 8:
+        if pretty_expected_tokens:
+            pretty_expected = ", ".join(pretty_expected_tokens[:8])
+            if len(pretty_expected_tokens) > 8:
                 pretty_expected += ", ..."
             summary += f". Expected one of: {pretty_expected}"
 

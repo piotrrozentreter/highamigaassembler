@@ -29,6 +29,8 @@ code main:
     assert "var x: int = ;" in msg
     assert "^" in msg
     assert "Hint: Missing expression after '='." in msg
+    assert "CNAME" not in msg
+    assert "identifier" in msg
 
 
 def test_missing_section_colon_has_targeted_hint():
@@ -60,3 +62,35 @@ code main:
     assert "Syntax error at line 4, column" in msg
     assert "if (1 < )" in msg
     assert "Hint: Incomplete comparison expression inside parentheses." in msg
+
+
+def test_missing_semicolon_has_targeted_hint():
+    src = """
+code main:
+    proc main() -> int {
+        var x: int = 1
+        return x;
+    }
+"""
+    with pytest.raises(SyntaxError) as ei:
+        has_parser.parse(src)
+    msg = str(ei.value)
+    assert "Syntax error at line 5, column" in msg
+    assert "return x;" in msg
+    assert "Hint: Missing ';' at the end of the previous statement." in msg
+
+
+def test_missing_closing_paren_before_block_has_hint():
+    src = """
+code main:
+    proc main() -> int {
+        if (1 < 2 { return 1; }
+        return 0;
+    }
+"""
+    with pytest.raises(SyntaxError) as ei:
+        has_parser.parse(src)
+    msg = str(ei.value)
+    assert "Syntax error at line 4, column" in msg
+    assert "if (1 < 2 {" in msg
+    assert "Hint: Missing ')' before '{'." in msg
