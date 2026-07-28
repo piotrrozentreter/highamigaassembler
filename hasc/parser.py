@@ -23,8 +23,23 @@ error_directive: "#error" STRING ";"
 pragma_directive: "#pragma" CNAME "(" pragma_args ")" ";"
 pragma_args: CNAME ("," CNAME)*
 
-const_decl: "const" CNAME "=" NUMBER ";"
-const_decl_nosemi: "const" CNAME "=" NUMBER
+const_decl: "const" CNAME "=" const_expr ";"
+const_decl_nosemi: "const" CNAME "=" const_expr
+
+// Constant expressions: compile-time arithmetic, no variables allowed
+?const_expr: const_cadd
+?const_cadd: const_cadd "+" const_cmul  -> const_expr_add
+           | const_cadd "-" const_cmul  -> const_expr_sub
+           | const_cmul
+?const_cmul: const_cmul "*" const_cunary -> const_expr_mul
+           | const_cmul "/" const_cunary -> const_expr_div
+           | const_cmul "%" const_cunary -> const_expr_mod
+           | const_cunary
+?const_cunary: "-" const_catom -> const_expr_neg
+             | const_catom
+?const_catom: NUMBER            -> const_expr_num
+            | "(" const_expr ")"
+
 
 macro_def: "macro" CNAME "(" [macro_params] ")" "{" stmt* "}"
 macro_params: CNAME ("," CNAME)*
@@ -244,17 +259,63 @@ class ASTBuilder(Transformer):
         # items is list of CNAME tokens
         return [self._val(item) for item in items]
 
+    @staticmethod
+    def _const_to_q16(value):
+        """Convert a Python float (or int) to a Q16.16 integer and return (q16_int, is_q16)."""
+        if isinstance(value, float):
+            return int(value * 65536), True
+        return value, False
+
     def const_decl(self, items):
-        """const_decl: "const" CNAME "=" NUMBER ";" """
+        """const_decl: "const" CNAME "=" const_expr ";" """
         name = self._val(items[0])
-        value = self._parse_number(self._val(items[1]))
-        return ast.ConstDecl(name=name, value=value)
+        value, is_q16 = self._const_to_q16(items[1])
+        return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
 
     def const_decl_nosemi(self, items):
-        """const_decl_nosemi: "const" CNAME "=" NUMBER """
+        """const_decl_nosemi: "const" CNAME "=" const_expr """
         name = self._val(items[0])
-        value = self._parse_number(self._val(items[1]))
-        return ast.ConstDecl(name=name, value=value)
+        value, is_q16 = self._const_to_q16(items[1])
+        return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
+
+    # --- Constant expression evaluators (compile-time folding) ---
+    # All arithmetic is performed in Python's native numeric domain:
+    # - Integer literals remain Python int throughout.
+    # - Float literals remain Python float (NOT pre-converted to Q16.16).
+    # Q16.16 conversion happens once, at const_decl / const_decl_nosemi.
+    # This ensures float*float and float/float produce correct Q16.16 results.
+
+    def const_expr_num(self, items):
+        s = self._val(items[0])
+        # Return float for float literals so downstream arithmetic stays in float domain.
+        if '.' in s:
+            return float(s)
+        return self._parse_number(s)  # int (handles 0x, $, %, decimal)
+
+    def const_expr_add(self, items):
+        return items[0] + items[1]
+
+    def const_expr_sub(self, items):
+        return items[0] - items[1]
+
+    def const_expr_mul(self, items):
+        return items[0] * items[1]
+
+    def const_expr_div(self, items):
+        if items[1] == 0:
+            raise ValueError("Division by zero in constant expression")
+        # Use true division when either operand is float so fractions are preserved.
+        if isinstance(items[0], float) or isinstance(items[1], float):
+            return items[0] / items[1]
+        return items[0] // items[1]  # integer division for pure-int constants
+
+    def const_expr_mod(self, items):
+        if items[1] == 0:
+            raise ValueError("Modulo by zero in constant expression")
+        return items[0] % items[1]
+
+    def const_expr_neg(self, items):
+        return -items[0]
 
     def proc_decl(self, items):
         name = self._val(items[0])
@@ -1130,24 +1191,171 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
     # Match '@python' followed by '{' ... '}'
     text3 = re.sub(r"@python\s*\{(.*?)\}", _extract_python_block, text2, flags=re.S)
     
-    from lark.exceptions import UnexpectedToken
-    parser = Lark(GRAMMAR, parser="lalr", propagate_positions=False)
+    from lark.exceptions import UnexpectedInput, UnexpectedToken, VisitError
+
+    def _const_name_at_line(src_text: str, line_no: int):
+        if line_no is None or line_no <= 0:
+            return None
+        lines = src_text.splitlines()
+        if line_no > len(lines):
+            return None
+        line_text = lines[line_no - 1]
+        m = re.match(r"\s*const\s+([A-Za-z_]\w*)\s*=", line_text)
+        return m.group(1) if m else None
+    def _line_text(src_text: str, line_no: int):
+        if line_no is None or line_no <= 0:
+            return None
+        lines = src_text.splitlines()
+        if line_no > len(lines):
+            return None
+        return lines[line_no - 1]
+
+    def _caret_line(column: int):
+        if column is None or column <= 0:
+            return "^"
+        return " " * (column - 1) + "^"
+
+    def _pretty_token_name(tok_name: str):
+        token_labels = {
+            "COLON": "':'",
+            "SEMICOLON": "';'",
+            "COMMA": "','",
+            "LPAR": "'('",
+            "RPAR": "')'",
+            "LBRACE": "'{'",
+            "RBRACE": "'}'",
+            "LSQB": "'['",
+            "RSQB": "']'",
+            "EQUAL": "'='",
+            "LESSTHAN": "'<'",
+            "MORETHAN": "'>'",
+            "CNAME": "identifier",
+            "NUMBER": "number",
+            "STRING": "string literal",
+            "GETREG": "'GetReg'",
+            "SETREG": "'SetReg'",
+            "AMPERSAND": "'&'",
+            "BANG": "'!'",
+            "TILDE": "'~'",
+            "MINUS": "'-'",
+            "STAR": "'*'",
+            "VAR": "'var'",
+            "PROC": "'proc'",
+            "DATA": "'data'",
+            "BSS": "'bss'",
+            "CODE": "'code'",
+            "__ANON_0": "'++'",
+            "__ANON_1": "'--'",
+            "__ANON_4": "'=='",
+            "__ANON_5": "'!='",
+            "__ANON_6": "'<='",
+            "__ANON_7": "'>='",
+        }
+        return token_labels.get(tok_name, tok_name.lower())
+
+    def _pretty_expected(expected):
+        pretty = []
+        seen = set()
+        for tok_name in expected:
+            label = _pretty_token_name(tok_name)
+            if label not in seen:
+                seen.add(label)
+                pretty.append(label)
+        return pretty
+
+    def _hint_for_unexpected_token(e, expected):
+        tok = getattr(e, "token", None)
+        tok_type = getattr(tok, "type", "")
+        tok_val = getattr(tok, "value", "")
+        expected_set = set(expected or [])
+
+        expr_starters = {
+            "MINUS", "TILDE", "LPAR", "BANG", "AMPERSAND", "NUMBER",
+            "GETREG", "CNAME", "SETREG", "STAR", "__ANON_0", "__ANON_1"
+        }
+
+        if expected_set == {"COLON"}:
+            return "Did you forget ':' after section name?"
+
+        if tok_type == "SEMICOLON" and len(expected_set.intersection(expr_starters)) >= 4:
+            return "Missing expression after '='."
+
+        if "SEMICOLON" in expected_set and tok_type in {"VAR", "RETURN", "IF", "WHILE", "FOR", "REPEAT", "CNAME"}:
+            return "Missing ';' at the end of the previous statement."
+
+        if tok_type == "LBRACE" and "RPAR" in expected_set:
+            return "Missing ')' before '{'."
+
+        if tok_val in {None, ""} and "RBRACE" in expected_set:
+            return "Missing closing '}' for a block."
+
+        last = None
+        hist = getattr(e, "token_history", None)
+        if hist:
+            last = hist[-1]
+        last_type = getattr(last, "type", "") if last else ""
+        if tok_type == "RPAR" and last_type in {"LESSTHAN", "MORETHAN", "__ANON_4", "__ANON_5", "__ANON_6", "__ANON_7"}:
+            return "Incomplete comparison expression inside parentheses."
+
+        if tok_type == "VAR":
+            return "Top-level variable declarations are not allowed in code sections. Use data/bss or local 'var' inside a procedure."
+
+        if tok_val == "":
+            return "Unexpected end of input."
+        return None
+
+    def _format_unexpected_input(src_text: str, e):
+        line = getattr(e, "line", None)
+        column = getattr(e, "column", None)
+        token = getattr(e, "token", None)
+        token_val = getattr(token, "value", None)
+        expected = sorted(getattr(e, "expected", []) or [])
+        pretty_expected_tokens = _pretty_expected(expected)
+
+        if token_val is None:
+            summary = "Unexpected end of input"
+        else:
+            summary = f"Unexpected token '{token_val}'"
+
+        if pretty_expected_tokens:
+            pretty_expected = ", ".join(pretty_expected_tokens[:8])
+            if len(pretty_expected_tokens) > 8:
+                pretty_expected += ", ..."
+            summary += f". Expected one of: {pretty_expected}"
+
+        hint = _hint_for_unexpected_token(e, expected)
+        src_line = _line_text(src_text, line)
+
+        parts = [f"Syntax error at line {line}, column {column}: {summary}"]
+        if src_line is not None:
+            parts.append(src_line)
+            parts.append(_caret_line(column))
+        if hint:
+            parts.append(f"Hint: {hint}")
+        return "\n".join(parts)
+
+    parser = Lark(GRAMMAR, parser="lalr", propagate_positions=True)
     try:
            tree = parser.parse(text3)
-    except UnexpectedToken as e:
-        # Check if user is trying to declare variables in code section
-        # The error message will contain the token value in str(e)
-        error_str = str(e)
-        if 'var' in error_str.lower() and ('Expected' in error_str):
-            raise SyntaxError(
-                "Cannot declare variables in code section. "
-                "Variables must be declared in 'data' or 'bss' sections, or as local variables inside procedures.\n"
-                f"Original error: {error_str}"
-            ) from e
-        # Re-raise the original exception
-        raise
+    except UnexpectedInput as e:
+        raise SyntaxError(_format_unexpected_input(text3, e)) from e
     builder = ASTBuilder()
-    module = builder.transform(tree)
+    try:
+        module = builder.transform(tree)
+    except VisitError as e:
+        rule = getattr(e, "rule", "")
+        original = getattr(e, "orig_exc", e)
+        if str(rule).startswith("const_expr_") and isinstance(original, ValueError):
+            line = getattr(getattr(e.obj, "meta", None), "line", None)
+            column = getattr(getattr(e.obj, "meta", None), "column", None)
+            const_name = _const_name_at_line(text3, line)
+            const_prefix = f" in const '{const_name}'" if const_name else ""
+            if line is not None and column is not None:
+                raise SyntaxError(
+                    f"Constant expression error{const_prefix} at line {line}, column {column}: {original}"
+                ) from original
+            raise SyntaxError(f"Constant expression error{const_prefix}: {original}") from original
+        raise
     
     # Step 3: Restore extracted blocks
     # Helper to restore placeholders in various node types
