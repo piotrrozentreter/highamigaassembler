@@ -76,10 +76,16 @@ def test_constexpr_mixed_float_int_division_encodes_to_q16():
 
 
 def test_constexpr_division_by_zero_reports_error():
-    with pytest.raises(Exception, match="Division by zero in constant expression"):
+    with pytest.raises(
+        SyntaxError,
+        match=r"Constant expression error at line 1, column \d+: Division by zero in constant expression",
+    ):
         has_parser.parse("const BAD = 10 / 0;")
 
 
 def test_constexpr_modulo_by_zero_reports_error():
-    with pytest.raises(Exception, match="Modulo by zero in constant expression"):
+    with pytest.raises(
+        SyntaxError,
+        match=r"Constant expression error at line 1, column \d+: Modulo by zero in constant expression",
+    ):
         has_parser.parse("const BAD = 10 % 0;")

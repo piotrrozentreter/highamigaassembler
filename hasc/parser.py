@@ -1191,8 +1191,8 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
     # Match '@python' followed by '{' ... '}'
     text3 = re.sub(r"@python\s*\{(.*?)\}", _extract_python_block, text2, flags=re.S)
     
-    from lark.exceptions import UnexpectedToken
-    parser = Lark(GRAMMAR, parser="lalr", propagate_positions=False)
+    from lark.exceptions import UnexpectedToken, VisitError
+    parser = Lark(GRAMMAR, parser="lalr", propagate_positions=True)
     try:
            tree = parser.parse(text3)
     except UnexpectedToken as e:
@@ -1208,7 +1208,20 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
         # Re-raise the original exception
         raise
     builder = ASTBuilder()
-    module = builder.transform(tree)
+    try:
+        module = builder.transform(tree)
+    except VisitError as e:
+        rule = getattr(e, "rule", "")
+        original = getattr(e, "orig_exc", e)
+        if str(rule).startswith("const_expr_") and isinstance(original, ValueError):
+            line = getattr(getattr(e.obj, "meta", None), "line", None)
+            column = getattr(getattr(e.obj, "meta", None), "column", None)
+            if line is not None and column is not None:
+                raise SyntaxError(
+                    f"Constant expression error at line {line}, column {column}: {original}"
+                ) from original
+            raise SyntaxError(f"Constant expression error: {original}") from original
+        raise
     
     # Step 3: Restore extracted blocks
     # Helper to restore placeholders in various node types
