@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; math.s - Q16.16 fixed-point helpers for HAS
 ; Provides basic constructors, arithmetic, and comparisons.
 ; Q16.16 layout: signed 32-bit, upper 16 bits = integer, lower 16 bits = fractional.
@@ -10,6 +12,10 @@
 ;      0.98  -> (0 << 16) + (98 * 65536 / 100) = 0 + 64224 = 64224
     
     SECTION code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
     
     XDEF Q16FromInt
     XDEF Q16Add
@@ -26,8 +32,12 @@
     XREF HeapAlloc
 
 ; -----------------------------------------------------------------------------
-; Q16FromInt(val: int) -> Q16.16
-; Returns val << 16 in d0
+; Function: Q16FromInt
+; Input: 8(a6)=val
+; Output: d0=Q16.16 value
+; Description: Converts an integer to Q16.16 format.
+; Notes: Performs a left shift by 16 bits.
+; -----------------------------------------------------------------------------
 Q16FromInt:
     link a6,#0
     move.l 8(a6),d0
@@ -37,7 +47,12 @@ Q16FromInt:
     rts
 
 ; -----------------------------------------------------------------------------
-; Q16Add(a: Q16.16, b: Q16.16) -> Q16.16
+; Function: Q16Add
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=Q16.16 value
+; Description: Adds two Q16.16 values.
+; Notes: Uses native 32-bit integer addition.
+; -----------------------------------------------------------------------------
 Q16Add:
     link a6,#0
     move.l 8(a6),d0
@@ -46,7 +61,12 @@ Q16Add:
     rts
 
 ; -----------------------------------------------------------------------------
-; Q16Sub(a: Q16.16, b: Q16.16) -> Q16.16
+; Function: Q16Sub
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=Q16.16 value
+; Description: Subtracts b from a.
+; Notes: Uses native 32-bit integer subtraction.
+; -----------------------------------------------------------------------------
 Q16Sub:
     link a6,#0
     move.l 8(a6),d0
@@ -55,8 +75,12 @@ Q16Sub:
     rts
 
 ; -----------------------------------------------------------------------------
-; Q16Mul(a: Q16.16, b: Q16.16) -> Q16.16
-; Uses 16-bit partial products to compute (a*b)>>16 with signed inputs.
+; Function: Q16Mul
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=Q16.16 value
+; Description: Multiplies two Q16.16 values.
+; Notes: Uses signed 16-bit partial products to compute (a*b)>>16.
+; -----------------------------------------------------------------------------
 Q16Mul:
     link a6,#0
     movem.l d2-d7,-(a7)
@@ -111,8 +135,12 @@ Q16Mul:
     rts
 
 ; -----------------------------------------------------------------------------
-; Q16Div(a: Q16.16, b: Q16.16) -> Q16.16
-; Computes (a << 16) / b using unsigned 64/32 division with sign handling.
+; Function: Q16Div
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=Q16.16 value
+; Description: Divides one Q16.16 value by another.
+; Notes: Returns 0 on divide-by-zero and applies sign handling manually.
+; -----------------------------------------------------------------------------
 Q16Div:
     link a6,#0
     movem.l d2-d5,-(a7)
@@ -164,7 +192,12 @@ Q16Div:
     rts
 
 ; -----------------------------------------------------------------------------
-; Comparisons return 1 if true, 0 if false (result in d0).
+; Function: Q16Eq
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=1 if equal, 0 otherwise
+; Description: Tests Q16.16 equality.
+; Notes: Returns a boolean-like long result.
+; -----------------------------------------------------------------------------
 
 Q16Eq:
     link a6,#0
@@ -177,6 +210,13 @@ Q16Eq:
     rts
 
 Q16Gt:
+; -----------------------------------------------------------------------------
+; Function: Q16Gt
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=1 if a>b, 0 otherwise
+; Description: Tests Q16.16 greater-than.
+; Notes: Returns a boolean-like long result.
+; -----------------------------------------------------------------------------
     link a6,#0
     move.l 8(a6),d0
     cmp.l 12(a6),d0
@@ -187,6 +227,13 @@ Q16Gt:
     rts
 
 Q16Lt:
+; -----------------------------------------------------------------------------
+; Function: Q16Lt
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=1 if a<b, 0 otherwise
+; Description: Tests Q16.16 less-than.
+; Notes: Returns a boolean-like long result.
+; -----------------------------------------------------------------------------
     link a6,#0
     move.l 8(a6),d0
     cmp.l 12(a6),d0
@@ -197,6 +244,13 @@ Q16Lt:
     rts
 
 Q16Ge:
+; -----------------------------------------------------------------------------
+; Function: Q16Ge
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=1 if a>=b, 0 otherwise
+; Description: Tests Q16.16 greater-than-or-equal.
+; Notes: Returns a boolean-like long result.
+; -----------------------------------------------------------------------------
     link a6,#0
     move.l 8(a6),d0
     cmp.l 12(a6),d0
@@ -207,6 +261,13 @@ Q16Ge:
     rts
 
 Q16Le:
+; -----------------------------------------------------------------------------
+; Function: Q16Le
+; Input: 8(a6)=a, 12(a6)=b
+; Output: d0=1 if a<=b, 0 otherwise
+; Description: Tests Q16.16 less-than-or-equal.
+; Notes: Returns a boolean-like long result.
+; -----------------------------------------------------------------------------
     link a6,#0
     move.l 8(a6),d0
     cmp.l 12(a6),d0
@@ -217,10 +278,12 @@ Q16Le:
     rts
 
 ; -----------------------------------------------------------------------------
-; Q16ToStringAlloc(val: Q16.16) -> ptr to string or 0
-; Converts Q16.16 fixed-point to string like "-123.4567"
-; Allocates memory from heap - caller must free with HeapFree
-; Format: up to 4 decimal places
+; Function: Q16ToStringAlloc
+; Input: 8(a6)=val
+; Output: d0=allocated string or 0
+; Description: Converts a Q16.16 value to a decimal string.
+; Notes: Allocates memory from HeapAlloc and formats up to 4 decimal places.
+; -----------------------------------------------------------------------------
 Q16ToStringAlloc:
     link a6,#-32           ; temp buffer for building string
     movem.l d1-d7/a0-a2,-(sp)

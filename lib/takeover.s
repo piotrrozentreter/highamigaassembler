@@ -2,6 +2,7 @@
 ; Takes and releases control of Amiga hardware.
 ;
 ; (c) 2024 Stefano Coppi
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ;****************************************************************
           
  
@@ -32,10 +33,17 @@ old_int4      dc.l       0
 
     SECTION code,CODE
 
-;************************************************************************
-; Takes full control of Amiga hardware,
-; disabling the O.S. in a controlled way.
-;************************************************************************
+;****************************************************************
+; Public API
+;****************************************************************
+
+;----------------------------------------------------------------
+; Function: TakeSystem
+; Input: none
+; Output: none
+; Description: Takes exclusive control of Amiga hardware from the OS.
+; Notes: Saves system state so ReleaseSystem can restore it later.
+;----------------------------------------------------------------
               xdef       TakeSystem
 TakeSystem:
               move.l     ExecBase,a6                  ; base address of Exec
@@ -77,9 +85,13 @@ TakeSystem:
               rts
 
 
-;************************************************************************
-; Releases the hardware control to the O.S.
-;************************************************************************
+;----------------------------------------------------------------
+; Function: ReleaseSystem
+; Input: none
+; Output: none
+; Description: Restores hardware control back to the operating system.
+; Notes: Reverses the state saved by TakeSystem.
+;----------------------------------------------------------------
               xdef       ReleaseSystem
 ReleaseSystem:
               movem.l    d0-a6,-(sp)

@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; str.s - String utility routines for HAS runtime (Motorola 68000)
 ; Provides: StrLen, StrCmp, StrFind, StrConcatAlloc, Atoi, ItoaAlloc
 ; Calling conventions:
@@ -16,6 +18,10 @@
 
     SECTION str_code,code
 
+; =============================================================================
+; Public API
+; =============================================================================
+
     XDEF StrLen
     XDEF StrCmp
     XDEF StrFind
@@ -27,9 +33,13 @@
 
     SECTION str_code,code
 
-; ----------------------------------------
-; StrLen(a0=ptr) -> d0 = length (bytes before NUL)
-; ----------------------------------------
+; -----------------------------------------------------------------------------
+; Function: StrLen
+; Input: 8(a6)=ptr
+; Output: d0=length
+; Description: Returns the number of bytes before the terminating NUL.
+; Notes: Treats the input as a standard NUL-terminated byte string.
+; -----------------------------------------------------------------------------
 StrLen:
     link a6,#0
     movem.l d1/a0,-(sp)
@@ -46,9 +56,13 @@ StrLen:
     unlk a6
     rts
 
-; ----------------------------------------
-; StrCmp(a0=s1, a1=s2) -> d0 comparison
-; ----------------------------------------
+; -----------------------------------------------------------------------------
+; Function: StrCmp
+; Input: 8(a6)=s1, 12(a6)=s2
+; Output: d0=comparison result
+; Description: Compares two NUL-terminated strings byte by byte.
+; Notes: Returns the signed difference of the first mismatching bytes.
+; -----------------------------------------------------------------------------
 StrCmp:
     link a6,#0
     movem.l d1-d2/a0-a1,-(sp)
@@ -76,10 +90,13 @@ StrCmp:
     unlk a6
     rts
 
-; ----------------------------------------
-; StrFind(a0=haystack, a1=needle) -> d0=ptr or 0
-; Naive search (O(n*m))
-; ----------------------------------------
+; -----------------------------------------------------------------------------
+; Function: StrFind
+; Input: 8(a6)=haystack, 12(a6)=needle
+; Output: d0=match pointer or 0
+; Description: Finds the first occurrence of needle in haystack.
+; Notes: Uses a naive O(n*m) scan.
+; -----------------------------------------------------------------------------
 StrFind:
     link a6,#0
     movem.l d1-d6/a0-a3,-(sp)
@@ -131,10 +148,13 @@ StrFind:
     unlk a6
     rts
 
-; ----------------------------------------
-; StrConcatAlloc(a0=s1, a1=s2) -> d0=new string or 0
-; Allocates memory from heap using HeapAlloc. Caller must free with HeapFree.
-; ----------------------------------------
+; -----------------------------------------------------------------------------
+; Function: StrConcatAlloc
+; Input: 8(a6)=s1, 12(a6)=s2
+; Output: d0=allocated string or 0
+; Description: Allocates and returns the concatenation of two strings.
+; Notes: The caller must free the result with HeapFree.
+; -----------------------------------------------------------------------------
 StrConcatAlloc:
     link a6,#0
     movem.l d1-d7/a0-a2,-(sp)
@@ -213,9 +233,13 @@ StrConcatAlloc:
     unlk a6
     rts
 
-; ----------------------------------------
-; Atoi(a0=str) -> d0=int (decimal), supports +/- and spaces
-; ----------------------------------------
+; -----------------------------------------------------------------------------
+; Function: Atoi
+; Input: 8(a6)=str
+; Output: d0=signed integer
+; Description: Parses a decimal ASCII string into an integer.
+; Notes: Accepts optional leading spaces and sign characters.
+; -----------------------------------------------------------------------------
 Atoi:
     link a6,#0
     movem.l d1-d3/a0,-(sp)
