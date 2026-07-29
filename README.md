@@ -1,4 +1,4 @@
-# HAS - High Assembler for Motorola 68000 (Amiga)
+﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
 **Version:** 0.7
 
@@ -6,7 +6,7 @@
 
 **HAS (High Assembler)** is a Python-based compiler that translates a high-level assembly language targeting the Motorola 68000 processor (Amiga). It provides modern programming constructs while maintaining full control over the generated assembly code.
 
-## 🎯 What is HAS?
+## ðŸŽ¯ What is HAS?
 
 HAS bridges the gap between high-level languages and assembly programming. It offers:
 
@@ -18,7 +18,7 @@ HAS bridges the gap between high-level languages and assembly programming. It of
 - **Amiga-specific support**: hardware registers, graphics libraries, copper lists
 - **Clean output**: generates standard 68000 assembly compatible with `vasm` + `vlink`
 
-## 📋 Features
+## ðŸ“‹ Features
 
 ### Core Language Features
 
@@ -50,7 +50,7 @@ HAS bridges the gap between high-level languages and assembly programming. It of
 - **Heap Management**: Dynamic memory allocation primitives
 - **System Integration**: AmigaDOS/Exec library interfaces
 
-## 🚀 Quick Start
+## ðŸš€ Quick Start
 
 ### Installation
 
@@ -101,7 +101,7 @@ python -m hasc.cli hello.has -o hello.s
 ./scripts/build.sh hello.s hello.o hello.exe
 ```
 
-## 📖 Documentation
+## ðŸ“– Documentation
 
 ### Essential Guides
 
@@ -131,7 +131,7 @@ python -m hasc.cli hello.has -o hello.s
 - **[docs/GRAPHICS_LIBRARY_INTERFACE.md](docs/GRAPHICS_LIBRARY_INTERFACE.md)** - Amiga graphics programming
 - **[docs/HAM6_SUPPORT.md](docs/HAM6_SUPPORT.md)** - HAM6 graphics mode implementation
 
-## 📚 Examples
+## ðŸ“š Examples
 
 The `examples/` directory contains numerous demonstrations:
 
@@ -194,7 +194,7 @@ These examples demonstrate game-related concepts and systems, but they are not r
 - `code_generator.py` - External Python code generation
 - `simple_generator.py` - Simple generation example
 
-## 🔧 Usage
+## ðŸ”§ Usage
 
 ### Basic Compilation
 
@@ -265,10 +265,10 @@ python -m hasc.cli program.has -o program.s
 
 ```bash
 # Linux/macOS
-./scripts/test_vbcc_interop.sh
+./scripts/tests/test_vbcc_interop.sh
 
 # Windows PowerShell
-./scripts/test_vbcc_interop.ps1
+./scripts/tests/test_vbcc_interop.ps1
 ```
 
 ### Run Selected Runtime Tests With Musashi (Linux only)
@@ -286,57 +286,57 @@ tests that need CPU emulation. See
 `docs/MUSASHI_RUNTIME_TESTING.md` for the MMIO pass/fail protocol and the
 pinned-update workflow.
 
-## 🏗️ Project Structure
+## ðŸ—ï¸ Project Structure
 
 ```
 hasc/                   # Main compiler source code
-├── __init__.py
-├── cli.py             # Command-line interface
-├── parser.py          # Lark-based parser
-├── ast.py             # AST node definitions
-├── validator.py       # Semantic analysis
-├── codegen.py         # Code generation orchestration (~2900 lines)
-├── register_allocator.py  # 68000 register allocation with spilling (~160 lines)
-├── codegen_utils.py   # Code generation utilities (~310 lines)
-├── asm_substitution.py # Assembly placeholder substitution
-├── macro_expander.py   # Macro expansion support
-├── peepholeopt.py     # Peephole optimization passes
-└── reachability.py     # Dead-procedure reachability analysis
+â”œâ”€â”€ __init__.py
+â”œâ”€â”€ cli.py             # Command-line interface
+â”œâ”€â”€ parser.py          # Lark-based parser
+â”œâ”€â”€ ast.py             # AST node definitions
+â”œâ”€â”€ validator.py       # Semantic analysis
+â”œâ”€â”€ codegen.py         # Code generation orchestration (~2900 lines)
+â”œâ”€â”€ register_allocator.py  # 68000 register allocation with spilling (~160 lines)
+â”œâ”€â”€ codegen_utils.py   # Code generation utilities (~310 lines)
+â”œâ”€â”€ asm_substitution.py # Assembly placeholder substitution
+â”œâ”€â”€ macro_expander.py   # Macro expansion support
+â”œâ”€â”€ peepholeopt.py     # Peephole optimization passes
+â””â”€â”€ reachability.py     # Dead-procedure reachability analysis
 
 vscode-highamigassembler/  # VS Code extension
-├── package.json       # Extension manifest
-├── extension.js       # Extension entry point
-├── language-configuration.json  # Language configuration
-├── syntaxes/          # Syntax highlighting grammar
-├── themes/            # Color themes
-├── icon.png           # Extension marketplace icon
-└── README.md          # Extension documentation
+â”œâ”€â”€ package.json       # Extension manifest
+â”œâ”€â”€ extension.js       # Extension entry point
+â”œâ”€â”€ language-configuration.json  # Language configuration
+â”œâ”€â”€ syntaxes/          # Syntax highlighting grammar
+â”œâ”€â”€ themes/            # Color themes
+â”œâ”€â”€ icon.png           # Extension marketplace icon
+â””â”€â”€ README.md          # Extension documentation
 
 examples/              # Example programs and games
-├── *.has              # Basic example programs
-└── games/             # Known semi-projects and game concepts
-    ├── launchers/     # Space shooter concept demo
-    └── robots/        # Robot concept demo
+â”œâ”€â”€ *.has              # Basic example programs
+â””â”€â”€ games/             # Known semi-projects and game concepts
+    â”œâ”€â”€ launchers/     # Space shooter concept demo
+    â””â”€â”€ robots/        # Robot concept demo
 
 lib/                   # Standard library modules
 scripts/               # Build and utility scripts
 tools/                 # Asset conversion utilities
-├── ham6_gen.py        # HAM6 image generator
-├── sprite_importer.py # Hardware sprite converter
-├── sprite_strip_importer.py # Hardware sprite strip converter
-├── bob_importer.py    # Blitter object converter
-├── bob_strip_importer.py # Blitter object strip converter
-├── tile_importer.py   # Tile graphics converter
-├── frame_merger.py    # Assembly frame file merger
-├── c64_font_converter.py  # C64 font importer
-├── c64_sprites_to_bobs.py # C64 sprite converter
-├── q16_helper.py       # Q16.16 conversion helper utility
-├── texturepacker_atlas_importer.py # TexturePacker atlas importer
-└── iff_importer.py    # IFF format importer
+â”œâ”€â”€ ham6_gen.py        # HAM6 image generator
+â”œâ”€â”€ sprite_importer.py # Hardware sprite converter
+â”œâ”€â”€ sprite_strip_importer.py # Hardware sprite strip converter
+â”œâ”€â”€ bob_importer.py    # Blitter object converter
+â”œâ”€â”€ bob_strip_importer.py # Blitter object strip converter
+â”œâ”€â”€ tile_importer.py   # Tile graphics converter
+â”œâ”€â”€ frame_merger.py    # Assembly frame file merger
+â”œâ”€â”€ c64_font_converter.py  # C64 font importer
+â”œâ”€â”€ c64_sprites_to_bobs.py # C64 sprite converter
+â”œâ”€â”€ q16_helper.py       # Q16.16 conversion helper utility
+â”œâ”€â”€ texturepacker_atlas_importer.py # TexturePacker atlas importer
+â””â”€â”€ iff_importer.py    # IFF format importer
 docs/                  # Additional documentation
 ```
 
-## 🎓 Language Basics
+## ðŸŽ“ Language Basics
 
 ### VS Code Extension
 
@@ -515,7 +515,7 @@ code main:
 
 **Best Practice:** Always use `#pragma lockreg(a5)` at the top of your file when calling external Amiga libraries or system routines that expect hardware register base pointers.
 
-## 🔍 Type System
+## ðŸ” Type System
 
 | Type | Size | Signed | Description |
 |------|------|--------|-------------|
@@ -529,7 +529,7 @@ code main:
 | bool | 1 | - | Boolean (0/1) |
 | void | 0 | - | No type |
 
-## 🎯 Calling Convention
+## ðŸŽ¯ Calling Convention
 
 HAS follows Motorola 68000 standard calling convention:
 
@@ -540,7 +540,7 @@ HAS follows Motorola 68000 standard calling convention:
 - **Frame Pointer**: a6 (established via `link`/`unlk`)
 - **Stack Pointer**: a7 (never allocated)
 
-## 🛠️ Development Status
+## ðŸ› ï¸ Development Status
 
 **Version 0.7** - Active Development
 
@@ -552,14 +552,14 @@ This compiler is actively being developed. Current focus areas:
 - Extended standard library
 - Performance improvements
 
-## 🐛 Known Limitations
+## ðŸ› Known Limitations
 
 - No floating-point support (68000 has no FPU; requires software library)
 - Limited optimization (focus is on correct code generation)
 - Struct support is basic (no nested structs yet)
 - No inline optimization across procedures
 
-## 📝 Contributing
+## ðŸ“ Contributing
 
 **We welcome contributions from the community!** This is an active development project and there's plenty of room for collaboration.
 
@@ -593,7 +593,7 @@ This compiler is actively being developed. Current focus areas:
 
 **Join us in building a modern, high-level development environment for the Amiga!** Whether you're an experienced compiler developer or just getting started, there's a place for you in this project.
 
-## 🔗 Requirements
+## ðŸ”— Requirements
 
 **Python Dependencies** (see requirements.txt):
 
@@ -606,7 +606,7 @@ This compiler is actively being developed. Current focus areas:
 - `vlink` - Linker for Amiga executables
 - Amiga emulator (e.g., FS-UAE, WinUAE) for testing
 
-## 🛠️ Asset Conversion Tools
+## ðŸ› ï¸ Asset Conversion Tools
 
 The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats:
 
@@ -622,11 +622,11 @@ The `tools/` directory contains Python utilities for converting graphics and ass
 
 These tools generate assembly `.s` files that can be included in your HAS projects using `#include` directives. See the `examples/games/launchers/` directory for practical usage examples.
 
-## 📄 License
+## ðŸ“„ License
 
 [Check project repository for license information]
 
-## 🙏 Acknowledgments
+## ðŸ™ Acknowledgments
 
 - Lark parser generator for excellent grammar-based parsing
 - Amiga development community for hardware documentation
@@ -634,6 +634,6 @@ These tools generate assembly `.s` files that can be included in your HAS projec
 
 ---
 
-## Happy Amiga Programming! 🖥️
+## Happy Amiga Programming! ðŸ–¥ï¸
 
 For detailed documentation, see the markdown files in this directory or explore the examples folder.

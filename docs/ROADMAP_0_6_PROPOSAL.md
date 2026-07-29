@@ -1,4 +1,4 @@
-# HAS 0.7 Proposal (HSC Amiga Developer Focus)
+﻿# HAS 0.7 Proposal (HSC Amiga Developer Focus)
 
 ## Purpose
 
@@ -12,12 +12,12 @@ Status: Active Proposal (M1 completed, M2 core implemented)
 M1 is complete.
 
 Completed deliverables:
-- Added explicit expected-fail manifest: `examples/negative_examples.txt`.
-- Added deterministic split test gate: `scripts/test_examples_split.sh`.
+- Added explicit expected-fail manifest: `examples/tests/compiler/negative_examples.txt`.
+- Added deterministic split test gate: `scripts/tests/test_examples_split.sh`.
 - Fixed previously stale positive examples:
   - `examples/execution_order_demo.has`
-  - `examples/push_pop_test.has`
-  - `examples/heap_test.has`
+  - `examples/tests/compiler/push_pop_test.has`
+  - `examples/tests/compiler/heap_test.has`
   - `examples/return_values.has`
 
 Validated result using split gate:
@@ -52,14 +52,14 @@ Observed with a recursive compile sweep over `examples/**/*.has`:
 Failure split:
 
 - Expected/negative validation tests (intentional): 4
-  - `examples/error_directive_test.has`
-  - `examples/getreg_invalid_reg.has`
-  - `examples/native_test_errors.has`
-  - `examples/validation_errors.has`
+  - `examples/tests/compiler/error_directive_test.has`
+  - `examples/tests/compiler/getreg_invalid_reg.has`
+  - `examples/tests/compiler/native_test_errors.has`
+  - `examples/tests/compiler/validation_errors.has`
 - Drift/stale examples or behavior mismatch: 4
   - `examples/execution_order_demo.has`
-  - `examples/push_pop_test.has`
-  - `examples/heap_test.has`
+  - `examples/tests/compiler/push_pop_test.has`
+  - `examples/tests/compiler/heap_test.has`
   - `examples/return_values.has`
 
 Additional consistency gaps noted:
@@ -108,7 +108,7 @@ Deliverables (choose one and document clearly):
 
 Acceptance checks:
 - `examples/execution_order_demo.has` compiles and matches documented behavior.
-- `examples/push_pop_test.has` compiles after canonicalization.
+- `examples/tests/compiler/push_pop_test.has` compiles after canonicalization.
 - No regressions in existing declaration-only code sections.
 
 ## 3) Extern ABI Register Passing for Interop
@@ -144,7 +144,7 @@ Candidates:
 - Optional explicit register pseudo-symbol read path for return-value examples (or improve canonical guidance to avoid pseudo-symbol usage).
 
 Acceptance checks:
-- `examples/heap_test.has` compiles or is rewritten canonically with no ambiguity.
+- `examples/tests/compiler/heap_test.has` compiles or is rewritten canonically with no ambiguity.
 - `examples/return_values.has` compiles and teaches one canonical return-value pattern.
 
 ## 5) Complete Strict Arithmetic Safety Path

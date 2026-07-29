@@ -1,4 +1,4 @@
-# Struct Pointer Feature - Implementation Complete ✓
+﻿# Struct Pointer Feature - Implementation Complete âœ“
 
 ## Summary
 
@@ -99,7 +99,7 @@ move.b 4(a0),d2         ; Access dir_x at offset 4
 ## Performance Benefit
 
 For the robots.has game example, using struct pointers in `DrawBullets()` reduced:
-- **6-8 array index calculations** → **1 address calculation + pointer reuse**
+- **6-8 array index calculations** â†’ **1 address calculation + pointer reuse**
 - **Instruction count reduced by ~40-50%** in hot loops
 - **Register pressure reduced** (fewer temporary address calculations)
 
@@ -137,7 +137,7 @@ proc main() -> long {
 
 3. **AST Helper** (hasc/ast.py):
    - Added `pointer_base_type()` function to extract base type from pointer types
-   - Example: `'bullet*'` → `'bullet'`
+   - Example: `'bullet*'` â†’ `'bullet'`
 
 ### Already Working (No Changes Needed)
 
@@ -150,7 +150,7 @@ proc main() -> long {
 
 Two comprehensive test files demonstrate the feature:
 
-1. **examples/struct_pointer_test.has**
+1. **examples/tests/compiler/struct_pointer_test.has**
    - Basic struct pointer operations
    - Reading and writing through pointers
    - Loop-based pointer usage
@@ -208,7 +208,7 @@ Don't bother for:
 
 C-style arrow operator for cleaner syntax:
 ```has
-p->field      // ✓ Recommended - clean and readable
+p->field      // âœ“ Recommended - clean and readable
 p->x = 100;
 var y = p->y;
 ```
@@ -217,11 +217,11 @@ var y = p->y;
 
 Direct dereference syntax (requires parentheses):
 ```has
-(*p).field    // ✓ Also works - more explicit
+(*p).field    // âœ“ Also works - more explicit
 (*p).x = 100;
 var y = (*p).y;
 
-*p.field      // ✗ Won't work - ambiguous parsing
+*p.field      // âœ— Won't work - ambiguous parsing
 ```
 
 **Note:** The arrow operator `p->field` is syntactic sugar that the compiler translates to `(*p).field` internally. Both produce identical assembly code.
@@ -247,7 +247,7 @@ Full implementation details in:
 - [docs/STRUCT_POINTER_IMPLEMENTATION.md](STRUCT_POINTER_IMPLEMENTATION.md) - Technical specification
 
 Example code in:
-- [examples/struct_pointer_test.has](../examples/struct_pointer_test.has) - Basic usage
+- [examples/tests/compiler/struct_pointer_test.has](../examples/tests/compiler/struct_pointer_test.has) - Basic usage
 - [examples/struct_pointer_advanced.has](../examples/struct_pointer_advanced.has) - Advanced patterns
 
 ## Conclusion
@@ -256,4 +256,4 @@ Struct pointers are now fully functional in HAS! This feature enables significan
 
 The implementation was straightforward because most of the infrastructure already existed - we primarily needed to extend the parser to accept `(*p).field` as a valid left-hand side of assignments.
 
-Enjoy the performance boost! 🚀
+Enjoy the performance boost! ðŸš€

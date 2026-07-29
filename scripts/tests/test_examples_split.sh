@@ -2,10 +2,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-NEG_MANIFEST="${NEG_MANIFEST:-$ROOT/examples/negative_examples.txt}"
-PYTHON_BIN="${HASC_PYTHON:-python}"
+NEG_MANIFEST="${NEG_MANIFEST:-$ROOT/examples/tests/compiler/negative_examples.txt}"
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="${HASC_PYTHON:-$ROOT/.venv/bin/python}"
+elif [[ -x "$ROOT/.venv/Scripts/python.exe" ]]; then
+    PYTHON_BIN="${HASC_PYTHON:-$ROOT/.venv/Scripts/python.exe}"
+elif [[ -x "$ROOT/venv/bin/python" ]]; then
+    PYTHON_BIN="${HASC_PYTHON:-$ROOT/venv/bin/python}"
+elif command -v python3 &>/dev/null; then
+    PYTHON_BIN="${HASC_PYTHON:-python3}"
+else
+    PYTHON_BIN="${HASC_PYTHON:-python}"
+fi
 
 if [[ ! -f "$NEG_MANIFEST" ]]; then
     echo "ERROR: negative manifest not found: $NEG_MANIFEST" >&2
@@ -92,7 +102,7 @@ while IFS= read -r abs_path; do
             echo "POS FAIL $rel_path :: $first_line"
         fi
     fi
-done < <(find "$ROOT/examples" -name '*.has' | sort)
+done < <(find "$ROOT/examples/tests/compiler" -name '*.has' | sort)
 
 echo
 echo "Summary"
