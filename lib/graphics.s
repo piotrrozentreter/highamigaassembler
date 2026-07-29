@@ -68,12 +68,38 @@ Text:
     move.w gfx_text_cursor_x,-(sp)
     move.w gfx_text_cursor_y,-(sp)
 
-    ; Load x -> gfx_text_cursor_x (word)
+    ; Load and clamp x to active text columns (mode 0/2: 40, mode 1: 80)
+    move.w gfx_current_mode,d7
+    cmp.w #1,d7
+    beq.s .tx_hires_cols
+    moveq #39,d6
+    bra.s .tx_have_cols
+.tx_hires_cols:
+    moveq #79,d6
+.tx_have_cols:
     move.l 8(a6),d0
+    tst.l d0
+    bge.s .tx_check_x_hi
+    moveq #0,d0
+    bra.s .tx_store_x
+.tx_check_x_hi:
+    cmp.l d6,d0
+    ble.s .tx_store_x
+    move.l d6,d0
+.tx_store_x:
     move.w d0,gfx_text_cursor_x
 
-    ; Load y -> gfx_text_cursor_y (word)
+    ; Load and clamp y to visible text rows (0..31)
     move.l 12(a6),d0
+    tst.l d0
+    bge.s .tx_check_y_hi
+    moveq #0,d0
+    bra.s .tx_store_y
+.tx_check_y_hi:
+    cmp.l #31,d0
+    ble.s .tx_store_y
+    moveq #31,d0
+.tx_store_y:
     move.w d0,gfx_text_cursor_y
 
     ; Load string pointer into a0
@@ -117,6 +143,9 @@ Print:
     ; Load arguments
     move.l 8(a6),a0         ; String pointer
     move.l 12(a6),d2        ; Color parameter
+
+    ; Normalize cursor before printing so direct Print calls stay in-bounds.
+    bsr .print_normalize_cursor
     
 .print_loop:
     move.b (a0)+,d0         ; Load char and advance pointer
@@ -183,6 +212,41 @@ Print:
     moveq #0,d0             ; Return 0
     movem.l (sp)+,d1-d7/a0-a5
     unlk a6
+    rts
+
+.print_normalize_cursor:
+    ; Clamp cursor to valid text area for current mode.
+    move.w gfx_current_mode,d0
+    cmp.w #1,d0
+    beq.s .pnc_hires
+    moveq #39,d1
+    bra.s .pnc_have_cols
+.pnc_hires:
+    moveq #79,d1
+.pnc_have_cols:
+    move.w gfx_text_cursor_x,d0
+    tst.w d0
+    bge.s .pnc_x_hi
+    moveq #0,d0
+    bra.s .pnc_store_x
+.pnc_x_hi:
+    cmp.w d1,d0
+    ble.s .pnc_store_x
+    move.w d1,d0
+.pnc_store_x:
+    move.w d0,gfx_text_cursor_x
+
+    move.w gfx_text_cursor_y,d0
+    tst.w d0
+    bge.s .pnc_y_hi
+    moveq #0,d0
+    bra.s .pnc_store_y
+.pnc_y_hi:
+    cmp.w #31,d0
+    ble.s .pnc_store_y
+    moveq #31,d0
+.pnc_store_y:
+    move.w d0,gfx_text_cursor_y
     rts
 
 SwapScreen:
