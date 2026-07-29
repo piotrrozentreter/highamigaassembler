@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 
 if ($env:HASC_PYTHON -and $env:HASC_PYTHON.Trim().Length -gt 0) {
     $PythonBin = $env:HASC_PYTHON

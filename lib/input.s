@@ -2,6 +2,7 @@
 ; Mouse input
 ;
 ; (c) 2024 Stefano Coppi
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ;****************************************************************
 
     include "hardware.i"
@@ -21,6 +22,10 @@ mouse_lbtn  dc.w       0                    ; state of left mouse button: 1 pres
 mouse_rbtn  dc.w       0                    ; state of left right button: 1 pressed, 0 not pressed
             SECTION    code,CODE
 
+;****************************************************************
+; Public API
+;****************************************************************
+
 
 
 ;****************************************************************
@@ -28,10 +33,13 @@ mouse_rbtn  dc.w       0                    ; state of left right button: 1 pres
 ;****************************************************************
 
 
-;****************************************************************
-; Reads the joystick (0) state.
-; Returns in D0,D1
-;****************************************************************
+;----------------------------------------------------------------
+; Function: ReadJoystick
+; Input: none
+; Output: d0,d1=joystick state bits
+; Description: Reads joystick 0 direction state from JOY0DAT.
+; Notes: Returns the raw decoded axis state used by existing callers.
+;----------------------------------------------------------------
             xdef       ReadJoystick
 ReadJoystick:
             move.l  JOY0DAT(a5),d0
@@ -42,10 +50,13 @@ ReadJoystick:
             add.l   d1,d0
             rts
 
-;****************************************************************
-; Reads the joystick (0) fire button state.
-; Returns 1 in D0 if pressed, 0 if not pressed.
-;****************************************************************
+;----------------------------------------------------------------
+; Function: ReadJoystickFire
+; Input: none
+; Output: d0=1 if pressed, 0 otherwise
+; Description: Reads joystick 0 fire button state.
+; Notes: Uses CIAA button input for the fire trigger.
+;----------------------------------------------------------------
             xdef ReadJoystickFire
 ReadJoystickFire:
             clr.l d0
@@ -55,9 +66,13 @@ ReadJoystickFire:
 .no_fire:
             rts
 
-;****************************************************************
-; Reads the mouse position.
-;****************************************************************
+;----------------------------------------------------------------
+; Function: ReadMouse
+; Input: none
+; Output: d0,d1=updated mouse state
+; Description: Updates mouse deltas, absolute position, and button state.
+; Notes: Keeps internal mouse_x/mouse_y/mouse_dx/mouse_dy in sync.
+;----------------------------------------------------------------
             xdef       ReadMouse
 ReadMouse:
             movem.l    d0-d1,-(sp)
@@ -114,42 +129,78 @@ ReadMouse:
             movem.l    (sp)+,d0-d1
             rts
 
-; ------------------------------------------------------------------
-; RAL-friendly accessors for mouse variables
-; Each routine returns the requested value in D0 (long) so RAL code
-; can call them via inline asm or JSR and obtain the value in D0.
-; ------------------------------------------------------------------
-
+;----------------------------------------------------------------
+; Function: GetMouseX
+; Input: none
+; Output: d0=mouse X
+; Description: Returns the current accumulated mouse X position.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseX
 GetMouseX:
             move.w     mouse_x,d0
             ext.l      d0
             rts
 
+;----------------------------------------------------------------
+; Function: GetMouseY
+; Input: none
+; Output: d0=mouse Y
+; Description: Returns the current accumulated mouse Y position.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseY
 GetMouseY:
             move.w     mouse_y,d0
             ext.l      d0
             rts
 
+;----------------------------------------------------------------
+; Function: GetMouseDX
+; Input: none
+; Output: d0=mouse delta X
+; Description: Returns the latest mouse X delta.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseDX
 GetMouseDX:
             move.w     mouse_dx,d0
             ext.l      d0
             rts
 
+;----------------------------------------------------------------
+; Function: GetMouseDY
+; Input: none
+; Output: d0=mouse delta Y
+; Description: Returns the latest mouse Y delta.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseDY
 GetMouseDY:
             move.w     mouse_dy,d0
             ext.l      d0
             rts
 
+;----------------------------------------------------------------
+; Function: GetMouseLBtn
+; Input: none
+; Output: d0=left mouse button state
+; Description: Returns the current left mouse button state.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseLBtn
 GetMouseLBtn:
             move.w     mouse_lbtn,d0
             ext.l      d0
             rts
 
+;----------------------------------------------------------------
+; Function: GetMouseRBtn
+; Input: none
+; Output: d0=right mouse button state
+; Description: Returns the current right mouse button state.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
             xdef       GetMouseRBtn
 GetMouseRBtn:
             move.w     mouse_rbtn,d0

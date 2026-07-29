@@ -1,11 +1,20 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
+; heap.s
 ; Memory block header format (4 bytes):
 ; High word (bits 31-16): Block memory length in words
 ; Low word (bits 15-0): Block status (0=free, 1=occupied)
 ; End of heap is detected when high word = 0
 
+; =============================================================================
+
     XDEF HeapAlloc
     XDEF HeapInit
     XDEF HeapFree
+
+; =============================================================================
+; Public API
+; =============================================================================
 
 HEAP_BLOCK_FREE         EQU 0
 HEAP_BLOCK_OCCUPIED     EQU 1

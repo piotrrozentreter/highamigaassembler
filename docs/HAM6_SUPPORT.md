@@ -1,4 +1,4 @@
-# HAM6 Support in HAS Compiler
+﻿# HAM6 Support in HAS Compiler
 
 ## Overview
 
@@ -38,7 +38,7 @@ proc main() -> int {
 - Bitplanes: 6
 - Colors: 4096 (via Hold-And-Modify mechanism)
 - BPLCON0 register: 0x6800 (6 planes + HAM mode bit)
-- Screen buffer size: 320 × 256 ÷ 8 × 6 = 61,440 bytes
+- Screen buffer size: 320 Ã— 256 Ã· 8 Ã— 6 = 61,440 bytes
 
 **Hardware:**
 - Custom chip access: Standard Amiga display window
@@ -84,11 +84,11 @@ HAM6 maintains a color **register** that tracks the current RGB values. As you s
 
 Starting with the 16-color palette:
 - Load a palette color: 16 options
-- Modify red: ×16 variations
-- Modify green: ×16 variations
-- Modify blue: ×16 variations
+- Modify red: Ã—16 variations
+- Modify green: Ã—16 variations
+- Modify blue: Ã—16 variations
 
-Result: 16 × 16 × 16 × 16 = 65,536 theoretical colors, but practical usage achieves ~4096 per scanline.
+Result: 16 Ã— 16 Ã— 16 Ã— 16 = 65,536 theoretical colors, but practical usage achieves ~4096 per scanline.
 
 ## Displaying HAM6 Pictures
 
@@ -116,7 +116,7 @@ proc main() -> int {
 ```
 
 **Parameters:**
-- `picture_addr`: Pointer to HAM6 bitmap data (61,440 bytes for 320×256)
+- `picture_addr`: Pointer to HAM6 bitmap data (61,440 bytes for 320Ã—256)
 
 **Returns:**
 - 0: Success
@@ -287,8 +287,8 @@ gfx_prepare_copperlist_ham6:
 ### Screen Buffers
 
 Two double-buffered screens for HAM6:
-- `gfx_screen1_ham6`: 320×256÷8×6 = 61,440 bytes
-- `gfx_screen2_ham6`: 320×256÷8×6 = 61,440 bytes
+- `gfx_screen1_ham6`: 320Ã—256Ã·8Ã—6 = 61,440 bytes
+- `gfx_screen2_ham6`: 320Ã—256Ã·8Ã—6 = 61,440 bytes
 
 ## Limitations and Notes
 
@@ -321,7 +321,7 @@ Test HAM6 support:
 
 ```bash
 # Compile HAM6 test program
-python -m hasc.cli examples/ham6_display_test.has -o ham6_test.s
+python -m hasc.cli examples/tests/compiler/ham6_display_test.has -o ham6_test.s
 
 # Assemble and link (requires vasm/vlink)
 ./scripts/build.sh ham6_test.s ham6_test.o ham6_test.exe

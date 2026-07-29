@@ -1,0 +1,8 @@
+# Expected-fail examples (negative tests)
+# Format: path|expected_category(optional)
+
+examples/tests/compiler/error_directive_test.has|error_directive
+examples/tests/compiler/extern_reg_conflict_errors.has|validation
+examples/tests/compiler/getreg_invalid_reg.has|validation
+examples/tests/compiler/native_test_errors.has|validation
+examples/tests/compiler/validation_errors.has|validation

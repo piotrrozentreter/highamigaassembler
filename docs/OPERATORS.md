@@ -1,4 +1,4 @@
-# Operators Implemented
+﻿# Operators Implemented
 
 ## Arithmetic Operators
 - `+` - Addition
@@ -94,4 +94,4 @@ This avoids incorrect negative rounding behavior that would result from substitu
 
 ## Examples
 
-See `examples/operators_test.has` for comprehensive operator examples.
+See `examples/tests/compiler/operators_test.has` for comprehensive operator examples.

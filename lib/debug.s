@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; debug.s
 ; Lightweight debug logging runtime for HAS games.
 ;
@@ -20,6 +22,8 @@
 ; Notes:
 ; - DebugLogStr appends a trailing LF per message.
 ; - Buffer overflow is clipped (no wrap) to keep implementation simple.
+
+; =============================================================================
 
     include "hardware.i"
     include "exec_lib.i"
@@ -52,6 +56,10 @@ debug_tmp_line:
 
     SECTION debug_code,CODE
 
+; =============================================================================
+; Public API
+; =============================================================================
+
     XDEF DebugSetEnabled
     XDEF DebugClear
     XDEF DebugLogStrRaw
@@ -60,8 +68,13 @@ debug_tmp_line:
     XDEF DebugLogInt
     XDEF DebugFlushToDos
 
-; DebugSetEnabled(flag)
-;  8(a6) = 0 disables logging, non-zero enables logging
+; -----------------------------------------------------------------------------
+; Function: DebugSetEnabled
+; Input: 8(a6)=flag
+; Output: d0=0
+; Description: Enables or disables buffered debug logging.
+; Notes: Non-zero enables logging; zero disables it.
+; -----------------------------------------------------------------------------
 DebugSetEnabled:
     link a6,#0
     move.l 8(a6),d0
@@ -77,8 +90,13 @@ DebugSetEnabled:
     unlk a6
     rts
 
-; DebugClear()
-; Clears buffered log contents.
+; -----------------------------------------------------------------------------
+; Function: DebugClear
+; Input: none
+; Output: d0=0
+; Description: Clears the buffered log contents.
+; Notes: Resets the write cursor without flushing.
+; -----------------------------------------------------------------------------
 DebugClear:
     link a6,#0
     clr.w debug_used
@@ -86,9 +104,13 @@ DebugClear:
     unlk a6
     rts
 
-; DebugLogStr(msg_ptr)
-;  8(a6) = pointer to NUL-terminated ASCII text
-; Appends text and a trailing LF if logging is enabled.
+; -----------------------------------------------------------------------------
+; Function: DebugLogStrRaw
+; Input: 8(a6)=msg_ptr
+; Output: d0=0
+; Description: Appends raw text to the debug buffer.
+; Notes: This variant does not add a trailing line feed.
+; -----------------------------------------------------------------------------
 DebugLogStrRaw:
     link a6,#0
     movem.l d1-d3/a0-a1,-(sp)
@@ -121,9 +143,13 @@ DebugLogStrRaw:
     unlk a6
     rts
 
-; DebugLogStr(msg_ptr)
-;  8(a6) = pointer to NUL-terminated ASCII text
-; Appends text and a trailing LF if logging is enabled.
+; -----------------------------------------------------------------------------
+; Function: DebugLogStr
+; Input: 8(a6)=msg_ptr
+; Output: d0=0
+; Description: Appends text plus a trailing line feed to the debug buffer.
+; Notes: Honors the module-local enabled flag.
+; -----------------------------------------------------------------------------
 DebugLogStr:
     link a6,#0
     movem.l d1-d3/a0-a1,-(sp)
@@ -162,9 +188,13 @@ DebugLogStr:
     unlk a6
     rts
 
-; DebugLogHex(value)
-;  8(a6) = 32-bit value
-; Appends a fixed-width 0xXXXXXXXX line when logging is enabled.
+; -----------------------------------------------------------------------------
+; Function: DebugLogHex
+; Input: 8(a6)=value
+; Output: d0=0
+; Description: Appends a fixed-width hexadecimal line to the debug buffer.
+; Notes: Formats the value as 0xXXXXXXXX.
+; -----------------------------------------------------------------------------
 DebugLogHex:
     link a6,#0
     movem.l d1-d4/a0-a1,-(sp)
@@ -209,9 +239,13 @@ DebugLogHex:
     unlk a6
     rts
 
-; DebugLogInt(value)
-;  8(a6) = signed 32-bit value
-; Appends a decimal line when logging is enabled.
+; -----------------------------------------------------------------------------
+; Function: DebugLogInt
+; Input: 8(a6)=value
+; Output: d0=0
+; Description: Appends a decimal representation of a signed integer.
+; Notes: Handles INT_MIN explicitly to avoid negation overflow.
+; -----------------------------------------------------------------------------
 DebugLogInt:
     link a6,#0
     movem.l d1-d7/a0-a1,-(sp)
@@ -302,9 +336,13 @@ DebugLogInt:
     unlk a6
     rts
 
-; DebugFlushToDos()
-; Flushes buffered log to current DOS output (CLI shell, redirection, etc.).
-; Safe usage pattern: call this only after ReleaseSystem().
+; -----------------------------------------------------------------------------
+; Function: DebugFlushToDos
+; Input: none
+; Output: d0=0
+; Description: Flushes the buffered log to current DOS output.
+; Notes: Safe usage pattern is after ReleaseSystem().
+; -----------------------------------------------------------------------------
 DebugFlushToDos:
     link a6,#0
     movem.l d1-d7/a0-a6,-(sp)

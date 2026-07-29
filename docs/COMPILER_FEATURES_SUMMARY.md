@@ -1,4 +1,4 @@
-# Compiler Feature Implementation Summary
+﻿# Compiler Feature Implementation Summary
 
 ## Overview
 
@@ -137,17 +137,17 @@ code main:
 Created comprehensive examples demonstrating all features:
 
 - `examples/const_demo.has` - Basic const usage with arithmetic and comparisons
-- `examples/error_directive_test.has` - Error directive that stops compilation  
+- `examples/tests/compiler/error_directive_test.has` - Error directive that stops compilation  
 - `examples/all_features_demo.has` - All three features used together
 
 ## Testing
 
 Created `tests/test_new_features.py` with 4 test cases:
 
-1. ✅ `test_warning_directive()` - Verifies warning prints without stopping
-2. ✅ `test_error_directive()` - Verifies error stops compilation
-3. ✅ `test_const_substitution()` - Verifies const values are substituted in assembly
-4. ✅ `test_const_in_compound_assignments()` - Verifies const works in compound assignments
+1. âœ… `test_warning_directive()` - Verifies warning prints without stopping
+2. âœ… `test_error_directive()` - Verifies error stops compilation
+3. âœ… `test_const_substitution()` - Verifies const values are substituted in assembly
+4. âœ… `test_const_in_compound_assignments()` - Verifies const works in compound assignments
 
 All tests pass successfully.
 
@@ -180,7 +180,7 @@ add.l d1,d0            ; x += result
 
 ## Implementation Status
 
-✅ **Complete and tested**
+âœ… **Complete and tested**
 - AST nodes created and integrated
 - Parser grammar rules implemented
 - Validator directive processing implemented

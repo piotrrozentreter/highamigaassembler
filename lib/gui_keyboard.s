@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; gui_keyboard.s - GUI keyboard helpers split from gui.s
 ;
 ; Contains EditBoxPollKey, which bridges keyboard.s current_key
@@ -6,6 +8,10 @@
     include "hardware.i"
 
     SECTION gui_code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
 
     XDEF EditBoxPollKey
 

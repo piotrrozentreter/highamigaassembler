@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; Sprite runtime - hardware sprite manager for Amiga DMA sprites
 ; Hardware sprites are 16px wide, 2 bitplanes (4 colors), with control words
 ; Format: DC.W control1,control2, [plane0,plane1]..., 0,0
@@ -88,6 +90,10 @@ sprite_palettes:
     ENDR
 
     SECTION sprite_code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
 
 
 ; CreateSprite: Copy sprite data from fast RAM to chip RAM slot
@@ -447,6 +453,13 @@ null_sprite:
 
 ; Wrappers that follow 68000 cdecl-style stack args
 
+; -----------------------------------------------------------------------------
+; Function: CreateSprite
+; Input: 8(a6)=sprite index, 12(a6)=source sprite data pointer
+; Output: d0=0 on success, -1 on error
+; Description: Creates a sprite handle by copying template data into chip RAM.
+; Notes: The source template must include the height word and palette metadata.
+; -----------------------------------------------------------------------------
 CreateSprite:
 	link a6,#0
 	move.l 8(a6),d0    ; sprite index (0-7) - rightmost arg (pushed last, at top of stack)
@@ -459,6 +472,13 @@ CreateSprite:
 ; Reuses existing chip RAM slot - suitable for animation (call every frame)
 ; Args: sprite index (0-7), pointer to new sprite data
 ; Returns: d0 = 0 on success, -1 on error
+; -----------------------------------------------------------------------------
+; Function: SetSpriteShape
+; Input: 8(a6)=sprite index, 12(a6)=source sprite data pointer
+; Output: d0=0 on success, -1 on error
+; Description: Replaces the sprite image stored in an existing chip slot.
+; Notes: Requires that CreateSprite or InitSpriteSlots has already assigned a slot.
+; -----------------------------------------------------------------------------
 SetSpriteShape:
 	link a6,#0
 	move.l 8(a6),d0   ; sprite index (0-7)
@@ -540,6 +560,13 @@ Sprite_SetShape:
 	moveq #-1,d0
 	rts
 
+; -----------------------------------------------------------------------------
+; Function: SetSpritePosition
+; Input: 8(a6)=sprite index, 12(a6)=x, 16(a6)=y
+; Output: d0=0 on success, -1 on error
+; Description: Updates the sprite position and control words.
+; Notes: Coordinates are translated to Amiga hardware sprite positioning.
+; -----------------------------------------------------------------------------
 SetSpritePosition:
 	link a6,#0
 	movem.l d1-d5/a0-a2,-(sp)
@@ -551,6 +578,13 @@ SetSpritePosition:
 	unlk a6
 	rts
 
+; -----------------------------------------------------------------------------
+; Function: ShowSprite
+; Input: 8(a6)=sprite index
+; Output: d0=1 on success, -1 on error
+; Description: Marks a sprite as visible.
+; Notes: Updates only the sprite metadata flag; call UpdateSpritePointers to refresh hardware.
+; -----------------------------------------------------------------------------
 ShowSprite:
 	link a6,#0
 	move.l 8(a6),d0   ; sprite index
@@ -558,6 +592,13 @@ ShowSprite:
 	unlk a6
 	rts
 
+; -----------------------------------------------------------------------------
+; Function: HideSprite
+; Input: 8(a6)=sprite index
+; Output: d0=1 on success, -1 on error
+; Description: Marks a sprite as hidden.
+; Notes: Updates only the sprite metadata flag; call UpdateSpritePointers to refresh hardware.
+; -----------------------------------------------------------------------------
 HideSprite:
 	link a6,#0
 	move.l 8(a6),d0   ; sprite index
@@ -566,6 +607,13 @@ HideSprite:
 	rts
 
 ; Wrapper to enable all sprites (global DMA)
+; -----------------------------------------------------------------------------
+; Function: ShowSprites
+; Input: none
+; Output: d0=0
+; Description: Enables sprite DMA globally.
+; Notes: Operates on the current custom chip base in a5.
+; -----------------------------------------------------------------------------
 ShowSprites:
 	link a6,#0
 	jsr Sprite_ShowAll
@@ -573,6 +621,13 @@ ShowSprites:
 	rts
 
 ; Wrapper to disable all sprites (global DMA)
+; -----------------------------------------------------------------------------
+; Function: HideSprites
+; Input: none
+; Output: d0=0
+; Description: Disables sprite DMA globally.
+; Notes: Operates on the current custom chip base in a5.
+; -----------------------------------------------------------------------------
 HideSprites:
 	link a6,#0
 	jsr Sprite_HideAll
@@ -582,6 +637,13 @@ HideSprites:
 ; GetSpritePalette: Return pointer to sprite's 3-color palette (colors 1-3)
 ; Args: sprite index (0-7)
 ; Returns: d0 = pointer to 3-word palette array, or 0 if error
+; -----------------------------------------------------------------------------
+; Function: GetSpritePalette
+; Input: 8(a6)=sprite index
+; Output: d0=palette pointer or 0
+; Description: Returns the palette storage pointer for a sprite.
+; Notes: Returns zero for invalid indices.
+; -----------------------------------------------------------------------------
 GetSpritePalette:
 	link a6,#0
 	movem.l d1-d3/a2,-(sp)
@@ -614,6 +676,13 @@ GetSpritePalette:
 ; SetSpritePalette: Copy new 3-color palette (colors 1-3) to sprite
 ; Args: sprite index (0-7), pointer to 3-word array
 ; Returns: d0 = 0 on success, -1 on error
+; -----------------------------------------------------------------------------
+; Function: SetSpritePalette
+; Input: 8(a6)=sprite index, 12(a6)=palette pointer
+; Output: d0=0 on success, -1 on error
+; Description: Copies palette values into a sprite's palette storage.
+; Notes: Accepts either raw palette data or a RAL array header.
+; -----------------------------------------------------------------------------
 SetSpritePalette:
 	link a6,#0
 	movem.l d1-d5/a0-a2,-(sp)
@@ -686,6 +755,13 @@ SetSpritePalette:
 	rts
 
 ; Wrapper to update sprite pointers in hardware
+; -----------------------------------------------------------------------------
+; Function: UpdateSpritePointers
+; Input: none
+; Output: d0=0
+; Description: Writes sprite pointers into the active copper list.
+; Notes: Selects the lores or hires copper list based on gfx_current_mode.
+; -----------------------------------------------------------------------------
 UpdateSpritePointers:
 	link a6,#0
 	jsr Sprite_UpdatePointers
@@ -698,6 +774,13 @@ UpdateSpritePointers:
 ; preallocated slot in `sprite_chip_data` into the corresponding sprites_table
 ; entry (word 0 = data_ptr).
 ; Returns d0 = 0
+; -----------------------------------------------------------------------------
+; Function: InitSpriteSlots
+; Input: none
+; Output: d0=0
+; Description: Initializes the sprite metadata table with chip slot addresses.
+; Notes: Useful when callers want to reuse preallocated sprite slots.
+; -----------------------------------------------------------------------------
 InitSpriteSlots:
 	movem.l d1-d2/a0-a1,-(sp)
 	lea sprite_chip_data,a0    ; a0 = base of chip slots
@@ -785,6 +868,13 @@ Sprite_ApplyPalette:
 
 ; ApplySpritePalette: cdecl wrapper for Sprite_ApplyPalette
 ; Args (stack): 8(a6)=index
+; -----------------------------------------------------------------------------
+; Function: ApplySpritePalette
+; Input: 8(a6)=sprite index
+; Output: d0=0
+; Description: Applies a sprite's stored palette to the current copper list.
+; Notes: cdecl wrapper around the internal Sprite_ApplyPalette worker.
+; -----------------------------------------------------------------------------
 ApplySpritePalette:
 	link a6,#0
 	move.l 8(a6),d0

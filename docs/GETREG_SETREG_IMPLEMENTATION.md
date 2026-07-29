@@ -1,4 +1,4 @@
-# GetReg and SetReg Built-in Functions Implementation
+﻿# GetReg and SetReg Built-in Functions Implementation
 
 ## Overview
 Added two new built-in functions to the HAS compiler for direct register access:
@@ -42,8 +42,8 @@ SetReg("d2", x + y);              // Write expression result to register
 
 ### Parser Changes (parser.py)
 - Added `getreg` and `setreg` grammar rules in the `atom` section
-- Parses string literals for register names: `GetReg("d0")` → `ast.GetReg(register="d0")`
-- Parses SetReg with two arguments: `SetReg("d3", expr)` → `ast.SetReg(register="d3", value=expr)`
+- Parses string literals for register names: `GetReg("d0")` â†’ `ast.GetReg(register="d0")`
+- Parses SetReg with two arguments: `SetReg("d3", expr)` â†’ `ast.SetReg(register="d3", value=expr)`
 
 ### AST Nodes (ast.py)
 ```python
@@ -128,9 +128,9 @@ move.l d1,d2          ; Write result to d2
 ## Test Files
 Created example files to test the implementation:
 - `examples/getreg_setreg_simple.has` - Basic GetReg/SetReg usage
-- `examples/getreg_setreg_test.has` - Comprehensive tests with all registers
+- `examples/tests/compiler/getreg_setreg_test.has` - Comprehensive tests with all registers
 - `examples/getreg_addr_regs.has` - Tests address registers a0-a3
-- `examples/getreg_invalid_reg.has` - Validation error test (attempts to use a4)
+- `examples/tests/compiler/getreg_invalid_reg.has` - Validation error test (attempts to use a4)
 
 ## Error Handling
 Invalid register names are caught during validation:

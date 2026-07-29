@@ -1,5 +1,8 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; helpers.s - small assembly helpers for HAS projects
 ; Provide minimal runtime symbols and a simple WaitVBlank implementation.
+; =============================================================================
 
     SECTION helper_data,DATA
 
@@ -8,20 +11,35 @@ rnd_seed:
     dc.l $1234ABCD
 
     SECTION code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
     XDEF WaitVBlank
     XDEF SeedRnd
     XDEF Rnd
     XDEF RndAMOS
     XDEF RndMaxAMOS
 
-; WaitVBlank - simple implementation copied from universal_safestart.ral
-; Wait for vertical blank (frame synchronization)
+; -----------------------------------------------------------------------------
+; Function: WaitVBlank
+; Input: none
+; Output: none
+; Description: Waits for one full VBlank transition.
+; Notes: Uses CUSTOM register polling and waits for leave-then-enter timing.
+; -----------------------------------------------------------------------------
 WaitVBlank:
-.WaitLoop:
+.WaitLeaveVBlank:
     move.l $004(a5),d0
     and.l #$1ff00,d0
     cmp.l #303<<8,d0
-    bne.b .WaitLoop
+    bge.b .WaitLeaveVBlank
+
+.WaitNextVBlank:
+    move.l $004(a5),d0
+    and.l #$1ff00,d0
+    cmp.l #303<<8,d0
+    blt.b .WaitNextVBlank
     rts
 
 ; =============================================================================
@@ -29,7 +47,13 @@ WaitVBlank:
 ; Algorithm: seed = seed * 0xBB40E62D + 1; return (seed >> 8)
 ; =============================================================================
 
-; SeedRnd(seed: int) -> void
+; -----------------------------------------------------------------------------
+; Function: SeedRnd
+; Input: 8(a6)=seed
+; Output: d0=0
+; Description: Sets the AMOS-compatible RNG seed.
+; Notes: Seed is stored in the module-local `rnd_seed` variable.
+; -----------------------------------------------------------------------------
 SeedRnd:
     link a6,#0
     move.l 8(a6),d0
@@ -64,8 +88,13 @@ _mulu32:
     swap d2
     rts
 
-; RndAMOS() -> int
-; Returns random value in d0 (with >>8 shift applied)
+; -----------------------------------------------------------------------------
+; Function: RndAMOS
+; Input: none
+; Output: d0=random value
+; Description: Advances the RNG and returns an AMOS-compatible result.
+; Notes: Uses the module-local LCG and returns the value shifted right by 8.
+; -----------------------------------------------------------------------------
 RndAMOS:
     movem.l d1-d3,-(a7)
     move.l rnd_seed,d2
@@ -78,9 +107,13 @@ RndAMOS:
     movem.l (a7)+,d1-d3
     rts
 
-; RndMaxAMOS(max: int) -> int
-; Returns value in range [0, max-1] using rejection sampling
-; More uniform distribution than simple modulo
+; -----------------------------------------------------------------------------
+; Function: RndMaxAMOS
+; Input: 8(a6)=max
+; Output: d0=value in [0, max-1]
+; Description: Returns a bounded random value.
+; Notes: Uses rejection sampling for a more uniform distribution.
+; -----------------------------------------------------------------------------
 RndMaxAMOS:
     link a6,#0
     movem.l d1-d4,-(a7)
@@ -113,7 +146,13 @@ RndMaxAMOS:
     unlk a6
     rts
 
-; Returns random value in d0 (with >>8 shift applied)
+; -----------------------------------------------------------------------------
+; Function: Rnd
+; Input: none
+; Output: d0=random value
+; Description: Advances the RNG and returns the current value.
+; Notes: Same implementation as RndAMOS, exposed as a separate entry point.
+; -----------------------------------------------------------------------------
 Rnd:
     movem.l d1-d3,-(a7)
     move.l rnd_seed,d2

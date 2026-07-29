@@ -1,4 +1,4 @@
-# Struct Pointer Implementation Guide
+﻿# Struct Pointer Implementation Guide
 
 ## Overview
 
@@ -250,7 +250,7 @@ Looking at the code, the VarDecl AST node has a `vtype` field that should contai
 
 #### 5.1 Create Test File
 
-Create `examples/struct_pointer_test.has`:
+Create `examples/tests/compiler/struct_pointer_test.has`:
 
 ```has
 const MAX_BULLETS = 5;
@@ -352,7 +352,7 @@ code test_func:
 
 ## Implementation Status
 
-### Already Working ✓
+### Already Working âœ“
 
 1. **Type syntax**: `bullet*` is already parsed correctly by the `type` rule
 2. **Address-of array elements**: `&bullet[i]` already generates correct code
@@ -360,7 +360,7 @@ code test_func:
 4. **Type inference**: Code already extracts struct type from pointer types ending in `*`
 5. **Struct info lookup**: Code already uses extracted type to get field offsets
 
-### Needs Implementation ⚠️
+### Needs Implementation âš ï¸
 
 1. **lvalue grammar extension**: Add `"(" STAR CNAME ")" "." CNAME` pattern to support `(*p).field = value`
 2. **lvalue handler update**: Add parsing logic for dereferenced struct member in assignments

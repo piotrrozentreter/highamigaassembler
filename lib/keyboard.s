@@ -3,6 +3,7 @@
 ; Keyboard input
 ;
 ; (c) 2024 Stefano Coppi
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ;****************************************************************
 
     include "hardware.i"
@@ -20,8 +21,16 @@ current_key  dc.b       0                                ; current key pressed o
     EVEN
 
 ;****************************************************************
-; Initializes the keyboard input.
+; Public API
 ;****************************************************************
+
+;----------------------------------------------------------------
+; Function: InitKeyboard
+; Input: none
+; Output: none
+; Description: Installs the keyboard interrupt handler and enables IRQs.
+; Notes: Resets CIAA interrupt masks before enabling keyboard input.
+;----------------------------------------------------------------
              xdef       InitKeyboard
 InitKeyboard:
  
@@ -41,10 +50,13 @@ InitKeyboard:
              
              rts
 
-;****************************************************************
-; RAL compatible function: GetKey()
-; returns `current_key` in D0 (zero-extended)
-;****************************************************************
+;----------------------------------------------------------------
+; Function: GetKey
+; Input: none
+; Output: d0=current_key
+; Description: Returns the pending keyboard scan code.
+; Notes: The value is zero-extended from the module-local variable.
+;----------------------------------------------------------------
              xdef       GetKey
 GetKey:
              moveq      #0,d0

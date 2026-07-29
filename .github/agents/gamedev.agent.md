@@ -94,6 +94,13 @@ proc blit_bob(int src, int dst, word width_words, word height) {
 - DO NOT leave Blitter operations unguarded — always check/wait for BBUSY before issuing a new blit.
 - ALWAYS keep game data in chip RAM when it needs to be accessible by custom chips.
 
+## Assembly Formatting Rule
+
+- New or edited assembly files should begin with a clear module header, including the copyright line and a short description of the game/runtime role of the file.
+- Public assembly entry points should be documented with `Function`, `Input`, `Output`, `Description`, and `Notes` fields so game code is easy to navigate.
+- Internal helpers can use brief semicolon comments only; keep the full header format for exported routines and other public-facing entry points.
+- Preserve the surrounding style of the file; do not reflow unrelated code when adding headers.
+
 ## Approach
 
 1. **Understand the goal** — identify which hardware subsystem is involved (Blitter, Copper, sprites, audio, input).
