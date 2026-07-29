@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; graphics.s
 ; Calling convention: assembler routines expect a stack frame set up with
 ;    link a6,#0
@@ -19,6 +21,10 @@ GFX_FONT_PLANES      EQU 5                ; Font assets are always expanded to 5
     endif
 
     SECTION graphics_code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
 
 ; Exported runtime entry points (wrapper labels)
     XDEF SetGraphicsMode
@@ -48,18 +54,43 @@ GFX_FONT_PLANES      EQU 5                ; Font assets are always expanded to 5
 ; functionality (UpdateCopperList/SwapScreen) is implemented here
 ; to orchestrate copper list updates and double-buffer swaps.
 
+; -----------------------------------------------------------------------------
+; Function: SetGraphicsMode
+; Input: 8(a6)=mode
+; Output: d0=0 on success, -1 on error
+; Description: Configures the active graphics mode, copper list, and buffers.
+; Notes: Valid modes are 0=lores, 1=hires, 2=HAM6.
+; -----------------------------------------------------------------------------
 SetGraphicsMode:
     jmp _SetGraphicsMode
 
+; -----------------------------------------------------------------------------
+; Function: SetPixel
+; Input: none
+; Output: none
+; Description: Public wrapper for the pixel plotting implementation.
+; Notes: Forwards directly to the internal SetPixel worker.
+; -----------------------------------------------------------------------------
 SetPixel:
     jmp _SetPixel
 
+; -----------------------------------------------------------------------------
+; Function: ClearScreen
+; Input: none
+; Output: none
+; Description: Clears the active screen buffer.
+; Notes: Wrapper that calls the mode-aware clear routine.
+; -----------------------------------------------------------------------------
 ClearScreen:
     jmp gfx_clear_screen
 
-; Text(x, y, string) - set text cursor and print string at coordinates
-; Arguments: 8(a6)=x, 12(a6)=y, 16(a6)=string, 20(a6)=color
-; Returns: d0 = 0
+; -----------------------------------------------------------------------------
+; Function: Text
+; Input: 8(a6)=x, 12(a6)=y, 16(a6)=string, 20(a6)=color
+; Output: d0=0
+; Description: Sets the text cursor and prints a string at the given position.
+; Notes: Saves and restores the previous cursor position.
+; -----------------------------------------------------------------------------
 Text:
     link a6,#0
     movem.l d1-d7/a0-a5,-(sp)
@@ -127,15 +158,13 @@ Text:
     rts
 
 
-; =============================================================================
-; Print - Print null-terminated string with optional color
-; =============================================================================
-; Arguments:
-;   8(a6) = string pointer (address of null-terminated string)
-;   12(a6) = color (0-31 for lores, 0-15 for hires)
-; Returns: d0 = 0
-; Uses: d0-d2/a0-a1
-; =============================================================================
+; -----------------------------------------------------------------------------
+; Function: Print
+; Input: 8(a6)=string pointer, 12(a6)=color
+; Output: d0=0
+; Description: Prints a NUL-terminated string using the current font.
+; Notes: Handles newlines and wraps/scrolls based on the active mode.
+; -----------------------------------------------------------------------------
 Print:
     link a6,#0
     movem.l d1-d7/a0-a5,-(sp)
@@ -249,6 +278,13 @@ Print:
     move.w d0,gfx_text_cursor_y
     rts
 
+; -----------------------------------------------------------------------------
+; Function: SwapScreen
+; Input: none
+; Output: d0=0
+; Description: Toggles the active screen pointer.
+; Notes: Does not rebuild the copper list; caller should update during VBlank.
+; -----------------------------------------------------------------------------
 SwapScreen:
     link a6,#0
     movem.l a0,-(sp)
@@ -271,6 +307,13 @@ SwapScreen:
     unlk a6
     rts
 
+; -----------------------------------------------------------------------------
+; Function: Show / UpdateCopperList
+; Input: none
+; Output: d0=0
+; Description: Rebuilds the copper list and sprite pointers for the current mode.
+; Notes: UpdateCopperList is a deprecated alias retained for compatibility.
+; -----------------------------------------------------------------------------
 Show:
 UpdateCopperList:
     link a6,#0
@@ -289,6 +332,13 @@ UpdateCopperList:
     unlk a6
     rts
 
+; -----------------------------------------------------------------------------
+; Function: SetFont
+; Input: 8(a6)=font_ptr
+; Output: d0=0
+; Description: Sets the active font pointer used by text rendering.
+; Notes: Stores the pointer in gfx_font_ptr for later DrawChar calls.
+; -----------------------------------------------------------------------------
 SetFont:
     link a6,#0
     move.l 8(a6),d0
@@ -409,13 +459,13 @@ _SetGraphicsMode:
     unlk a6
     rts
 
-; ShowPicture: Copy picture data from a memory address to current screen
-; Parameters: 8(a6) = picture_address (pointer to image data)
-; The picture data should be sized to match current graphics mode:
-; - Mode 0 (320x256x32): 320*256*5/8 bytes (lores)
-; - Mode 1 (640x256x16): 640*256*4/8 bytes (hires)
-; - Mode 2 (320x256 HAM6): 320*256*6/8 bytes
-; Returns: D0 = 0 on success, -1 on error
+; -----------------------------------------------------------------------------
+; Function: ShowPicture
+; Input: 8(a6)=picture_address
+; Output: d0=0 on success, -1 on error
+; Description: Copies image data into the current screen buffer.
+; Notes: The picture size must match the active graphics mode.
+; -----------------------------------------------------------------------------
 ShowPicture:
     link a6,#0
     movem.l d1-d7/a0-a6,-(sp)
@@ -723,6 +773,13 @@ gfx_prepare_copperlist_ham6:
 ; Parameters: 8(a6) = idx (0..31), 12(a6) = color value (long)
 ; The color is masked to 12 bits ($0FFF) before writing to the copperlists.
 ; Returns: D0 = 0 on success, -1 on error (idx out of range)
+; -----------------------------------------------------------------------------
+; Function: SetColor
+; Input: 8(a6)=idx, 12(a6)=value
+; Output: d0=0 on success, -1 on error
+; Description: Updates a palette entry in the mode-specific copper lists.
+; Notes: The color value is masked to 12 bits before writing.
+; -----------------------------------------------------------------------------
 SetColor:
     link a6,#0
     movem.l d1-d2/a0,-(sp)
@@ -772,6 +829,13 @@ SetColor:
 ; Loads palette into copper list based on current graphics mode
 ; Parameters: 8(a6) = palette_ptr (address of word array), 12(a6) = num_colors (long, max 32 for lores, 16 for hires/ham6)
 ; Returns: D0 = 0 on success
+; -----------------------------------------------------------------------------
+; Function: LoadPalette
+; Input: 8(a6)=palette_ptr, 12(a6)=num_colors
+; Output: d0=0
+; Description: Copies palette data into the current mode's copper list.
+; Notes: Limits the copy count to the mode's palette capacity.
+; -----------------------------------------------------------------------------
 LoadPalette:
     link a6,#0
     movem.l d1-d2/a0-a1,-(sp)
@@ -835,6 +899,13 @@ LoadPalette:
 ; Helper: ToRGB(r, g, b)
 ; Parameters: 8(a6)=r, 12(a6)=g, 16(a6)=b (each 0..15 or larger)
 ; Returns: D0 = 12-bit Amiga color (r<<8 | g<<4 | b)
+; -----------------------------------------------------------------------------
+; Function: ToRGB
+; Input: 8(a6)=r, 12(a6)=g, 16(a6)=b
+; Output: d0=12-bit Amiga color
+; Description: Packs RGB components into Amiga color format.
+; Notes: Each component is masked to 4 bits.
+; -----------------------------------------------------------------------------
 ToRGB:
     link a6,#0
     movem.l d1-d2,-(sp)
@@ -858,6 +929,13 @@ ToRGB:
 
 ; DrawChar and SetPixel routines
 
+; -----------------------------------------------------------------------------
+; Function: _DrawChar
+; Input: d0=ASCII code, d1=color
+; Output: d0=0
+; Description: Draws one character using the current font and cursor state.
+; Notes: Newline characters advance the cursor without drawing glyph pixels.
+; -----------------------------------------------------------------------------
 _DrawChar:
     ; DrawChar: D0 = ASCII code, D1 = color
     link a6,#0

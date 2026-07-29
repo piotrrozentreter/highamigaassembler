@@ -32,6 +32,13 @@ Code-quality and regression-risk specialist for compiler and generated-assembly 
 4. AST immutability in validation: avoid embedding transient validation state in nodes.
 5. Stack conventions: parameters and locals use stable frame offsets.
 
+## Assembly Formatting Rule
+
+- When reviewing assembly files, expect each file to start with a concise module header that identifies the file and purpose.
+- Public assembly functions should have a structured comment header with `Function`, `Input`, `Output`, `Description`, and `Notes` when relevant.
+- Internal helper labels may keep short descriptive comments, but they should not be mistaken for public API documentation.
+- If the formatting is inconsistent, call it out as a documentation/style gap separate from behavioral findings.
+
 ## Output Contract
 
 - List findings only where impact exists; state explicitly when no findings are found.

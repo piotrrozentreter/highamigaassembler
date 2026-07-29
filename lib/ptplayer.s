@@ -1,3 +1,9 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
+; ptplayer.s
+; ProTracker V2.3B playroutine imported for HAS runtime support.
+; =============================================================================
+
 ;**************************************************
 ;*    ----- Protracker V2.3B Playroutine -----	  *
 ;**************************************************
@@ -23,6 +29,8 @@
 ;
 ; Exported functions and variables:
 ; (CUSTOM is the custom-chip register set base address $dff000.)
+;
+; Public API starts below.
 ;
 ; _mt_install_cia(a6=CUSTOM, a0=VectorBase, d0=PALflag.b)
 ;   Install a CIA-B interrupt for calling _mt_music or mt_sfxonly.

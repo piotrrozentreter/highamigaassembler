@@ -38,6 +38,13 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 5. ABI/stack discipline: preserve parameter/local offsets and call/return expectations.
 6. Deterministic validation: run stable compile checks and report exact commands.
 
+## Assembly Formatting Rule
+
+- For every new or edited assembly file, add a clear file header with the project copyright line and a short description of the module.
+- For every public assembly function, add a comment block that includes `Function`, `Input`, `Output`, `Description`, and `Notes` when applicable.
+- Internal helpers may use short one-line comments only; do not give them the full public-function header unless they are part of the exported API.
+- Keep the header and function comments aligned with the existing file style and avoid reformatting unrelated code.
+
 ## Standard Workflow
 
 1. Reproduce and scope

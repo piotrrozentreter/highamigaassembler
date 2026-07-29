@@ -1,3 +1,5 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; gui.s - HAS GUI widget library for Motorola 68000 / Amiga
 ;
 ; Supports mode 0 (320x256x32, 5 planes, 40 bytes/row) and
@@ -34,6 +36,10 @@
     include "hardware.i"
 
     SECTION gui_code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
 
     XDEF FillRect
     XDEF DrawHLine

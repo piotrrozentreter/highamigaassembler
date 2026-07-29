@@ -1,6 +1,9 @@
+; =============================================================================
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; bob.s
 ; BOB runtime helpers (Create, Paste, Save/Restore background)
 ; Calling convention: link a6,#0 ; args at 8(a6), 12(a6), ...
+; =============================================================================
     
     include "hardware.i"
 
@@ -17,6 +20,10 @@ WAITBLIT:MACRO
 	ENDM
 
     SECTION bob_code,CODE
+
+; =============================================================================
+; Public API
+; =============================================================================
 
 ; CreateBob(descriptor_ptr, b) -> returns handle in d0 (pointer to runtime struct)
 ; descriptor layout (word-aligned):
@@ -37,6 +44,13 @@ WAITBLIT:MACRO
 ;   +20: dc.w height
 ;   +22: dc.w color_count
 ;
+; -----------------------------------------------------------------------------
+; Function: CreateBob
+; Input: 8(a6)=descriptor_ptr, 12(a6)=b
+; Output: d0=handle or -1 on error
+; Description: Allocates a BOB runtime object from a sprite descriptor.
+; Notes: Optional background allocation is controlled by the b flag.
+; -----------------------------------------------------------------------------
     XDEF CreateBob
 CreateBob:
     link a6,#0
@@ -143,6 +157,13 @@ CreateBob:
 
 ; MirrorBobHorizontally(handle) -> returns new handle in d0
 ; Creates a new BOB with mirrored data/mask and preserves save_background policy.
+; -----------------------------------------------------------------------------
+; Function: MirrorBobHorizontally
+; Input: 8(a6)=handle
+; Output: d0=new handle or -1 on error
+; Description: Creates a horizontally mirrored copy of an existing BOB.
+; Notes: Preserves the source BOB's background allocation policy.
+; -----------------------------------------------------------------------------
     XDEF MirrorBobHorizontally
 MirrorBobHorizontally:
     link a6,#0
@@ -412,6 +433,13 @@ MirrorBobHorizontally:
 
 ; MirrorBobVertically(handle) -> returns new handle in d0
 ; Creates a new BOB with vertically mirrored data/mask and preserves save_background policy.
+; -----------------------------------------------------------------------------
+; Function: MirrorBobVertically
+; Input: 8(a6)=handle
+; Output: d0=new handle or -1 on error
+; Description: Creates a vertically mirrored copy of an existing BOB.
+; Notes: Preserves the source BOB's background allocation policy.
+; -----------------------------------------------------------------------------
     XDEF MirrorBobVertically
 MirrorBobVertically:
     link a6,#0
@@ -747,6 +775,13 @@ BitReverse16:
 
 ; DestroyBob(handle)
 ; Frees the per-instance background buffer (if allocated) and the runtime struct
+; -----------------------------------------------------------------------------
+; Function: DestroyBob
+; Input: 8(a6)=handle
+; Output: none
+; Description: Releases a BOB handle and any owned buffers.
+; Notes: Frees background, mirrored data, and mirrored mask blocks when present.
+; -----------------------------------------------------------------------------
     XDEF DestroyBob
 DestroyBob:
     link a6,#0
@@ -1000,6 +1035,13 @@ DrawBobHires:
 ; PasteBob(handle, x, y, mode)
 ; mode: 0 = opaque draw (copy), 1 = use mask (transparent)
 ; Uses blitter with shift to support arbitrary X positions
+; -----------------------------------------------------------------------------
+; Function: PasteBob
+; Input: 8(a6)=handle, 12(a6)=x, 16(a6)=y, 20(a6)=mode
+; Output: d0=0
+; Description: Pastes a BOB onto the current screen.
+; Notes: Mode 0 draws opaque; mode 1 uses the mask for transparency.
+; -----------------------------------------------------------------------------
     XDEF PasteBob
 PasteBob:
     link a6,#0
@@ -1141,6 +1183,13 @@ PrepBOB:
 ; GetBobBackground(handle, x, y)
 ; Saves the screen area under the bob into the background buffer
 ; Uses blitter to copy screen rectangle to background buffer
+; -----------------------------------------------------------------------------
+; Function: GetBobBackground
+; Input: 8(a6)=handle, 12(a6)=x, 16(a6)=y
+; Output: d0=0
+; Description: Saves the screen area under the BOB into its background buffer.
+; Notes: Returns early when the handle has no allocated background buffer.
+; -----------------------------------------------------------------------------
     XDEF GetBobBackground
 GetBobBackground:
     link a6,#0
@@ -1173,6 +1222,13 @@ GetBobBackground:
 ; PasteBackground(handle, x, y)
 ; Restores previously saved background from buffer to screen
 ; Uses blitter to copy background buffer back to screen
+; -----------------------------------------------------------------------------
+; Function: PasteBackground
+; Input: 8(a6)=handle, 12(a6)=x, 16(a6)=y
+; Output: d0=0
+; Description: Restores the previously saved background for a BOB.
+; Notes: Returns early when the handle has no allocated background buffer.
+; -----------------------------------------------------------------------------
     XDEF PasteBackground
 PasteBackground:
     link a6,#0
@@ -1206,6 +1262,13 @@ PasteBackground:
 ; GetBobPalette: Return pointer to BOB's palette
 ; Args: handle
 ; Returns: d0 = pointer to palette array, or 0 if error
+; -----------------------------------------------------------------------------
+; Function: GetBobPalette
+; Input: 8(a6)=handle
+; Output: d0=palette pointer or 0
+; Description: Returns the palette pointer stored in a BOB handle.
+; Notes: Returns zero for invalid or null handles.
+; -----------------------------------------------------------------------------
     XDEF GetBobPalette
 GetBobPalette:
     link a6,#0
@@ -1233,6 +1296,13 @@ GetBobPalette:
 ; Note: This updates the palette in the converter data, affecting all BOBs
 ;       that share the same descriptor. For per-instance palettes, you would
 ;       need to allocate and manage separate palette copies.
+; -----------------------------------------------------------------------------
+; Function: SetBobPalette
+; Input: 8(a6)=handle, 12(a6)=palette_ptr
+; Output: d0=0 on success, -1 on error
+; Description: Copies palette values into the BOB's palette storage.
+; Notes: Updates the shared descriptor-backed palette storage.
+; -----------------------------------------------------------------------------
     XDEF SetBobPalette
 SetBobPalette:
     link a6,#0
@@ -1275,6 +1345,13 @@ SetBobPalette:
 ; GetBobWidth: Return BOB width in pixels
 ; Args: handle
 ; Returns: d0 = width in pixels, or 0 if error
+; -----------------------------------------------------------------------------
+; Function: GetBobWidth
+; Input: 8(a6)=handle
+; Output: d0=width or 0
+; Description: Returns the BOB width in pixels.
+; Notes: Returns zero for invalid or null handles.
+; -----------------------------------------------------------------------------
     XDEF GetBobWidth
 GetBobWidth:
     link a6,#0
@@ -1301,6 +1378,13 @@ GetBobWidth:
 ; GetBobHeight: Return BOB height in pixels
 ; Args: handle
 ; Returns: d0 = height in pixels, or 0 if error
+; -----------------------------------------------------------------------------
+; Function: GetBobHeight
+; Input: 8(a6)=handle
+; Output: d0=height or 0
+; Description: Returns the BOB height in pixels.
+; Notes: Returns zero for invalid or null handles.
+; -----------------------------------------------------------------------------
     XDEF GetBobHeight
 GetBobHeight:
     link a6,#0
