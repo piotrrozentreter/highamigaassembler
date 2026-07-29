@@ -1,4 +1,4 @@
-# Codegen Tips: Scc Boolean Assignment and DBcc Loop Optimisation
+﻿# Codegen Tips: Scc Boolean Assignment and DBcc Loop Optimisation
 
 These are two codegen improvements left out of the 2025 peephole pass because
 they require AST-level analysis that cannot be done safely at the assembly text
@@ -51,7 +51,7 @@ the current `_emit_stmt` (IfStmt branch, ~line 2576) generates the branchy versi
 This can become two fewer instructions using Scc:
 
 ```asm
-    ; evaluate (a > b) → flags already set by cmp
+    ; evaluate (a > b) â†’ flags already set by cmp
     sgt  d0            ; d0 = $FF if gt, $00 if not
     neg.b d0           ; d0 = $01 if gt, $00 if not
     move.b d0,-6(a4)
@@ -94,7 +94,7 @@ def _emit_bool_assign_scc(self, stmt, params, locals_info, proc, indent, frame_r
         if {then_val, else_val} != {0, 1}:
             return False  # not a proper boolean assignment
 
-        invert = (then_val == 0)   # then=0,else=1 → use inverted condition
+        invert = (then_val == 0)   # then=0,else=1 â†’ use inverted condition
 
         # Try to emit flags via _emit_comparison_branch_inverted / _emit_comparison_branch.
         # We need the Scc mnemonic that matches the comparison.
@@ -114,7 +114,7 @@ def _emit_bool_assign_scc(self, stmt, params, locals_info, proc, indent, frame_r
         code.append(f"    cmp.l d1,d0")
 
         scc   = scc_map[cond.op]
-        if invert:          # invert condition: sgt → sle, etc.
+        if invert:          # invert condition: sgt â†’ sle, etc.
             inv = {'seq':'sne','sne':'seq','slt':'sge','sge':'slt','sle':'sgt','sgt':'sle'}
             scc = inv[scc]
 
@@ -154,9 +154,9 @@ elif isinstance(stmt, ast.IfStmt):
   one assignment to the **same** variable.
 * Handle pointer / address register variables with care: `Scc` only works on data
   registers.  Guard with `vtype not in pointer_types`.
-* Unsigned comparisons need `sls`/`shi`/`slo`/`shs` — extend `scc_map` accordingly
+* Unsigned comparisons need `sls`/`shi`/`slo`/`shs` â€” extend `scc_map` accordingly
   (mirror what the existing `_emit_expr` BinOp path does at ~line 1250).
-* Add a regression compile of `examples/operators_test.has` after the change; the
+* Add a regression compile of `examples/tests/compiler/operators_test.has` after the change; the
   existing test suite (`tests/test_peepholeopt.py`) validates the peephole layer.
 
 ---
@@ -166,7 +166,7 @@ elif isinstance(stmt, ast.IfStmt):
 ### Current situation
 
 `RepeatLoop` already emits `dbra` correctly (lines ~2790-2810).
-`ForLoop` does not — it emits a generic compare-branch pattern:
+`ForLoop` does not â€” it emits a generic compare-branch pattern:
 
 ```asm
 for1:
@@ -195,9 +195,9 @@ All of the following must hold:
 | # | Condition | How to check in codegen |
 |---|-----------|------------------------|
 | 1 | `stmt.start` is the constant `0` | `isinstance(stmt.start, ast.Number) and stmt.start.value == 0` |
-| 2 | `stmt.end`   is a non-negative integer constant ≤ 32767 | `isinstance(stmt.end, ast.Number) and 0 <= stmt.end.value <= 32767` |
+| 2 | `stmt.end`   is a non-negative integer constant â‰¤ 32767 | `isinstance(stmt.end, ast.Number) and 0 <= stmt.end.value <= 32767` |
 | 3 | `stmt.step`  is the constant `1` | `isinstance(stmt.step, ast.Number) and stmt.step.value == 1` |
-| 4 | Loop variable is **not read or written** inside the body | AST walk — see helper below |
+| 4 | Loop variable is **not read or written** inside the body | AST walk â€” see helper below |
 | 5 | A scratch data register is available (d7 or any free Dn) | Check `self.reg_allocator` |
 
 ### Helper: check whether loop variable appears in body AST
@@ -225,7 +225,7 @@ def _var_used_in_body(self, var_name, body):
 > **Note**: `ast.ASTNode` may not exist as a base class in the current codebase.
 > Adapt `_walk` to iterate over `dataclasses.fields(node)` instead if needed.
 
-### Proposed `dbra` code path inside `_emit_stmt` → ForLoop
+### Proposed `dbra` code path inside `_emit_stmt` â†’ ForLoop
 
 ```python
 elif isinstance(stmt, ast.ForLoop):
@@ -243,10 +243,10 @@ elif isinstance(stmt, ast.ForLoop):
     )
 
     if use_dbra:
-        count = stmt.end.value + 1          # for i=0 to N → N+1 iterations
+        count = stmt.end.value + 1          # for i=0 to N â†’ N+1 iterations
         dbra_reg = self.reg_allocator.allocate_data()   # grab a free Dn
 
-        # Load counter (count-1) into dbra_reg — dbra counts N+1 times from N
+        # Load counter (count-1) into dbra_reg â€” dbra counts N+1 times from N
         self.emit(indent + f"moveq #{count - 1},{dbra_reg}")
         self.emit(f"{start_label}:")
 
@@ -296,21 +296,21 @@ forcont3:
 endfor2:
 ```
 
-Loop-control instructions per iteration: **8 → 1**.
+Loop-control instructions per iteration: **8 â†’ 1**.
 
 ### Caveats and risks
 
-* **`dbra` is a 16-bit decrement**: counter wraps from 0 to −1 (not from 0 to 65535).
+* **`dbra` is a 16-bit decrement**: counter wraps from 0 to âˆ’1 (not from 0 to 65535).
   The guard `count <= 32767` ensures the word counter never wraps incorrectly.
 * **`count = 0`**: If `stmt.end.value == -1` (i.e., `for i = 0 to -1`), the loop
-  should execute 0 times.  `dbra` with initial value `−1` would execute 65536 times —
+  should execute 0 times.  `dbra` with initial value `âˆ’1` would execute 65536 times â€”
   fall back to the general path if `stmt.end.value < 0`.
 * **Register allocator**: call `allocate_data()` and `free()` symmetrically on every
   control-flow path (including the `break` path through `end_label`).  Do not
-  hardcode `d7` — the allocator picks the least-clobbered register.
+  hardcode `d7` â€” the allocator picks the least-clobbered register.
 * **`break` / `continue` still work**: `cont_label` sits just before `dbra`, so
-  `continue` → decrement and re-test.  `break` → jump to `end_label` past `dbra`.
-* Test with `examples/break_continue_test.has` after the change.
+  `continue` â†’ decrement and re-test.  `break` â†’ jump to `end_label` past `dbra`.
+* Test with `examples/tests/compiler/break_continue_test.has` after the change.
 * Run the full example suite afterward:
   ```
   python -m hasc.cli examples/<each>.has -o /tmp/test.s
@@ -320,8 +320,8 @@ Loop-control instructions per iteration: **8 → 1**.
 
 ## Testing checklist after implementing either change
 
-- [ ] `python tests/test_peepholeopt.py` — all 43 tests still pass
-- [ ] `examples/break_continue_test.has` compiles and loop counts are correct
-- [ ] `examples/operators_test.has` — boolean expression results unchanged
-- [ ] `examples/random_test.has` — conditional branches unchanged
+- [ ] `python tests/test_peepholeopt.py` â€” all 43 tests still pass
+- [ ] `examples/tests/compiler/break_continue_test.has` compiles and loop counts are correct
+- [ ] `examples/tests/compiler/operators_test.has` â€” boolean expression results unchanged
+- [ ] `examples/tests/compiler/random_test.has` â€” conditional branches unchanged
 - [ ] Full suite: 63 examples compile with zero new failures

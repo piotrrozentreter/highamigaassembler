@@ -1,4 +1,4 @@
-# Contributing to HAS Compiler
+﻿# Contributing to HAS Compiler
 
 Thank you for your interest in contributing to the HAS (High Assembler) project!
 
@@ -126,14 +126,14 @@ Explain the problem this commit solves and why this approach was chosen.
    python -m hasc.cli examples/add.has -o /tmp/test.s
 
    # Verify no regressions (split positive/negative example gate)
-   ./scripts/test_examples_split.sh
+   ./scripts/tests/test_examples_split.sh
 
    # Or compile all root examples in a loop
    for f in examples/*.has; do python -m hasc.cli "$f" -o /tmp/test.s || exit 1; done
 
    # VBCC interop regression wrappers
-   ./scripts/test_vbcc_interop.sh
-   ./scripts/test_vbcc_interop.ps1
+   ./scripts/tests/test_vbcc_interop.sh
+   ./scripts/tests/test_vbcc_interop.ps1
    ```
 
 4. **Update Documentation**:
@@ -175,13 +175,13 @@ Understanding the codebase:
 
 ```
 hasc/
-├── cli.py              # Command-line interface
-├── parser.py           # Lark grammar and AST builder
-├── ast.py              # AST node definitions
-├── validator.py        # Semantic analysis (2-pass)
-├── codegen.py          # Code generation
-├── macro_expander.py   # Macro expansion support
-└── reachability.py     # Dead-procedure reachability analysis
+â”œâ”€â”€ cli.py              # Command-line interface
+â”œâ”€â”€ parser.py           # Lark grammar and AST builder
+â”œâ”€â”€ ast.py              # AST node definitions
+â”œâ”€â”€ validator.py        # Semantic analysis (2-pass)
+â”œâ”€â”€ codegen.py          # Code generation
+â”œâ”€â”€ macro_expander.py   # Macro expansion support
+â””â”€â”€ reachability.py     # Dead-procedure reachability analysis
 ```
 
 ### Compilation Pipeline

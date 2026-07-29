@@ -760,6 +760,11 @@ code increment:
     }
 ```
 
+Codegen note: when `++`/`--` are used as standalone statements, HAS emits direct
+updates to the underlying storage (local/stack/global/register-backed parameter)
+without materializing an unused temporary result register. Expression contexts
+such as `y = x++` still preserve post-increment old-value semantics.
+
 ---
 
 ## Advanced Features

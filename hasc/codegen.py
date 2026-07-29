@@ -3084,9 +3084,50 @@ class CodeGen:
             cont_label, _ = self.loop_stack[-1]
             self.emit(indent + f"bra {cont_label}")
         elif isinstance(stmt, ast.ExprStmt):
-            # Expression statement - emit code for the expression if it has side effects
-            # (like i++ or i--)
-            code = self._emit_expr(stmt.expr, params, locals_info, "d0", target_type=None, frame_reg=frame_reg)
+            # Expression statement: result is unused, so emit side effects directly
+            # for ++/-- to avoid redundant loads into d0.
+            expr = stmt.expr
+            if isinstance(expr, (ast.PostIncr, ast.PreIncr, ast.PostDecr, ast.PreDecr)) and isinstance(expr.operand, ast.VarRef):
+                name = expr.operand.name
+                is_increment = isinstance(expr, (ast.PostIncr, ast.PreIncr))
+                op = "add" if is_increment else "sub"
+                code = []
+
+                local_info = next((l for l in locals_info if l[0] == name), None)
+                param_obj = next((p for p in params if p.name == name), None)
+
+                if local_info:
+                    _, vtype, offset = local_info
+                    size = ast.type_size(vtype) if vtype else 4
+                    suffix = ast.size_suffix(size)
+                    code.append(f"    {op}{suffix} #1,{-offset}({frame_reg})")
+                elif param_obj:
+                    reg = param_obj.register
+                    if reg == 'None':
+                        reg = None
+                    if reg:
+                        code.append(f"    {op}.l #1,{reg}")
+                    else:
+                        stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                        if param_obj in stack_params:
+                            idx = stack_params.index(param_obj)
+                            off = 8 + 4 * idx
+                            param_type = param_obj.ptype if param_obj.ptype else 'long'
+                            param_size = ast.type_size(param_type) if param_type else 4
+                            param_suffix = ast.size_suffix(param_size)
+                            code.append(f"    {op}{param_suffix} #1,{off}(a6)")
+                        else:
+                            self._fail(f"Unresolved stack parameter '{name}' in increment/decrement statement")
+                elif name in self.globals:
+                    gsize = self.globals.get(name, 'l')
+                    gsuffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(gsize, '.l')
+                    code.append(f"    {op}{gsuffix} #1,{name}")
+                elif name in self.extern_vars:
+                    code.append(f"    {op}.l #1,{name}")
+                else:
+                    self._fail(f"Undefined variable '{name}' in increment/decrement statement")
+            else:
+                code = self._emit_expr(expr, params, locals_info, "d0", target_type=None, frame_reg=frame_reg)
             for l in code:
                 for sub in str(l).splitlines():
                     self.emit(sub if sub.startswith(indent) else indent + sub)

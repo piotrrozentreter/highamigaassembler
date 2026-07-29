@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
     PYTHON_BIN="${HASC_PYTHON:-$ROOT/.venv/bin/python}"

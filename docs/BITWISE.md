@@ -1,4 +1,4 @@
-# Bitwise Operators
+﻿# Bitwise Operators
 
 ## Operators
 
@@ -80,7 +80,7 @@ var result: long = value & mask;
 ```
 
 The parser disambiguates based on position:
-- Prefix position (after operators like `=`, `(`, etc.) → address-of
-- Infix position (between values) → bitwise AND
+- Prefix position (after operators like `=`, `(`, etc.) â†’ address-of
+- Infix position (between values) â†’ bitwise AND
 
-See `examples/bitwise_test.has` and `examples/bitwise_comprehensive.has` for more examples.
+See `examples/tests/compiler/bitwise_test.has` and `examples/bitwise_comprehensive.has` for more examples.

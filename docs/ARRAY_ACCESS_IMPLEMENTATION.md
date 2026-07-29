@@ -1,4 +1,4 @@
-# Array Access Implementation Summary
+﻿# Array Access Implementation Summary
 
 ## Changes Made
 
@@ -64,14 +64,14 @@ move.l (a0,d2.l),d0        ; Load element
 
 ## Test Files Created
 
-### `examples/array_access_test.has`
+### `examples/tests/compiler/array_access_test.has`
 Basic array access tests:
 - 1D array with variable index
 - 2D array access
 - Constant indices
 - Array access in expressions
 
-### `examples/array_comprehensive_test.has`
+### `examples/tests/compiler/array_comprehensive_test.has`
 Advanced tests:
 - Nested array access in complex expressions
 - Array access with function call results
@@ -81,16 +81,16 @@ Advanced tests:
 ## Generated Assembly Quality
 
 ### Optimizations:
-✅ No unnecessary register preservation
-✅ Efficient indexed addressing modes: `(a0,d1.l)`
-✅ Immediate multiply for 2D arrays (no register clobbering)
-✅ Proper left-shift for scaling (faster than multiply)
+âœ… No unnecessary register preservation
+âœ… Efficient indexed addressing modes: `(a0,d1.l)`
+âœ… Immediate multiply for 2D arrays (no register clobbering)
+âœ… Proper left-shift for scaling (faster than multiply)
 
 ### Correct register preservation:
-✅ Binary operations preserve left operand when needed
-✅ Array access doesn't clobber d3-d7 or a2-a6
-✅ PUSH/POP properly saves/restores registers
-✅ Function calls preserve caller-save registers
+âœ… Binary operations preserve left operand when needed
+âœ… Array access doesn't clobber d3-d7 or a2-a6
+âœ… PUSH/POP properly saves/restores registers
+âœ… Function calls preserve caller-save registers
 
 ## Limitations & Future Work
 
@@ -134,8 +134,8 @@ for i = 0 to 9 {
 ## Testing
 
 All tests compile successfully:
-- ✅ `examples/array_access_test.has` → `array_access_test.s`
-- ✅ `examples/array_comprehensive_test.has` → `array_comprehensive_test.s`
-- ✅ `examples/add.has` (regression test) → `t.s`
+- âœ… `examples/tests/compiler/array_access_test.has` â†’ `array_access_test.s`
+- âœ… `examples/tests/compiler/array_comprehensive_test.has` â†’ `array_comprehensive_test.s`
+- âœ… `examples/add.has` (regression test) â†’ `t.s`
 
 Register preservation verified in generated assembly.

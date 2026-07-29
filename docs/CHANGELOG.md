@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to the HAS (High Assembler) project will be documented in this file.
 
@@ -24,7 +24,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     emulation checks, while existing parser/codegen/link tests remain unchanged.
 
 - **VBCC interop test wrappers**:
-  - Added `scripts/test_vbcc_interop.sh` and `scripts/test_vbcc_interop.ps1` as direct entrypoints for the vbcc interop test suite.
+  - Added `scripts/tests/test_vbcc_interop.sh` and `scripts/tests/test_vbcc_interop.ps1` as direct entrypoints for the vbcc interop test suite.
   - This provides a consistent cross-platform command surface for contributor and CI-style interop checks.
 
 - **Branchless Scc boolean assignment** and **DBcc counter-loop** codegen fast paths
@@ -40,7 +40,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     `@i` substitution) - eliminating the per-iteration load/compare/increment/store
     entirely. Loops nested inside another active `dbra`-based loop (`for` or `repeat`)
     automatically save/restore the shared `d7` counter register around the inner loop.
-  - New example `examples/scc_dbcc_optimization_test.has` demonstrates both fast paths
+  - New example `examples/tests/compiler/scc_dbcc_optimization_test.has` demonstrates both fast paths
     and their general-path fallback cases.
   - New tests in `tests/test_scc_dbcc_codegen.py` cover both optimizations end-to-end
     and unit-test the loop-variable-usage analysis directly.
@@ -55,15 +55,15 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Roots are discovered from `public` declarations that point to internal `proc` definitions.
   - Unreachable internal procedures are removed from the AST before assembly is emitted.
   - Three conservative keep-all safeguards prevent incorrect stripping:
-    - **Feature off by default** — requires an explicit opt-in flag.
-    - **Top-level asm block** — raw `jsr`/`jmp` may reference any label; all procs kept.
-    - **No roots found** — keeps everything rather than silently discarding all code.
+    - **Feature off by default** â€” requires an explicit opt-in flag.
+    - **Top-level asm block** â€” raw `jsr`/`jmp` may reference any label; all procs kept.
+    - **No roots found** â€” keeps everything rather than silently discarding all code.
   - `--strip-unused-report` prints roots, kept, and removed procedure lists to stderr.
   - Three new example files demonstrate all scenarios: `strip_unused_procs_demo.has`, `strip_unused_procs_asm_safe.has`, `strip_unused_procs_no_roots.has`.
 
 - **Example suite split gate** for deterministic regression checks:
-  - Added `examples/negative_examples.txt` manifest for expected-fail examples.
-  - Added `scripts/test_examples_split.sh` to enforce:
+  - Added `examples/tests/compiler/negative_examples.txt` manifest for expected-fail examples.
+  - Added `scripts/tests/test_examples_split.sh` to enforce:
     - positive examples must compile
     - negative examples must fail
     - non-zero exit code on any mismatch (CI-friendly)
@@ -96,6 +96,10 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Pre/post `++` and `--` on procedure parameters now preserve parameter storage semantics for both stack and `__reg(...)`-annotated extern-style register parameters.
   - This aligns generated code with expected mutation behavior when parameter-backed lvalues are used in update expressions.
 
+- **Statement-form increment/decrement codegen tightening**:
+  - Standalone `++`/`--` statements now emit direct storage/register updates without loading an unused temporary result register.
+  - Expression semantics are unchanged: post-increment/post-decrement in value contexts still preserve old-value behavior.
+
 - **Documentation drift cleanup** across README and docs:
   - Updated README project structure to match current `hasc/` and `tools/` layout.
   - Replaced stale/missing documentation links with existing targets.
@@ -109,9 +113,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Register-annotated extern args are loaded into declared registers before `jsr`.
   - Non-annotated extern args continue to use right-to-left stack passing.
   - Stack cleanup now reflects only stack-passed extern args for mixed signatures.
-- Updated example startup style in `examples/execution_order_demo.has` and `examples/push_pop_test.has` to use explicit startup `asm` bootstrap (`jsr ...` + `rts`) instead of top-level `call` statements.
+- Updated example startup style in `examples/execution_order_demo.has` and `examples/tests/compiler/push_pop_test.has` to use explicit startup `asm` bootstrap (`jsr ...` + `rts`) instead of top-level `call` statements.
 - Updated `examples/return_values.has` manual return-register demonstration to valid explicit assembly (`move.l d0,result`) instead of pseudo-variable usage.
-- Updated `examples/heap_test.has` to valid HAS section syntax for heap buffer declaration (`bss` + array declaration) and parser-compatible comment style.
+- Updated `examples/tests/compiler/heap_test.has` to valid HAS section syntax for heap buffer declaration (`bss` + array declaration) and parser-compatible comment style.
 - Added extern ABI behavior examples:
   - `examples/extern_reg_params.has` (all-register extern params)
   - `examples/extern_mixed_params.has` (mixed register + stack extern params)
@@ -124,8 +128,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 - Resolved all previously identified stale positive-example failures in split-gate checks:
   - `examples/execution_order_demo.has`
-  - `examples/push_pop_test.has`
-  - `examples/heap_test.has`
+  - `examples/tests/compiler/push_pop_test.has`
+  - `examples/tests/compiler/heap_test.has`
   - `examples/return_values.has`
 - Example split gate now passes with:
   - Positive suite: 79/79
@@ -149,16 +153,16 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 #### GUI Widget Library (`lib/gui.s` / `lib/gui.i`)
 - **`DrawButton(x, y, w, h, bg, border, label, tc)`**: Clickable button gadget with centred label.
   - Renders a **3D raised effect**: flat `bg` fill, `border`-coloured highlight on top and left edges, colour-0 (black) shadow on bottom and right edges.
-  - Horizontal centering: `cx = (x + (w − label_px) / 2) / 8` (pixel-exact, snapped to char grid).
-  - Vertical centering: `cy = (y + h/2) / 8` (rounds to nearest char row; use `h ≥ 24` for perfect 7 px inner gap).
+  - Horizontal centering: `cx = (x + (w âˆ’ label_px) / 2) / 8` (pixel-exact, snapped to char grid).
+  - Vertical centering: `cy = (y + h/2) / 8` (rounds to nearest char row; use `h â‰¥ 24` for perfect 7 px inner gap).
 - **`GuiPollMouse()`**: Per-frame mouse event accumulator.
   - Reads `GetMouseDX/DY` and accumulates into internal `gui_abs_mouse_x/y` (clamped to screen bounds; mode-aware).
-  - Leading-edge detection on left button → `gui_lbtn_edge` flag.
+  - Leading-edge detection on left button â†’ `gui_lbtn_edge` flag.
   - Must be called once per frame after `ReadMouse()`.
 - **`GuiHitTestRect(x, y, w, h)`**: Returns 1 if the left button was just pressed inside the given pixel rect. Suitable for inline buttons in HAS without a GADGET struct.
 - **`GuiHitTest(gadget_ptr)`**: Same click detection driven by a GADGET struct.
 - **`GetGuiMouseX()` / `GetGuiMouseY()`**: Zero-frame accessors returning the current accumulated absolute mouse pixel position as a signed long. Use these to feed a hardware sprite cursor.
-- **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 → `DrawMsgBox`, type 1 → `DrawButton`.
+- **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 â†’ `DrawMsgBox`, type 1 â†’ `DrawButton`.
 - **GADGET struct** (20 bytes, defined in `lib/gui.i`): `X, Y, W, H, BG, BORDER, TEXT (long), TCOLOR, TYPE`.
 - **Hardware sprite mouse cursor** in `examples/msgbox_demo.has`:
   - 11-line classic arrow shape defined in a `data cursor_data:` section (fast RAM; `CreateSprite` copies to chip RAM).
@@ -166,11 +170,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Initialised with `CreateSprite(0, &cursor)` + `ApplySpritePalette(0)` + `ShowSprite(0)`.
   - Updated every VBlank: `SetSpritePosition(0, GetGuiMouseX(), GetGuiMouseY())`.
 - **`scripts/build_msgbox_demo.sh`**: End-to-end build script compiling, assembling, and linking all eight objects for the GUI demo.
-- **New documentation**: [`docs/GUI_LIBRARY.md`](GUI_LIBRARY.md) — full API reference for the GUI widget library.
+- **New documentation**: [`docs/GUI_LIBRARY.md`](GUI_LIBRARY.md) â€” full API reference for the GUI widget library.
 
 ### Changed
 - **`DrawButton` rendering** changed from a uniform `DrawBox` border to a **3D raised gadget** style (bright top/left highlight, black bottom/right shadow). Visual appearance now clearly distinguishes buttons from message-box windows.
-- **`DrawButton` vertical centering** formula changed from `(y/8) + (h/8−1)/2` to `(y + h/2) / 8`, which rounds to the nearest character row rather than the topmost. For `h = 16`, text is now placed in the lower half of the button face instead of starting at the top border pixel.
+- **`DrawButton` vertical centering** formula changed from `(y/8) + (h/8âˆ’1)/2` to `(y + h/2) / 8`, which rounds to the nearest character row rather than the topmost. For `h = 16`, text is now placed in the lower half of the button face instead of starting at the top border pixel.
 - **`examples/msgbox_demo.has`** button dimensions updated from `(120, 240, 80, 16)` to `(100, 232, 120, 24)` to achieve perfect 7 px inner gap centering and give the button a standard Amiga gadget proportion. Window 4 height reduced from 48 to 40 px to accommodate the taller button within the 256-line screen.
 - **`lib/gui.i`** updated with `XREF` declarations and HAS `extern func` comment templates for `DrawButton`, `GuiPollMouse`, `GuiHitTest`, `GuiHitTestRect`, `GetGuiMouseX`, and `GetGuiMouseY`.
 
@@ -197,11 +201,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - **Automatic Q16.16 Floating-Point Conversion**: Natural decimal syntax
   - Write floating-point literals directly: `2.5`, `0.98`, `43.55`
   - Compiler automatically converts to Q16.16 fixed-point format at compile-time
-  - Formula: `Q16.16 = int(float_value × 65536)`
+  - Formula: `Q16.16 = int(float_value Ã— 65536)`
   - Works in constants, data sections, and inline literals
   - Zero runtime overhead - all conversion happens during compilation
   - See [docs/Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) for details
-  - Examples: [q16_float_test.has](../examples/q16_float_test.has), [q16_comprehensive_test.has](../examples/q16_comprehensive_test.has)
+  - Examples: [q16_float_test.has](../examples/tests/compiler/q16_float_test.has), [q16_comprehensive_test.has](../examples/tests/compiler/q16_comprehensive_test.has)
 
 ### Documentation
 - Added comprehensive Q16 automatic conversion documentation

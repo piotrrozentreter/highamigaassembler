@@ -1,4 +1,4 @@
-# M2 Plan: Extern Register-Aware ABI Emission
+﻿# M2 Plan: Extern Register-Aware ABI Emission
 
 Date: 2026-07-11
 Status: Implemented (core + validator hardening)
@@ -35,16 +35,16 @@ Completed:
   - all-register extern args
   - mixed register/stack extern args
   - stack-only extern args
-- Full split gate remains green (`scripts/test_examples_split.sh`).
+- Full split gate remains green (`scripts/tests/test_examples_split.sh`).
 
 Completed validator hardening:
 - Added extern signature diagnostics for:
   - duplicate register assignment within one extern signature
   - reserved register usage (`a6`, `a7`) in extern params
 - Added negative regression example:
-  - `examples/extern_reg_conflict_errors.has`
+  - `examples/tests/compiler/extern_reg_conflict_errors.has`
 - Added expected-fail manifest entry:
-  - `examples/negative_examples.txt`
+  - `examples/tests/compiler/negative_examples.txt`
 - Split gate status after hardening:
   - Positive suite: 79/79
   - Negative suite: 5/5
@@ -117,7 +117,7 @@ Create these positive examples:
 - ensure output remains cdecl stack-only
 
 Optional negative example (if validator hardening is included):
-- `examples/extern_reg_conflict_errors.has`
+- `examples/tests/compiler/extern_reg_conflict_errors.has`
   - duplicate register assignment in one signature
   - expected validation failure
 
@@ -151,7 +151,7 @@ python -m hasc.cli examples/extern_stack_only.has -o /tmp/extern_stack_only.s
 Run suite gate:
 
 ```bash
-HASC_PYTHON=/run/media/piotr/BACKUP/Rozen/Projects/highamigaassembler/.venv/bin/python ./scripts/test_examples_split.sh
+HASC_PYTHON=/run/media/piotr/BACKUP/Rozen/Projects/highamigaassembler/.venv/bin/python ./scripts/tests/test_examples_split.sh
 ```
 
 Expected:

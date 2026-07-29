@@ -1,4 +1,4 @@
-#include "includes/inc_defs.has";
+#include "../../includes/inc_defs.has";
 
 data globals:
     counter.l = 0
