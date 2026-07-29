@@ -231,6 +231,48 @@ code main:
         assert_contains(body, r"move\.l.*\(a6\)")
 
 
+class TestIncDecOps:
+    """Tests for increment/decrement code generation."""
+
+    def test_statement_inc_dec_avoids_unused_result_loads(self):
+        """Standalone ++/-- statements should not load into d0."""
+        src = """
+code main:
+    proc incdec_stmt() -> int {
+        var x: int = 1;
+        x++;
+        ++x;
+        x--;
+        --x;
+        return 0;
+    }
+        """
+        asm = compile_src(src)
+        body = proc_body(asm, "incdec_stmt")
+
+        # No value from x should be loaded to d0 for statement-only ++/--.
+        assert not re.search(r"move\.l\s+-\d+\(a[46]\),d0", body)
+
+        # Side effects still happen: two increments and two decrements.
+        assert len(re.findall(r"add\.l\s+#1,-\d+\(a[46]\)", body)) == 2
+        assert len(re.findall(r"sub\.l\s+#1,-\d+\(a[46]\)", body)) == 2
+
+    def test_post_increment_expression_still_returns_old_value(self):
+        """post-increment in expression context must still preserve old value."""
+        src = """
+code main:
+    proc post_expr() -> int {
+        var x: int = 7;
+        var y: int = x++;
+        return y;
+    }
+        """
+        asm = compile_src(src)
+        body = proc_body(asm, "post_expr")
+        # In expression context, post-increment still needs the old value.
+        assert re.search(r"move\.l\s+-\d+\(a[46]\),d0", body)
+
+
 # ---------------------------------------------------------------------------
 # Tests: Array Access
 # ---------------------------------------------------------------------------
