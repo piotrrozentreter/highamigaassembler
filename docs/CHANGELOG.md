@@ -96,6 +96,10 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Pre/post `++` and `--` on procedure parameters now preserve parameter storage semantics for both stack and `__reg(...)`-annotated extern-style register parameters.
   - This aligns generated code with expected mutation behavior when parameter-backed lvalues are used in update expressions.
 
+- **Statement-form increment/decrement codegen tightening**:
+  - Standalone `++`/`--` statements now emit direct storage/register updates without loading an unused temporary result register.
+  - Expression semantics are unchanged: post-increment/post-decrement in value contexts still preserve old-value behavior.
+
 - **Documentation drift cleanup** across README and docs:
   - Updated README project structure to match current `hasc/` and `tools/` layout.
   - Replaced stale/missing documentation links with existing targets.
