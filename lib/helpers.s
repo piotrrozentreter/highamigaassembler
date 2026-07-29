@@ -14,14 +14,20 @@ rnd_seed:
     XDEF RndAMOS
     XDEF RndMaxAMOS
 
-; WaitVBlank - simple implementation copied from universal_safestart.ral
-; Wait for vertical blank (frame synchronization)
+; WaitVBlank - robust frame sync across CPU speeds
+; Wait for one full VBlank transition: leave current VBlank, then enter next.
 WaitVBlank:
-.WaitLoop:
+.WaitLeaveVBlank:
     move.l $004(a5),d0
     and.l #$1ff00,d0
     cmp.l #303<<8,d0
-    bne.b .WaitLoop
+    bge.b .WaitLeaveVBlank
+
+.WaitNextVBlank:
+    move.l $004(a5),d0
+    and.l #$1ff00,d0
+    cmp.l #303<<8,d0
+    blt.b .WaitNextVBlank
     rts
 
 ; =============================================================================
