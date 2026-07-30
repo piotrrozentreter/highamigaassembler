@@ -152,7 +152,6 @@ def emit_asm(interleaved: List[str], label: str, with_section: bool = True) -> s
     if with_section:
         lines.append("\tSECTION fonts,DATA")
         lines.append("\tCNOP\t0,4")
-        lines.append("\tEVEN")
         lines.append(f"\tXDEF\t{label}")
     lines.append(f"{label}:")
     for i in range(0, len(interleaved), 16):
