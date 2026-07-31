@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.7
+**Version:** 0.8
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -553,7 +553,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## ðŸ› ï¸ Development Status
 
-**Version 0.7** - Active Development
+**Version 0.8** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 
