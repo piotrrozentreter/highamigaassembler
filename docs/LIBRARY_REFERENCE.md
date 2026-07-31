@@ -12,6 +12,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 |-------------------|-------------------------------------------|------------------------------------------------------|
 | `graphics.s`      | Screen modes, drawing, text, colour       | [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md) |
 | `gui.s`           | Rectangles, boxes, buttons, gadgets       | [GUI_LIBRARY.md](GUI_LIBRARY.md)                     |
+| `debug.s`         | Buffered debug logging for takeover games | [DEBUG_LIBRARY.md](DEBUG_LIBRARY.md)                 |
 | `heap.s`          | Dynamic memory allocator                  | `lib/HEAP_README.md` + `lib/HEAP_QUICKSTART.md`      |
 | `math.s`          | Q16.16 fixed-point arithmetic             | [Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) + this file |
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |

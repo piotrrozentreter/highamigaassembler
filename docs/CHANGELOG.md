@@ -4,6 +4,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **Debug logging library documentation** `docs/DEBUG_LIBRARY.md`:
+  - Full API reference for `lib/debug.s`: `DebugSetEnabled`, `DebugClear`, `DebugLogStr`, `DebugLogStrRaw`, `DebugLogHex`, `DebugLogInt`, `DebugFlushToDos`.
+  - Explains the buffered design and why OS calls cannot be made during OS takeover.
+  - Documents buffer limits, overflow policy, and release-build zero-cost pattern.
+  - Added `debug.s` row to `docs/LIBRARY_REFERENCE.md`.
+
 ## [0.8] - 2026-07-31
 
 ### Added
