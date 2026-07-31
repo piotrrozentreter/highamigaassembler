@@ -1,0 +1,28 @@
+// HAS <-> lib/fileio.s interop declarations.
+// Use these APIs only while the system is released (ReleaseSystem called).
+
+const DOS_MODE_READWRITE = 1004;
+const DOS_MODE_OLDFILE = 1005;
+const DOS_MODE_NEWFILE = 1006;
+
+const DOS_OFFSET_BEGINNING = -1;
+const DOS_OFFSET_CURRENT = 0;
+const DOS_OFFSET_END = 1;
+
+const DOS_SHARED_LOCK = -2;
+const DOS_EXCLUSIVE_LOCK = -1;
+
+extern func FileIoInit() -> int;
+extern func FileIoDone() -> int;
+extern func FileIoErr() -> int;
+
+extern func FileOpen(path: ptr, mode: int) -> int;
+extern func FileClose(handle: int) -> int;
+extern func FileRead(handle: int, buffer: ptr, length: int) -> int;
+extern func FileWrite(handle: int, buffer: ptr, length: int) -> int;
+extern func FileSeek(handle: int, position: int, mode: int) -> int;
+extern func FileDelete(path: ptr) -> int;
+extern func FileRename(old_path: ptr, new_path: ptr) -> int;
+extern func FileLock(path: ptr, mode: int) -> int;
+extern func FileUnLock(lock: int) -> void;
+extern func FileExamine(lock: int, fib: ptr) -> int;

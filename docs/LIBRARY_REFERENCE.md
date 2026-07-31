@@ -12,6 +12,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 |-------------------|-------------------------------------------|------------------------------------------------------|
 | `graphics.s`      | Screen modes, drawing, text, colour       | [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md) |
 | `gui.s`           | Rectangles, boxes, buttons, gadgets       | [GUI_LIBRARY.md](GUI_LIBRARY.md)                     |
+| `debug.s`         | Buffered debug logging for takeover games | [DEBUG_LIBRARY.md](DEBUG_LIBRARY.md)                 |
 | `heap.s`          | Dynamic memory allocator                  | `lib/HEAP_README.md` + `lib/HEAP_QUICKSTART.md`      |
 | `math.s`          | Q16.16 fixed-point arithmetic             | [Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) + this file |
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
@@ -21,6 +22,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `input.s`         | Joystick and mouse input                  | this file                                            |
 | `keyboard.s`      | Keyboard interrupt driver                 | this file                                            |
 | `takeover.s`      | Amiga OS takeover/release                 | this file                                            |
+| `fileio.s`        | AmigaDOS file I/O wrappers                | [FILE_IO_LIBRARY.md](FILE_IO_LIBRARY.md)             |
 | `ptplayer.s`      | ProTracker 2.3B music player              | this file                                            |
 | `font8x8.s`       | 8×8 pixel bitmap font data               | used via `SetFont` in `graphics.s`                   |
 | `font8x8_2.s`     | Alternative 8×8 font data                | used via `SetFont` in `graphics.s`                   |
@@ -68,6 +70,30 @@ code main:
 
 Restores all saved hardware state, closes `graphics.library`, and returns control to the OS.  
 Must be called before exiting to avoid crashing the system.
+
+---
+
+## fileio.s — AmigaDOS File I/O
+
+Thin wrappers around `dos.library` operations for HAS interop.
+
+Typical takeover-safe flow:
+
+```has
+#include "includes/fileio_defs.has";
+
+extern func TakeSystem() -> void;
+extern func ReleaseSystem() -> void;
+
+call ReleaseSystem();
+if (FileIoInit() == 0) {
+    ; FileOpen / FileRead / FileWrite / FileSeek / FileClose
+    call FileIoDone();
+}
+call TakeSystem();
+```
+
+See [FILE_IO_LIBRARY.md](FILE_IO_LIBRARY.md) for full API details and constants.
 
 ---
 

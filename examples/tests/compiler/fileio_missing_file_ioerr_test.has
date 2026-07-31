@@ -1,0 +1,42 @@
+#include "../../includes/fileio_defs.has";
+
+code main:
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    // Compile-time regression target:
+    // - File I/O extern declarations are usable from HAS.
+    // - Missing-file path uses IoErr flow and returns deterministic code.
+    proc start() -> int {
+        var handle: int;
+        var ioerr: int;
+
+        call ReleaseSystem();
+
+        if (FileIoInit() != 0) {
+            call TakeSystem();
+            return -10;
+        }
+
+        handle = FileOpen(&missing_path, DOS_MODE_OLDFILE);
+        if (handle != 0) {
+            call FileClose(handle);
+            call FileIoDone();
+            call TakeSystem();
+            return -11;
+        }
+
+        ioerr = FileIoErr();
+        call FileIoDone();
+        call TakeSystem();
+
+        // IoErr may vary by environment; require only "error reported".
+        if (ioerr == 0) {
+            return -12;
+        }
+
+        return 0;
+    }
+
+data paths:
+    missing_path.b = "RAM:has_missing_file_for_test.bin",0

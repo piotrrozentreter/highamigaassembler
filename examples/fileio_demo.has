@@ -1,0 +1,101 @@
+// fileio_demo.has
+// Demonstrates safe DOS file I/O from a takeover-based program.
+// Pattern:
+//   TakeSystem -> game phase
+//   ReleaseSystem -> FileIo* calls
+//   TakeSystem -> back to game phase
+
+#include "includes/fileio_defs.has";
+
+const DEMO_LEN = 8;
+
+code demo:
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    public main;
+
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    proc main() -> int {
+        var handle: int;
+        var wrote: int;
+        var readn: int;
+        var ioerr: int = 0;
+
+        // Optional UI pattern: draw a loading marker while still in game context.
+        // Keep renderer-specific code out of fileio.s and place it in game code.
+        call ShowLoadingUi();
+
+        // Leave takeover mode before any DOS interaction.
+        call ReleaseSystem();
+
+        if (FileIoInit() != 0) {
+            call TakeSystem();
+            return -1;
+        }
+
+        handle = FileOpen(&demo_path, DOS_MODE_NEWFILE);
+        if (handle == 0) {
+            ioerr = FileIoErr();
+            call FileIoDone();
+            call TakeSystem();
+            return -2;
+        }
+
+        wrote = FileWrite(handle, &write_buf, DEMO_LEN);
+        call FileClose(handle);
+        if (wrote != DEMO_LEN) {
+            ioerr = FileIoErr();
+            call FileIoDone();
+            call TakeSystem();
+            return -3;
+        }
+
+        handle = FileOpen(&demo_path, DOS_MODE_OLDFILE);
+        if (handle == 0) {
+            ioerr = FileIoErr();
+            call FileIoDone();
+            call TakeSystem();
+            return -4;
+        }
+
+        call FileSeek(handle, 0, DOS_OFFSET_BEGINNING);
+        readn = FileRead(handle, &read_buf, DEMO_LEN);
+        call FileClose(handle);
+        call FileIoDone();
+
+        // Resume takeover mode for game-side hardware access.
+        call TakeSystem();
+
+        // Hide loading marker after returning to game/hardware context.
+        call HideLoadingUi();
+
+        if (readn != DEMO_LEN) {
+            ioerr = FileIoErr();
+            return -5;
+        }
+
+        return 0;
+    }
+
+    // Example hook points for screen feedback during file I/O.
+    // In a real game replace these with your rendering/UI calls.
+    proc ShowLoadingUi() -> int {
+        return 0;
+    }
+
+    proc HideLoadingUi() -> int {
+        return 0;
+    }
+
+data demo_data:
+    demo_path.b = "RAM:has_fileio_demo.bin",0
+    write_buf.b = {72, 65, 83, 73, 79, 118, 49, 33}
+
+bss demo_bss:
+    read_buf.b[DEMO_LEN]
