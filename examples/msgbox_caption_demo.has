@@ -1,0 +1,79 @@
+// msgbox_caption_demo.has
+// Minimal demo for DrawMsgBoxCaption (captioned frame windows).
+// Shows both a normal caption and a long caption that gets truncated.
+
+#pragma lockreg(a5);
+
+extern var fonts: int;
+
+code demo:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func ClearScreen() -> int;
+    extern func SetFont(ptr: int) -> int;
+    extern func SetColor(id: int, col: int) -> int;
+    extern func UpdateCopperList() -> int;
+    extern func WaitVBlank() -> int;
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    extern func DrawMsgBox(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+    extern func DrawMsgBoxCaption(x:int, y:int, w:int, h:int, bg:int, border:int, caption:int, str:int, tc:int) -> int;
+
+    public main;
+
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    proc main() -> int {
+        var result: int;
+        var frames: int = 0;
+
+        result = SetGraphicsMode(0);
+        if (result == -1) {
+            return -1;
+        }
+
+        call SetFont(&fonts);
+        call SetColor(0, $000);  // black
+        call SetColor(1, $FFF);  // white
+        call SetColor(4, $00F);  // blue
+        call SetColor(5, $FF0);  // yellow
+        call SetColor(8, $444);  // gray
+        call ClearScreen();
+
+        // Window 1: short caption fits the available width.
+        result = DrawMsgBoxCaption(16, 24, 288, 64, 8, 1,
+                                   &cap_ok,
+                                   &msg_one,
+                                   1);
+
+        // Window 2: long caption is clipped to window text width.
+        result = DrawMsgBoxCaption(16, 104, 200, 64, 4, 5,
+                                   &cap_long,
+                                   &msg_two,
+                                   1);
+
+        // Backward compatibility: classic DrawMsgBox still works unchanged.
+        result = DrawMsgBox(16, 184, 288, 40, 8, 1, &msg_legacy, 1);
+
+        call UpdateCopperList();
+
+        // Keep screen visible for ~3 seconds at 60 Hz.
+        do {
+            call WaitVBlank();
+            frames = frames + 1;
+        } while (frames < 180);
+
+        return 0;
+    }
+
+data demo_strings:
+    cap_ok.b = "Status", 0
+    cap_long.b = "Very long caption that should be truncated at window width", 0
+
+    msg_one.b = "Caption row is drawn at the top of the window.", 0
+    msg_two.b = "This body text starts one row below the caption.", 0
+    msg_legacy.b = "DrawMsgBox still behaves as before.", 0

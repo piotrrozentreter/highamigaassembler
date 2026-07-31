@@ -1,0 +1,107 @@
+// combobox_demo.has
+// Tiny demo for the ComboBox gadget.
+// - Items are semicolon-separated in one string.
+// - Rows are truncated to widget width.
+// - Rendering stops at NUL or screen bottom.
+// - Click a row to select it; previous highlight is removed.
+
+#pragma lockreg(a5);
+
+extern var fonts: int;
+
+bss demo_bss:
+    // Offsets match COMBOBOX layout in lib/gui.i.
+    struct combo[1] {
+        x.w, y.w, w.w, h.w,
+        bg.w, border.w, text.l, tcolor.w,
+        type.w, selected.w, selbg.w, seltext.w
+    }
+
+code demo:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func ClearScreen() -> int;
+    extern func SetFont(ptr: int) -> int;
+    extern func SetColor(id: int, col: int) -> int;
+    extern func UpdateCopperList() -> int;
+    extern func WaitVBlank() -> int;
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    extern func DrawMsgBox(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+    extern func DrawButton(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+    extern func DrawGadget(gadget_ptr:int) -> int;
+
+    extern func ReadMouse() -> void;
+    extern func GuiPollMouse() -> void;
+    extern func GuiHitTestRect(x:int, y:int, w:int, h:int) -> int;
+
+    public main;
+
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    proc main() -> int {
+        var result: int;
+        var done: int = 0;
+        var selected: int = -1;
+
+        result = SetGraphicsMode(0);
+        if (result == -1) {
+            return -1;
+        }
+
+        call SetFont(&fonts);
+        call SetColor(0, $000);  // black
+        call SetColor(1, $FFF);  // white
+        call SetColor(4, $00F);  // blue (selected row bg)
+        call SetColor(5, $FF0);  // yellow (combobox frame)
+        call SetColor(8, $444);  // gray (normal row bg)
+        call ClearScreen();
+
+        // ComboBox setup: placed near bottom so rendering also demonstrates
+        // stop-at-screen-height behavior.
+        combo[0].x = 20;
+        combo[0].y = 176;
+        combo[0].w = 200;
+        combo[0].h = 96;
+        combo[0].bg = 8;
+        combo[0].border = 5;
+        combo[0].text = &combo_items;
+        combo[0].tcolor = 1;
+        combo[0].type = 3;      // GADGET_TYPE_COMBOBOX
+        combo[0].selected = -1; // no selection at start
+        combo[0].selbg = 4;
+        combo[0].seltext = 1;
+
+        while (done == 0) {
+            call WaitVBlank();
+            call ReadMouse();
+            call GuiPollMouse();
+
+            call ClearScreen();
+            result = DrawMsgBox(12, 8, 296, 32, 8, 1, &hint, 1);
+            result = DrawButton(236, 220, 72, 24, 8, 1, &exit_txt, 1);
+
+            // Draw and update ComboBox. Return value is selected index for this frame.
+            selected = DrawGadget(&combo[0]);
+
+            // Exit button
+            if (GuiHitTestRect(236, 220, 72, 24) == 1) {
+                done = 1;
+            }
+
+            call UpdateCopperList();
+        }
+
+        return selected;
+    }
+
+data demo_data:
+    hint.b = "ComboBox demo: click a row to select. Click Exit to leave.", 0
+    exit_txt.b = "Exit", 0
+
+    // Semicolon-separated rows. Long rows are truncated to combobox width.
+    combo_items.b = "Alpha;Bravo;Charlie;Delta;Echo;Foxtrot;Golf with very long text that will be truncated;Hotel;India;Juliet", 0

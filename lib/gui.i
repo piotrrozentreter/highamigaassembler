@@ -39,6 +39,28 @@ GADGET_SIZE     EQU 20   ; struct size in bytes (for allocation)
 GADGET_TYPE_MSGBOX  EQU 0   ; message box with word-wrapped text
 GADGET_TYPE_BUTTON  EQU 1   ; clickable button with centred label
 GADGET_TYPE_EDITBOX EQU 2   ; keyboard-driven text input field
+GADGET_TYPE_COMBOBOX EQU 3  ; selectable list from semicolon-separated text
+
+; ============================================================
+; COMBOBOX struct layout (26 bytes) — offsets 0–19 are identical
+; to the GADGET struct so DrawGadget dispatch works transparently.
+; GADGET_TEXT points to a semicolon-separated list, NUL-terminated:
+;   "Item A;Item B;Item C",0
+; ============================================================
+
+COMBOBOX_X         EQU  0   ; word - screen X position in pixels
+COMBOBOX_Y         EQU  2   ; word - screen Y position in pixels
+COMBOBOX_W         EQU  4   ; word - width in pixels
+COMBOBOX_H         EQU  6   ; word - height in pixels
+COMBOBOX_BG        EQU  8   ; word - normal row background color
+COMBOBOX_BORDER    EQU 10   ; word - frame color
+COMBOBOX_TEXT      EQU 12   ; long - pointer to semicolon-separated list string
+COMBOBOX_TCOLOR    EQU 16   ; word - normal row text color
+COMBOBOX_TYPE      EQU 18   ; word = GADGET_TYPE_COMBOBOX (3)
+COMBOBOX_SELECTED  EQU 20   ; word - selected item index (-1 = none)
+COMBOBOX_SELBG     EQU 22   ; word - selected row background color
+COMBOBOX_SELTEXT   EQU 24   ; word - selected row text color
+COMBOBOX_SIZE      EQU 26   ; total struct size in bytes
 
 ; ============================================================
 ; EDITBOX struct layout (28 bytes) — offsets 0–19 are identical
@@ -73,7 +95,9 @@ EDITBOX_SIZE     EQU 28   ; total struct size in bytes
     XREF DrawBox
     XREF DrawWrappedText
     XREF DrawMsgBox
+    XREF DrawMsgBoxCaption
     XREF DrawButton
+    XREF DrawComboBox
     XREF DrawGadget
     XREF DrawEditBox
     XREF EditBoxProcessKey
@@ -96,7 +120,9 @@ EDITBOX_SIZE     EQU 28   ; total struct size in bytes
 ;   extern func DrawBox(x:int, y:int, w:int, h:int, bg:int, border:int) -> int;
 ;   extern func DrawWrappedText(cx:int, cy:int, cols:int, rows:int, str:int, color:int) -> int;
 ;   extern func DrawMsgBox(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+;   extern func DrawMsgBoxCaption(x:int, y:int, w:int, h:int, bg:int, border:int, caption:int, str:int, tc:int) -> int;
 ;   extern func DrawButton(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+;   extern func DrawComboBox(gadget_ptr:int) -> int;
 ;   extern func DrawGadget(gadget_ptr:int) -> int;
 ;   extern func DrawEditBox(x:int, y:int, w:int, h:int, bg:int, border:int, text_ptr:int, tc:int, cursor_pos:int, cursor_vis:int) -> int;
 ;   extern func EditBoxProcessKey(text_ptr:int, max_len:int, cursor_pos_ptr:int, scancode:int) -> int;
