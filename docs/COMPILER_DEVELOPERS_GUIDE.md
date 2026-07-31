@@ -35,6 +35,17 @@ HAS (High Assembler) is a **domain-specific compiler** that translates high-leve
 - **Amiga-specific**: Designed for Motorola 68000 (Amiga platform)
 - **Regression coverage**: example-driven `.has` programs, with optional targeted Python tests when present
 
+### Design Constraints
+
+Use these constraints when implementing or reviewing compiler changes to prevent feature drift.
+
+1. Assembly-first semantics: every language construct must map to understandable 68000 instruction patterns and remain compatible with vasm/vlink.
+2. Visible cost model: avoid hidden runtime scaffolding, implicit heap/runtime services, or rewrites that obscure cycle and memory impact.
+3. Explicit control flow: preserve HAS execution expectations (top-down code sections, explicit call/jump flow, explicit returns).
+4. Conservative correctness: when static analysis is uncertain (optimization legality, liveness, reachability), prefer safe fallback behavior over aggressive transforms.
+5. Stable ABI expectations: do not silently change extern calling behavior, register conventions, or stack layout without coordinated docs and migration notes.
+6. Evidence before expansion: new syntax or semantics should ship with at least one example and an inspectable generated-assembly path.
+
 ### Core Components
 
 ```
