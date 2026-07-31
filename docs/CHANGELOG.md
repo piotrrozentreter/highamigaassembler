@@ -6,6 +6,13 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **AmigaDOS file I/O library** in `lib/fileio.s` with HAS interop-friendly wrappers:
+  - Added `FileIoInit`, `FileIoDone`, `FileIoErr`, `FileOpen`, `FileClose`, `FileRead`, `FileWrite`, and `FileSeek`.
+  - Added HAS declaration/constants include: `examples/includes/fileio_defs.has`.
+  - Added takeover-safe usage example: `examples/fileio_demo.has`.
+  - Added dedicated API guide: `docs/FILE_IO_LIBRARY.md` and linked it from `docs/LIBRARY_REFERENCE.md`.
+  - Intended runtime pattern is explicit: `ReleaseSystem()` before DOS I/O, `TakeSystem()` after DOS I/O.
+
 - **Linux-only Musashi runtime-test scaffolding** for selected execution tests:
   - Added pinned Musashi lock file: `tools/musashi.lock`.
   - Added Linux scripts:
