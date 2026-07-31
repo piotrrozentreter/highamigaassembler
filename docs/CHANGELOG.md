@@ -4,6 +4,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.8] - 2026-07-31
+
 ### Added
 
 - **AmigaDOS file I/O library** in `lib/fileio.s` with HAS interop-friendly wrappers:
