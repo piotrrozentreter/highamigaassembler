@@ -67,7 +67,25 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     - positive examples must compile
     - negative examples must fail
     - non-zero exit code on any mismatch (CI-friendly)
-- **GUI EditBox control** in `lib/gui.s` / `lib/gui.i`:
+- **GUI ComboBox widget** (`lib/gui.s` / `lib/gui.i`):
+  - Added `DrawComboBox(gadget_ptr)` — renders a selectable list from a semicolon-separated, NUL-terminated item string.
+  - Normal and selected rows use independent background/text palette pairs (`COMBOBOX_BG`/`COMBOBOX_TCOLOR` vs `COMBOBOX_SELBG`/`COMBOBOX_SELTEXT`).
+  - Added `GADGET_TYPE_COMBOBOX = 3`; `DrawGadget` now dispatches combo boxes transparently.
+  - Added `COMBOBOX` struct (26 bytes, `gui.i`): offsets `0..19` are layout-compatible with `GADGET`.
+  - Added end-to-end example `examples/combobox_demo.has`.
+
+- **`DrawMsgBoxCaption` function** (`lib/gui.s` / `lib/gui.i`):
+  - Added `DrawMsgBoxCaption(x, y, w, h, bg, border, caption, str, tc)` — bordered window with an optional title caption rendered in the top border row.
+  - Caption is clipped to the available text width (`w/8 - 2` chars) automatically.
+  - `DrawMsgBox` is now a thin wrapper calling `DrawMsgBoxCaption` with `caption = 0`; existing code is unaffected.
+  - Added end-to-end example `examples/msgbox_caption_demo.has`.
+
+- **GUI library documentation** updated in `docs/GUI_LIBRARY.md`:
+  - Added `DrawMsgBoxCaption` and `DrawComboBox` API references.
+  - Added `COMBOBOX` struct field table.
+  - Updated `DrawGadget` dispatch table and `extern func` declaration snippet.
+
+
   - Added `DrawEditBox(x,y,w,h,bg,border,text_ptr,tc,cursor_pos,cursor_vis)` single-line editable text field renderer.
   - Added `EditBoxProcessKey(text_ptr,max_len,cursor_pos_ptr,scancode)` for scan-code-driven insert/delete/cursor movement.
   - Added `EditBoxPollKey(text_ptr,max_len,cursor_pos_ptr)` convenience wrapper consuming `keyboard.s` `current_key`.

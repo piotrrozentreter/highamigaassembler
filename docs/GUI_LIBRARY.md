@@ -14,10 +14,12 @@ Reads `gfx_current_mode` at call time — no recompilation needed when switching
 3. [Widget functions](#widget-functions)
    - [DrawBox](#drawbox)
    - [DrawMsgBox](#drawmsgbox)
+   - [DrawMsgBoxCaption](#drawmsgboxcaption) ← captioned window
    - [DrawButton](#drawbutton) ← 3D gadget style
     - [DrawEditBox](#draweditbox)
     - [EditBoxProcessKey](#editboxprocesskey)
     - [EditBoxPollKey](#editboxpollkey)
+   - [DrawComboBox](#drawcombobox) ← selectable list
    - [DrawWrappedText](#drawwrappedtext)
    - [DrawGadget](#drawgadget) ← struct-based dispatch
 4. [Mouse event manager](#mouse-event-manager)
@@ -25,7 +27,7 @@ Reads `gfx_current_mode` at call time — no recompilation needed when switching
    - [GuiHitTestRect](#guihittestRect)
    - [GuiHitTest](#guihittest) ← struct-based
    - [GetGuiMouseX / GetGuiMouseY](#getguimousex--getguimousey)
-5. [GADGET and EDITBOX structs](#gadget-and-editbox-structs)
+5. [GADGET, EDITBOX, and COMBOBOX structs](#gadget-and-editbox-structs)
 6. [Button centering rules](#button-centering-rules)
 7. [Sprite cursor integration](#sprite-cursor-integration)
 8. [Build integration](#build-integration)
@@ -45,9 +47,11 @@ include "gui.i"
 ```has
 extern func DrawButton(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
 extern func DrawMsgBox(x:int, y:int, w:int, h:int, bg:int, border:int, str:int, tc:int) -> int;
+extern func DrawMsgBoxCaption(x:int, y:int, w:int, h:int, bg:int, border:int, caption:int, str:int, tc:int) -> int;
 extern func DrawEditBox(x:int, y:int, w:int, h:int, bg:int, border:int, text_ptr:int, tc:int, cursor_pos:int, cursor_vis:int) -> int;
 extern func EditBoxProcessKey(text_ptr:int, max_len:int, cursor_pos_ptr:int, scancode:int) -> int;
 extern func EditBoxPollKey(text_ptr:int, max_len:int, cursor_pos_ptr:int) -> int;
+extern func DrawComboBox(gadget_ptr:int) -> int;
 extern func GuiPollMouse() -> void;
 extern func GuiHitTestRect(x:int, y:int, w:int, h:int) -> int;
 extern func GetGuiMouseX() -> int;
@@ -105,6 +109,7 @@ Draws a bordered window and renders word-wrapped text inside it.
 - Interior text area has a 1-character (8 px) padding on all sides.
 - Text overflows are truncated to `max_cols × max_rows` where `max_cols = w/8 - 2` and `max_rows = h/8 - 2`.
 - Line-breaks at word boundaries; long words are hard-broken at the column limit.
+- This function is a compatibility wrapper around `DrawMsgBoxCaption` that passes `caption_ptr = 0`.
 
 | Argument | Meaning |
 |----------|---------|
@@ -114,6 +119,40 @@ Draws a bordered window and renders word-wrapped text inside it.
 | `border` | Border line palette index |
 | `str` | Pointer to null-terminated message string |
 | `tc` | Text colour palette index |
+
+### `DrawMsgBoxCaption`
+
+```c
+DrawMsgBoxCaption(x, y, w, h, bg, border, caption, str, tc) -> int
+```
+
+Draws a bordered window with an optional title caption bar, then word-wrapped body text.
+
+- When `caption != 0`, a caption string is rendered in the top border row (clipped to `w/8 - 2` characters).
+- Body text behaviour is identical to `DrawMsgBox` — word-wrapped, 1-character padding.
+- Passing `caption = 0` is equivalent to calling `DrawMsgBox`.
+
+| Argument | Meaning |
+|----------|---------|
+| `x, y` | Top-left corner in pixels |
+| `w, h` | Dimensions in pixels (multiples of 8 recommended) |
+| `bg` | Background fill palette index |
+| `border` | Border line palette index |
+| `caption` | Pointer to null-terminated caption string, or `0` for none |
+| `str` | Pointer to null-terminated body message string |
+| `tc` | Text colour palette index |
+
+```has
+extern func DrawMsgBoxCaption(x:int, y:int, w:int, h:int, bg:int, border:int, caption:int, str:int, tc:int) -> int;
+
+// Short caption fits within window width:
+result = DrawMsgBoxCaption(16, 24, 288, 64, 8, 1, &my_title, &my_text, 1);
+
+// Long caption is clipped automatically:
+result = DrawMsgBoxCaption(16, 104, 200, 64, 4, 5, &long_title, &my_text, 1);
+```
+
+See example: [examples/msgbox_caption_demo.has](../examples/msgbox_caption_demo.has)
 
 ### `DrawButton`
 
@@ -219,6 +258,41 @@ Convenience wrapper around `EditBoxProcessKey`:
 
 Use this when the edit box is the sole keyboard consumer in the frame loop.
 
+### `DrawComboBox`
+
+```c
+DrawComboBox(gadget_ptr) -> int
+```
+
+Draws a selectable list widget from a `COMBOBOX` struct. Items are stored as a single semicolon-separated, NUL-terminated string:
+
+```
+"Item A;Item B;Item C",0
+```
+
+Rendering behaviour:
+
+- Each item is drawn on its own row within the widget bounds, clipped to the widget width.
+- The selected item row is filled with `COMBOBOX_SELBG` and text in `COMBOBOX_SELTEXT`.
+- Unselected rows use `COMBOBOX_BG` and `COMBOBOX_TCOLOR`.
+- A 1-pixel border frame is drawn using `COMBOBOX_BORDER`.
+- Rendering stops when the string ends or screen bottom is reached.
+- Click detection: use `GuiHitTestRect` per row to update `COMBOBOX_SELECTED`.
+
+| Argument | Meaning |
+|----------|---------|
+| `gadget_ptr` | Pointer to a `COMBOBOX` struct (see [COMBOBOX struct](#combobox-struct)) |
+
+```has
+extern func DrawComboBox(gadget_ptr:int) -> int;
+
+// Preferred: go through the generic dispatcher
+extern func DrawGadget(gadget_ptr:int) -> int;
+call DrawGadget(&my_combo);
+```
+
+See example: [examples/combobox_demo.has](../examples/combobox_demo.has)
+
 ### `DrawWrappedText`
 
 ```c
@@ -247,9 +321,10 @@ Struct-based dispatch: reads `GADGET_TYPE` from the struct and calls the appropr
 | `GADGET_TYPE_MSGBOX` | 0 | `DrawMsgBox` |
 | `GADGET_TYPE_BUTTON` | 1 | `DrawButton` |
 | `GADGET_TYPE_EDITBOX` | 2 | `DrawEditBox` |
+| `GADGET_TYPE_COMBOBOX` | 3 | `DrawComboBox` |
 
 Unknown types are silently skipped (returns 0).  
-See [GADGET and EDITBOX structs](#gadget-and-editbox-structs) below for field layouts.
+See [GADGET, EDITBOX, and COMBOBOX structs](#gadget-and-editbox-structs) below for field layouts.
 
 ---
 
@@ -374,6 +449,41 @@ When passed to `DrawGadget`:
 
 - Border colour uses `EDITBOX_ABORDER` when `EDITBOX_FLAGS bit0 == 1`.
 - Caret visibility uses `EDITBOX_FLAGS bit1`.
+
+### COMBOBOX struct
+
+Defined in `lib/gui.i`. Size = **26 bytes**. Offsets `0..19` are layout-compatible with `GADGET`, so `DrawGadget` dispatch works transparently.
+
+`GADGET_TEXT` / `COMBOBOX_TEXT` must point to a semicolon-separated, NUL-terminated item list:
+```
+"Item A;Item B;Item C",0
+```
+
+| Field | Offset | Type | Meaning |
+|-------|--------|------|---------|
+| `COMBOBOX_X` | 0 | word | Screen X position (pixels) |
+| `COMBOBOX_Y` | 2 | word | Screen Y position (pixels) |
+| `COMBOBOX_W` | 4 | word | Width (pixels) |
+| `COMBOBOX_H` | 6 | word | Height (pixels) |
+| `COMBOBOX_BG` | 8 | word | Normal row background palette index |
+| `COMBOBOX_BORDER` | 10 | word | Frame colour palette index |
+| `COMBOBOX_TEXT` | 12 | long | Pointer to semicolon-separated item list |
+| `COMBOBOX_TCOLOR` | 16 | word | Normal row text palette index |
+| `COMBOBOX_TYPE` | 18 | word | Must be `GADGET_TYPE_COMBOBOX` (3) |
+| `COMBOBOX_SELECTED` | 20 | word | Selected item index (`-1` = none) |
+| `COMBOBOX_SELBG` | 22 | word | Selected row background palette index |
+| `COMBOBOX_SELTEXT` | 24 | word | Selected row text palette index |
+
+HAS struct allocation example:
+
+```has
+bss demo_bss:
+    struct combo[1] {
+        x.w, y.w, w.w, h.w,
+        bg.w, border.w, text.l, tcolor.w,
+        type.w, selected.w, selbg.w, seltext.w
+    }
+```
 
 ---
 
