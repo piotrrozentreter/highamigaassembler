@@ -22,6 +22,14 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 - Create or update focused regression examples in `examples/` when needed.
 - Keep generated assembly inspectable and compatible with `vasm`.
 
+## Language Vision and Boundaries
+
+- Treat HAS as a C-like surface syntax with assembly-first semantics.
+- Preserve explicit execution flow: no implicit runtime bootstrap and no automatic `main()` entry behavior.
+- Keep codegen cost visible: avoid hidden runtime scaffolding or transforms that obscure cycle and memory impact.
+- Keep low-level control first-class: inline assembly and direct register control are core, not fallback-only features.
+- If a proposed feature cannot preserve predictable generated assembly behavior, prefer tooling/docs guidance over core semantic expansion.
+
 ## Out of Scope
 
 - Broad documentation rewrites (delegate to docs agent).
@@ -74,6 +82,8 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 - Do not skip freeing allocated registers in any control-flow path.
 - Do not introduce silent behavior changes without a regression example.
 - Do not rely on non-deterministic or environment-specific test commands.
+- Do not change extern ABI behavior, register conventions, or stack layout without explicit migration notes and synchronized docs/changelog updates.
+- When optimization legality is uncertain, choose conservative keep-correct behavior over aggressive transformation.
 
 ## Output Contract
 

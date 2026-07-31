@@ -77,6 +77,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Changed
 
+- Documentation clarification: README and compiler developer guidance now explicitly define HAS as C-like surface syntax with assembly-first semantics and maintainer guardrails against feature drift. This is documentation-only; compiler behavior is unchanged.
+- Changelog note style guidance: future entries that affect emitted code should include a short "Assembly impact" note (for example: "Assembly impact: no emitted-instruction change" or "Assembly impact: fewer branches in boolean lowering") so codegen cost implications are easy to scan.
+
 - **Longword alignment for every emitted section**:
   - Code generation now emits `cnop 0,4` immediately after every `SECTION` directive
     (`data`/`data_c`, `bss`/`bss_c`, `code`/`code_c`), guaranteeing the first label in

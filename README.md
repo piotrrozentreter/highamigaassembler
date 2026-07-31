@@ -18,6 +18,17 @@ HAS bridges the gap between high-level languages and assembly programming. It of
 - **Amiga-specific support**: hardware registers, graphics libraries, copper lists
 - **Clean output**: generates standard 68000 assembly compatible with `vasm` + `vlink`
 
+## Vision and Boundaries
+
+HAS intentionally uses a C-like surface syntax, but its semantics remain assembly-first.
+
+- Surface syntax improves readability: typed variables, loops, procedures, and structs.
+- Execution remains explicit: control starts at the first emitted instruction, with no implicit runtime or automatic main entry point.
+- Cost must stay visible: features are only valuable when generated 68000 assembly remains inspectable and predictable.
+- Low-level control is a core capability: inline assembly and direct register access are first-class tools, not escape-path afterthoughts.
+
+If a feature cannot preserve predictable assembly behavior, it belongs in tooling or documentation, not in core language semantics.
+
 ## ðŸ“‹ Features
 
 ### Core Language Features
