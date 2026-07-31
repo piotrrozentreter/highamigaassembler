@@ -30,6 +30,8 @@
 ;   DrawBox(x,y,w,h,bg_color,border_color)
 ;   DrawWrappedText(cx,cy,max_cols,max_rows,str_ptr,text_color)
 ;   DrawMsgBox(x,y,w,h,bg_color,border_color,str_ptr,text_color)
+;   DrawMsgBoxCaption(x,y,w,h,bg_color,border_color,caption_ptr,str_ptr,text_color)
+;   DrawComboBox(gadget_ptr)
 ;   DrawGadget(gadget_ptr)
 
 
@@ -47,7 +49,9 @@
     XDEF DrawBox
     XDEF DrawWrappedText
     XDEF DrawMsgBox
+    XDEF DrawMsgBoxCaption
     XDEF DrawButton
+    XDEF DrawComboBox
     XDEF DrawGadget
     XDEF DrawEditBox
     XDEF EditBoxProcessKey
@@ -82,16 +86,12 @@
 ; Returns d0 = 0.
 ; ============================================================
 FillRect:
-    link a6,#-8                     ; locals: -1(a6)=lmask, -2(a6)=rmask, -4(a6)=width_bytes, -6(a6)=row_stride, -8(a6)=num_planes
+    ; locals:
+    ;  -1(a6)=lmask, -2(a6)=rmask
+    ;  -4(a6)=width_bytes, -6(a6)=row_stride, -8(a6)=num_planes
+    ;  -12(a6)=clipped_x, -16(a6)=clipped_y, -20(a6)=clipped_w, -24(a6)=clipped_h
+    link a6,#-24
     movem.l d1-d7/a0-a4,-(sp)
-
-    ; Bail on zero/negative size
-    move.l 16(a6),d0                ; w
-    tst.l d0
-    ble .fr_exit
-    move.l 20(a6),d0                ; h
-    tst.l d0
-    ble .fr_exit
 
     ; ---- Determine mode-dependent parameters ----
     move.w gfx_current_mode,d0
@@ -109,28 +109,81 @@ FillRect:
     move.w #4,-8(a6)                ; num_planes
 .fr_mode_set:
 
+    ; ---- Clip rectangle to active screen bounds ----
+    ; screen width in pixels = width_bytes * 8
+    moveq #0,d2
+    move.w -4(a6),d2
+    lsl.l #3,d2                     ; d2 = screen_width (320 or 640)
+
+    ; Clip X / W
+    move.l 8(a6),d0                 ; d0 = x
+    move.l 16(a6),d1                ; d1 = w
+    tst.l d0
+    bge .fr_x_nonneg
+    add.l d0,d1                     ; w += x (x is negative)
+    moveq #0,d0                     ; x = 0
+.fr_x_nonneg:
+    tst.l d1
+    ble .fr_exit
+    cmp.l d2,d0                     ; x >= screen_width ?
+    bge .fr_exit
+    move.l d2,d3
+    sub.l d0,d3                     ; d3 = max drawable width from x
+    cmp.l d3,d1
+    ble .fr_x_ok
+    move.l d3,d1                    ; clamp w
+.fr_x_ok:
+
+    ; Clip Y / H to 0..255
+    move.l 12(a6),d6                ; d6 = y
+    move.l 20(a6),d7                ; d7 = h
+    tst.l d6
+    bge .fr_y_nonneg
+    add.l d6,d7                     ; h += y (y is negative)
+    moveq #0,d6                     ; y = 0
+.fr_y_nonneg:
+    tst.l d7
+    ble .fr_exit
+    cmp.l #256,d6
+    bge .fr_exit
+    move.l #256,d3
+    sub.l d6,d3                     ; d3 = max drawable height from y
+    cmp.l d3,d7
+    ble .fr_y_ok
+    move.l d3,d7                    ; clamp h
+.fr_y_ok:
+    tst.l d1
+    ble .fr_exit
+    tst.l d7
+    ble .fr_exit
+
+    move.l d0,-12(a6)               ; clipped_x
+    move.l d6,-16(a6)               ; clipped_y
+    move.l d1,-20(a6)               ; clipped_w
+    move.l d7,-24(a6)               ; clipped_h
+
     ; ---- Precompute left_byte and right_byte (in address registers a2/a3) ----
     ; left_byte = x >> 3
-    move.l 8(a6),d0
+    move.l -12(a6),d0
     lsr.l #3,d0
     move.l d0,a2                    ; a2 = left_byte
 
     ; right_byte = (x + w - 1) >> 3
-    move.l 8(a6),d0
-    add.l 16(a6),d0
+    move.l -12(a6),d0
+    add.l -20(a6),d0
     subq.l #1,d0                    ; x1 = x + w - 1
     lsr.l #3,d0
     move.l d0,a3                    ; a3 = right_byte
 
     ; ---- Precompute lmask = gui_lmask[ x & 7 ] ----
-    move.l 8(a6),d0
+    move.l -12(a6),d0
     and.l #7,d0
     lea gui_lmask,a1
     move.b (a1,d0.w),-1(a6)         ; store lmask byte
 
     ; ---- Precompute rmask = gui_rmask[ (x+w-1) & 7 ] ----
-    move.l 8(a6),d0
-    add.l 16(a6),d0
+    move.l -12(a6),d0
+    add.l -20(a6),d0
     subq.l #1,d0
     and.l #7,d0
     lea gui_rmask,a1
@@ -150,8 +203,8 @@ FillRect:
     neg.l d6                        ; 1 -> 0xFFFFFFFF, 0 -> 0x00000000
 
     ; Reset row cursor to y for this plane
-    move.l 12(a6),d7                ; d7 = current absolute pixel row (= y)
-    move.l 20(a6),d3
+    move.l -16(a6),d7               ; d7 = current absolute pixel row (= y)
+    move.l -24(a6),d3
     subq.l #1,d3                    ; d3 = h-1 (dbra counter)
 
 .fr_row_loop:
@@ -436,6 +489,22 @@ DrawWrappedText:
     tst.l d4
     ble .dwt_exit
 
+    ; Clamp by remaining columns on the active text grid (40 lores/HAM, 80 hires)
+    move.l 8(a6),d0                ; cx
+    moveq #40,d1
+    move.w gfx_current_mode,d2
+    cmp.w #1,d2
+    bne .dwt_cols_mode_ok
+    moveq #80,d1
+.dwt_cols_mode_ok:
+    sub.l d0,d1                    ; d1 = remaining visible columns from cx
+    tst.l d1
+    ble .dwt_exit
+    cmp.l d1,d4
+    ble .dwt_cols_ok
+    move.l d1,d4
+.dwt_cols_ok:
+
     move.l 28(a6),d6               ; d6 = text_color
     move.l 12(a6),d3               ; d3 = row cursor (abs char row = cy initially)
     move.l 24(a6),a0               ; a0 = cur_ptr
@@ -539,7 +608,47 @@ DrawWrappedText:
 ; ============================================================
 DrawMsgBox:
     link a6,#0
-    movem.l d1-d4,-(sp)            ; d1-d4 survive nested calls (FillRect/DrawBox preserve them)
+    movem.l d1-d4,-(sp)
+
+    ; Backward-compatible wrapper: DrawMsgBoxCaption(..., caption_ptr=0, ...)
+    move.l 36(a6),-(sp)            ; arg9 = text_color
+    move.l 32(a6),-(sp)            ; arg8 = str_ptr
+    move.l #0,-(sp)                ; arg7 = caption_ptr (none)
+    move.l 28(a6),-(sp)            ; arg6 = border_color
+    move.l 24(a6),-(sp)            ; arg5 = bg_color
+    move.l 20(a6),-(sp)            ; arg4 = h
+    move.l 16(a6),-(sp)            ; arg3 = w
+    move.l 12(a6),-(sp)            ; arg2 = y
+    move.l 8(a6),-(sp)             ; arg1 = x
+    jsr DrawMsgBoxCaption
+    lea 36(sp),sp
+
+.dmb_exit:
+    moveq #0,d0
+    movem.l (sp)+,d1-d4
+    unlk a6
+    rts
+
+
+; ============================================================
+; DrawMsgBoxCaption(x, y, w, h, bg_color, border_color, caption_ptr, str_ptr, text_color)
+;   8(a6)  = x
+;   12(a6) = y
+;   16(a6) = w            - width in pixels (should be multiple of 8)
+;   20(a6) = h            - height in pixels (should be multiple of 8)
+;   24(a6) = bg_color     - window background palette index
+;   28(a6) = border_color - frame palette index
+;   32(a6) = caption_ptr  - optional title string (NUL/empty skips caption)
+;   36(a6) = str_ptr      - pointer to null-terminated message string
+;   40(a6) = text_color   - text palette index
+;
+;   Draws a bordered window. If caption_ptr is provided, draws the caption on
+;   the top interior text row and truncates it to the window text width.
+;   Message text is wrapped below the caption.
+; ============================================================
+DrawMsgBoxCaption:
+    link a6,#0
+    movem.l d1-d7/a0,-(sp)
 
     ; ---- Draw the window frame ----
     move.l 28(a6),-(sp)            ; border_color (arg6)
@@ -556,6 +665,7 @@ DrawMsgBox:
     move.l 8(a6),d1
     lsr.l #3,d1
     addq.l #1,d1                   ; d1 = cx
+    move.l d1,d5                   ; preserve cx for wrapped body text
 
     ; cy = y/8 + 1
     move.l 12(a6),d2
@@ -574,24 +684,71 @@ DrawMsgBox:
 
     ; Bail if text area is too small
     tst.l d3
-    ble .dmb_exit
+    ble .dmbc_exit
     tst.l d4
-    ble .dmb_exit
+    ble .dmbc_exit
 
-    ; ---- Render word-wrapped text ----
+    ; ---- Optional caption at the top row (truncated to max_cols) ----
+    move.l 32(a6),a0               ; caption_ptr
+    tst.l a0
+    beq .dmbc_render_body
+    tst.b (a0)
+    beq .dmbc_render_body
+
+    move.l d3,d6                   ; remaining caption chars
+    moveq #40,d0
+    move.w gfx_current_mode,d7
+    cmp.w #1,d7
+    bne .dmbc_cap_cols_mode_ok
+    moveq #80,d0
+.dmbc_cap_cols_mode_ok:
+    sub.l d1,d0                    ; remaining screen columns from cx
+    tst.l d0
+    ble .dmbc_cap_done
+    cmp.l d0,d6
+    ble .dmbc_cap_cols_ok
+    move.l d0,d6
+.dmbc_cap_cols_ok:
+    move.w d1,gfx_text_cursor_x    ; start col
+    move.w d2,gfx_text_cursor_y    ; top interior row
+
+.dmbc_cap_loop:
+    tst.l d6
+    beq .dmbc_cap_done
+    moveq #0,d0
+    move.b (a0)+,d0
+    beq .dmbc_cap_done
+    cmp.b #10,d0                   ; keep caption strictly single-row
+    beq .dmbc_cap_done
+    cmp.b #13,d0
+    beq .dmbc_cap_done
+    move.l 40(a6),d1               ; text color
+    jsr _DrawChar
+    addq.w #1,gfx_text_cursor_x
+    subq.l #1,d6
+    bra .dmbc_cap_loop
+
+.dmbc_cap_done:
+    addq.l #1,d2                   ; body starts below caption
+    subq.l #1,d4                   ; one less text row for wrapped body
+    tst.l d4
+    ble .dmbc_exit
+
+.dmbc_render_body:
+    ; ---- Render word-wrapped body text ----
     ; DrawWrappedText(cx, cy, max_cols, max_rows, str_ptr, text_color)
-    move.l 36(a6),-(sp)            ; text_color (arg6)
-    move.l 32(a6),-(sp)            ; str_ptr    (arg5)
+    move.l 40(a6),-(sp)            ; text_color (arg6)
+    move.l 36(a6),-(sp)            ; str_ptr    (arg5)
     move.l d4,-(sp)                ; max_rows   (arg4)
     move.l d3,-(sp)                ; max_cols   (arg3)
     move.l d2,-(sp)                ; cy         (arg2)
-    move.l d1,-(sp)                ; cx         (arg1)
+    move.l d5,-(sp)                ; cx         (arg1)
     jsr DrawWrappedText
     lea 24(sp),sp
 
-.dmb_exit:
+.dmbc_exit:
     moveq #0,d0
-    movem.l (sp)+,d1-d4
+    movem.l (sp)+,d1-d7/a0
     unlk a6
     rts
 
@@ -601,23 +758,28 @@ DrawMsgBox:
 ;   8(a6) = gadget_ptr - pointer to a GADGET struct (see gui.i for layout)
 ;
 ;   Dispatches to the appropriate renderer based on GADGET_TYPE field.
-;   Type 0 = message box (DrawMsgBox), type 1 = button (DrawButton).
-;   Unknown types are silently ignored (returns 0).
+;   Type 0 = message box, 1 = button, 2 = edit box, 3 = combo box.
+;   Returns 0 for non-combo gadgets; for combo box returns selected index
+;   (or -1 when nothing is selected).
 ; ============================================================
 DrawGadget:
     link a6,#0
     movem.l d1/a0,-(sp)
+    moveq #0,d0                    ; default return for non-combo/unknown gadgets
 
     move.l 8(a6),a0                ; a0 = gadget struct pointer
 
-    ; Dispatch on GADGET_TYPE: 0=msgbox, 1=button, 2=editbox; skip unknown
+    ; Dispatch on GADGET_TYPE: 0=msgbox, 1=button, 2=editbox, 3=combobox
     move.w 18(a0),d1               ; 18 = GADGET_TYPE offset
     tst.w d1
     beq .dg_dispatch               ; type 0: msgbox
     cmp.w #1,d1
     beq .dg_dispatch               ; type 1: button
     cmp.w #2,d1
-    bne .dg_done                   ; unknown type: skip
+    beq .dg_editbox
+    cmp.w #3,d1
+    beq .dg_combobox
+    bra .dg_done                   ; unknown type: skip
 
 ; --- EditBox dispatch (GADGET_TYPE_EDITBOX = 2) ---
 ; DrawEditBox(x, y, w, h, bg, border, text_ptr, tc, cursor_pos, cursor_vis)
@@ -688,6 +850,14 @@ DrawGadget:
     lea 40(sp),sp
     bra .dg_done
 
+; --- ComboBox dispatch (GADGET_TYPE_COMBOBOX = 3) ---
+; DrawComboBox(gadget_ptr) -> selected index or -1.
+.dg_combobox:
+    move.l a0,-(sp)                ; arg1 = gadget_ptr
+    jsr DrawComboBox
+    lea 4(sp),sp
+    bra .dg_done
+
 .dg_dispatch:
     ; Push all 8 args (identical layout for DrawMsgBox and DrawButton)
     moveq #0,d1
@@ -731,7 +901,6 @@ DrawGadget:
     lea 32(sp),sp
 
 .dg_done:
-    moveq #0,d0
     movem.l (sp)+,d1/a0
     unlk a6
     rts
@@ -840,9 +1009,23 @@ DrawButton:
     ; ---- 9. Render label one char at a time ----
     move.w d1,gfx_text_cursor_x
     move.w d2,gfx_text_cursor_y
+
+    ; Clamp by remaining screen columns from cx (40 lores/HAM, 80 hires)
+    moveq #40,d3
+    move.w gfx_current_mode,d0
+    cmp.w #1,d0
+    bne .dbt_cols_mode_ok
+    moveq #80,d3
+.dbt_cols_mode_ok:
+    sub.l d1,d3
+    tst.l d3
+    ble .dbt_done
+
     move.l 32(a6),a0                ; reset to label start
     move.l 36(a6),d5                ; d5 = tcolor (constant)
 .dbt_draw:
+    tst.l d3
+    beq .dbt_done
     moveq #0,d0
     move.b (a0)+,d0                 ; d0 = next ASCII char; NUL = stop
     tst.b d0
@@ -852,11 +1035,261 @@ DrawButton:
     move.w gfx_text_cursor_x,d4
     addq.w #1,d4
     move.w d4,gfx_text_cursor_x
+    subq.l #1,d3
     bra .dbt_draw
 
 .dbt_done:
     moveq #0,d0
     movem.l (sp)+,d1-d5/a0
+    unlk a6
+    rts
+
+
+; ============================================================
+; DrawComboBox(gadget_ptr) -> int
+;   8(a6) = gadget_ptr - pointer to COMBOBOX struct (see gui.i)
+;
+; COMBOBOX string format (offset 12):
+;   "Item 1;Item 2;Item 3",0
+;
+; Behavior:
+;   - Draws frame and visible rows within combobox bounds.
+;   - Parses semicolon-separated entries until NUL or visible row limit.
+;   - Truncates each row text to window width in char units.
+;   - Highlights currently selected row.
+;   - On click edge inside combobox: selects clicked row.
+;   - Returns current selected index in d0 (zero-based), or -1 if none.
+; ============================================================
+DrawComboBox:
+    link a6,#-12                  ; -4 unused, -8 click_row, -12 new_selected
+    movem.l d1-d7/a0-a4,-(sp)
+
+    move.l 8(a6),a4               ; a4 = combobox_ptr
+
+    ; Load signed coordinates once (selection state is persistent in struct)
+    move.w 0(a4),d1               ; x
+    ext.l d1
+    move.w 2(a4),d2               ; y
+    ext.l d2
+    tst.l d2
+    blt .dcb_return_state         ; off-screen top not supported by this simple renderer
+
+    ; Draw frame: DrawBox(x, y, w, h, bg, border)
+    moveq #0,d0
+    move.w 10(a4),d0              ; border
+    move.l d0,-(sp)
+    moveq #0,d0
+    move.w 8(a4),d0               ; bg
+    move.l d0,-(sp)
+    moveq #0,d0
+    move.w 6(a4),d0               ; h
+    move.l d0,-(sp)
+    moveq #0,d0
+    move.w 4(a4),d0               ; w
+    move.l d0,-(sp)
+    move.l d2,-(sp)               ; y
+    move.l d1,-(sp)               ; x
+    jsr DrawBox
+    lea 24(sp),sp
+
+    ; visible_rows = min((h-2)/8, (256-(y+1))/8)
+    moveq #0,d7
+    move.w 6(a4),d7               ; h
+    subq.l #2,d7
+    ble .dcb_return_state
+    lsr.l #3,d7                   ; rows by box height
+    tst.l d7
+    ble .dcb_return_state
+
+    move.l d2,d6
+    addq.l #1,d6                  ; first row y pixel
+    cmp.l #256,d6
+    bge .dcb_return_state
+
+    move.l #256,d0
+    sub.l d6,d0                   ; pixels until screen bottom
+    ble .dcb_return_state
+    lsr.l #3,d0                   ; rows by screen height
+    cmp.l d0,d7
+    ble .dcb_rows_ok
+    move.l d0,d7
+.dcb_rows_ok:
+    tst.l d7
+    ble .dcb_return_state
+
+    ; max_cols = max(0, (w-16)/8)
+    moveq #0,d5
+    move.w 4(a4),d5               ; w
+    sub.l #16,d5
+    ble .dcb_cols_zero
+    lsr.l #3,d5
+    bra .dcb_cols_done
+.dcb_cols_zero:
+    clr.l d5
+.dcb_cols_done:
+
+    ; click_row = -1 by default
+    moveq #-1,d0
+    move.l d0,-8(a6)
+
+    ; If click edge happened inside combobox rect, compute clicked row index.
+    tst.w gui_lbtn_edge
+    beq .dcb_click_done
+
+    move.w gui_abs_mouse_x,d3
+    ext.l d3                      ; mx
+    cmp.l d1,d3
+    blt .dcb_click_done
+    moveq #0,d0
+    move.w 4(a4),d0               ; w
+    add.l d1,d0
+    cmp.l d0,d3
+    bge .dcb_click_done
+
+    move.w gui_abs_mouse_y,d3
+    ext.l d3                      ; my
+    cmp.l d2,d3
+    blt .dcb_click_done
+    moveq #0,d0
+    move.w 6(a4),d0               ; h
+    add.l d2,d0
+    cmp.l d0,d3
+    bge .dcb_click_done
+
+    sub.l d6,d3                   ; my - first_row_y
+    blt .dcb_click_done
+    lsr.l #3,d3                   ; clicked row within content area
+    cmp.l d7,d3
+    bge .dcb_click_done
+    move.l d3,-8(a6)
+
+.dcb_click_done:
+    ; new_selected starts as current selected
+    move.w 20(a4),d0              ; COMBOBOX_SELECTED
+    ext.l d0
+    move.l d0,-12(a6)
+
+    ; Iterate visible rows and semicolon-separated entries
+    move.l 12(a4),a0              ; COMBOBOX_TEXT list pointer
+    moveq #0,d4                   ; row/item index
+
+.dcb_row_loop:
+    cmp.l d7,d4
+    bge .dcb_finish
+    tst.b (a0)
+    beq .dcb_finish
+
+    ; Apply click selection before coloring so highlight is immediate.
+    move.l -8(a6),d0
+    cmp.l d4,d0
+    bne .dcb_keep_sel
+    move.l d4,-12(a6)
+.dcb_keep_sel:
+
+    ; Select row colors
+    moveq #0,d1
+    move.w 8(a4),d1               ; normal bg
+    moveq #0,d2
+    move.w 16(a4),d2              ; normal text color
+    move.l -12(a6),d0
+    cmp.l d4,d0
+    bne .dcb_colors_ready
+    moveq #0,d1
+    move.w 22(a4),d1              ; selected bg
+    moveq #0,d2
+    move.w 24(a4),d2              ; selected text color
+.dcb_colors_ready:
+
+    ; Fill row interior strip: FillRect(x+1, row_y, w-2, 8, row_bg)
+    moveq #0,d3
+    move.w 4(a4),d3               ; w
+    subq.l #2,d3
+    ble .dcb_skip_row_fill
+    move.l d1,-(sp)               ; color
+    move.l #8,-(sp)               ; h
+    move.l d3,-(sp)               ; w-2
+    move.l d6,-(sp)               ; row_y
+    move.w 0(a4),d0
+    ext.l d0
+    addq.l #1,d0
+    move.l d0,-(sp)               ; x+1
+    jsr FillRect
+    lea 20(sp),sp
+.dcb_skip_row_fill:
+
+    ; Draw row text (horizontal), truncated to max_cols chars
+    tst.l d5
+    beq .dcb_skip_draw
+    move.w 0(a4),d0
+    ext.l d0
+    lsr.l #3,d0
+    addq.l #1,d0
+    move.w d0,gfx_text_cursor_x
+
+    move.l d5,d3                    ; remaining cols by widget width
+    moveq #40,d1
+    move.w gfx_current_mode,d0
+    cmp.w #1,d0
+    bne .dcb_cols_mode_ok
+    moveq #80,d1
+.dcb_cols_mode_ok:
+    move.w 0(a4),d0
+    ext.l d0
+    lsr.l #3,d0
+    addq.l #1,d0                    ; d0 = cx
+    sub.l d0,d1                     ; remaining screen columns from cx
+    tst.l d1
+    ble .dcb_skip_draw
+    cmp.l d1,d3
+    ble .dcb_cols_ok
+    move.l d1,d3
+.dcb_cols_ok:
+
+    move.l d6,d0
+    lsr.l #3,d0
+    move.w d0,gfx_text_cursor_y
+.dcb_text_loop:
+    tst.l d3
+    beq .dcb_skip_draw
+    moveq #0,d0
+    move.b (a0),d0                ; peek char
+    beq .dcb_skip_draw
+    cmp.b #';',d0                 ; token delimiter
+    beq .dcb_skip_draw
+    move.l d2,d1
+    jsr _DrawChar
+    addq.w #1,gfx_text_cursor_x
+    addq.l #1,a0
+    subq.l #1,d3
+    bra .dcb_text_loop
+
+.dcb_skip_draw:
+    ; Skip remaining bytes of this token until ';' or NUL
+.dcb_seek_end:
+    moveq #0,d0
+    move.b (a0),d0
+    beq .dcb_token_done
+    cmp.b #';',d0
+    beq .dcb_token_delim
+    addq.l #1,a0
+    bra .dcb_seek_end
+.dcb_token_delim:
+    addq.l #1,a0                  ; move to next token start
+.dcb_token_done:
+
+.dcb_next_row:
+    addq.l #1,d4
+    add.l #8,d6                   ; next row y
+    bra .dcb_row_loop
+
+.dcb_finish:
+.dcb_store_and_return:
+    move.w -12(a6),20(a4)         ; persist COMBOBOX_SELECTED
+
+.dcb_return_state:
+    move.w 20(a4),d0
+    ext.l d0
+    movem.l (sp)+,d1-d7/a0-a4
     unlk a6
     rts
 
@@ -937,6 +1370,23 @@ DrawEditBox:
     lsr.l #3,d0                    ; >> 3
     move.w d0,d6                   ; d6 = cy (saved)
     move.w d0,gfx_text_cursor_y
+
+    ; Clamp visible_cols by remaining screen columns from cx_start.
+    moveq #40,d0
+    move.w gfx_current_mode,d1
+    cmp.w #1,d1
+    bne .deb_cols_mode_ok
+    moveq #80,d0
+.deb_cols_mode_ok:
+    moveq #0,d1
+    move.w d7,d1                   ; cx_start
+    sub.l d1,d0                    ; remaining columns on screen
+    tst.l d0
+    ble .deb_exit
+    cmp.l d0,-8(a6)
+    ble .deb_cols_ok
+    move.l d0,-8(a6)
+.deb_cols_ok:
 
     move.l 36(a6),d5               ; d5 = tc (text colour, constant)
 
