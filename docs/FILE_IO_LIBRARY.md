@@ -25,6 +25,17 @@ Use:
 
 This include provides constants and `extern func` declarations for all exported symbols.
 
+Key constants:
+
+- `DOS_MODE_READWRITE = 1004`
+- `DOS_MODE_OLDFILE = 1005`
+- `DOS_MODE_NEWFILE = 1006`
+- `DOS_OFFSET_BEGINNING = -1`
+- `DOS_OFFSET_CURRENT = 0`
+- `DOS_OFFSET_END = 1`
+- `DOS_SHARED_LOCK = -2`
+- `DOS_EXCLUSIVE_LOCK = -1`
+
 ## API reference
 
 ### `FileIoInit() -> int`
@@ -87,6 +98,49 @@ Calls DOS `Seek()`.
 - Returns previous file position on success.
 - Returns `-1` on failure.
 
+### `FileDelete(path: ptr) -> int`
+
+Calls DOS `DeleteFile()` style entry point.
+
+- Returns `DOSTRUE` (`-1`) on success.
+- Returns `DOSFALSE` (`0`) on failure.
+
+### `FileRename(old_path: ptr, new_path: ptr) -> int`
+
+Calls DOS `Rename()`.
+
+- Returns `DOSTRUE` (`-1`) on success.
+- Returns `DOSFALSE` (`0`) on failure.
+
+### `FileLock(path: ptr, mode: int) -> int`
+
+Calls DOS `Lock()`.
+
+- `mode`: `DOS_SHARED_LOCK` or `DOS_EXCLUSIVE_LOCK`.
+- Returns lock BPTR on success, `0` on failure.
+
+### `FileUnLock(lock: int) -> void`
+
+Calls DOS `UnLock()` to release a previously acquired lock.
+
+### `FileExamine(lock: int, fib: ptr) -> int`
+
+Calls DOS `Examine(lock, fib)`.
+
+- Returns `DOSTRUE` (`-1`) on success.
+- Returns `DOSFALSE` (`0`) on failure.
+- `fib` must point to a valid DOS FileInfoBlock buffer.
+
 ## Build linkage
 
 When assembling/linking a HAS program that uses these functions, include `lib/fileio.s` in your build alongside other used libraries.
+
+For the included demo, use the helper script:
+
+```bash
+./scripts/build_fileio_demo.sh
+```
+
+## Runtime test status
+
+Musashi-based runtime coverage for this library is planned, but runtime automation remains pending while Musashi integration is still incomplete in this workspace.

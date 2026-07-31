@@ -23,6 +23,11 @@
 ;   FileRead(handle, buf, len) -> int   ; bytes read or -1
 ;   FileWrite(handle, buf, len) -> int  ; bytes written or -1
 ;   FileSeek(handle, pos, mode) -> int  ; old pos or -1
+;   FileDelete(path) -> int      ; DOSTRUE(-1)/DOSFALSE(0)
+;   FileRename(old_path, new_path) -> int ; DOSTRUE(-1)/DOSFALSE(0)
+;   FileLock(path, mode) -> int  ; lock BPTR or 0
+;   FileUnLock(lock) -> void
+;   FileExamine(lock, fib) -> int ; DOSTRUE(-1)/DOSFALSE(0)
 ;
 ; =============================================================================
 
@@ -36,6 +41,11 @@ FILEIO_DOS_LVO_CLOSE     EQU -36
 FILEIO_DOS_LVO_READ      EQU -42
 FILEIO_DOS_LVO_WRITE     EQU -48
 FILEIO_DOS_LVO_SEEK      EQU -66
+FILEIO_DOS_LVO_DELETE    EQU -72
+FILEIO_DOS_LVO_RENAME    EQU -78
+FILEIO_DOS_LVO_LOCK      EQU -84
+FILEIO_DOS_LVO_UNLOCK    EQU -90
+FILEIO_DOS_LVO_EXAMINE   EQU -102
 FILEIO_DOS_LVO_IOERR     EQU -132
 
 fileio_dos_name:
@@ -55,6 +65,11 @@ fileio_dos_base:
     XDEF FileRead
     XDEF FileWrite
     XDEF FileSeek
+    XDEF FileDelete
+    XDEF FileRename
+    XDEF FileLock
+    XDEF FileUnLock
+    XDEF FileExamine
 
 ; -----------------------------------------------------------------------------
 ; Function: FileIoInit
@@ -264,7 +279,7 @@ FileWrite:
 ; Input: 8(a6)=handle, 12(a6)=position, 16(a6)=mode
 ; Output: d0=previous file position or -1 on failure
 ; Description: Seeks in file using dos.library Seek().
-; Notes: mode is one of OFFSET_BEGINNING(0), OFFSET_CURRENT(1), OFFSET_END(-1).
+; Notes: mode is one of OFFSET_BEGINNING(-1), OFFSET_CURRENT(0), OFFSET_END(1).
 ; -----------------------------------------------------------------------------
 FileSeek:
     link a6,#0
@@ -283,6 +298,145 @@ FileSeek:
 
 .no_dos:
     moveq #-1,d0
+
+.done:
+    movem.l (sp)+,d1-d3/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: FileDelete
+; Input: 8(a6)=path_ptr
+; Output: d0=DOSTRUE(-1) or DOSFALSE(0)
+; Description: Deletes a file by path.
+; Notes: Requires FileIoInit() success before use.
+; -----------------------------------------------------------------------------
+FileDelete:
+    link a6,#0
+    movem.l d1-d3/a0-a6,-(sp)
+
+    move.l fileio_dos_base,d0
+    tst.l d0
+    beq .no_dos
+
+    move.l 8(a6),d1
+    move.l d0,a6
+    jsr FILEIO_DOS_LVO_DELETE(a6)
+    bra .done
+
+.no_dos:
+    moveq #0,d0
+
+.done:
+    movem.l (sp)+,d1-d3/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: FileRename
+; Input: 8(a6)=old_path_ptr, 12(a6)=new_path_ptr
+; Output: d0=DOSTRUE(-1) or DOSFALSE(0)
+; Description: Renames or moves a file path.
+; Notes: Requires FileIoInit() success before use.
+; -----------------------------------------------------------------------------
+FileRename:
+    link a6,#0
+    movem.l d1-d3/a0-a6,-(sp)
+
+    move.l fileio_dos_base,d0
+    tst.l d0
+    beq .no_dos
+
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l d0,a6
+    jsr FILEIO_DOS_LVO_RENAME(a6)
+    bra .done
+
+.no_dos:
+    moveq #0,d0
+
+.done:
+    movem.l (sp)+,d1-d3/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: FileLock
+; Input: 8(a6)=path_ptr, 12(a6)=mode
+; Output: d0=lock BPTR or 0
+; Description: Acquires a file lock.
+; Notes: mode is DOS_SHARED_LOCK(-2) or DOS_EXCLUSIVE_LOCK(-1).
+; -----------------------------------------------------------------------------
+FileLock:
+    link a6,#0
+    movem.l d1-d3/a0-a6,-(sp)
+
+    move.l fileio_dos_base,d0
+    tst.l d0
+    beq .no_dos
+
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l d0,a6
+    jsr FILEIO_DOS_LVO_LOCK(a6)
+    bra .done
+
+.no_dos:
+    moveq #0,d0
+
+.done:
+    movem.l (sp)+,d1-d3/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: FileUnLock
+; Input: 8(a6)=lock BPTR
+; Output: none
+; Description: Releases a lock obtained via FileLock.
+; Notes: Requires FileIoInit() success before use.
+; -----------------------------------------------------------------------------
+FileUnLock:
+    link a6,#0
+    movem.l d1-d3/a0-a6,-(sp)
+
+    move.l fileio_dos_base,d0
+    tst.l d0
+    beq .done
+
+    move.l 8(a6),d1
+    move.l d0,a6
+    jsr FILEIO_DOS_LVO_UNLOCK(a6)
+
+.done:
+    movem.l (sp)+,d1-d3/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: FileExamine
+; Input: 8(a6)=lock BPTR, 12(a6)=fib_ptr
+; Output: d0=DOSTRUE(-1) or DOSFALSE(0)
+; Description: Calls Examine(lock, fib).
+; Notes: fib_ptr must point to a valid FileInfoBlock.
+; -----------------------------------------------------------------------------
+FileExamine:
+    link a6,#0
+    movem.l d1-d3/a0-a6,-(sp)
+
+    move.l fileio_dos_base,d0
+    tst.l d0
+    beq .no_dos
+
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l d0,a6
+    jsr FILEIO_DOS_LVO_EXAMINE(a6)
+    bra .done
+
+.no_dos:
+    moveq #0,d0
 
 .done:
     movem.l (sp)+,d1-d3/a0-a6
