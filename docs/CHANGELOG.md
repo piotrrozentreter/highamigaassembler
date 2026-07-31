@@ -15,6 +15,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Added compiler regression example for missing-file `IoErr` flow: `examples/tests/compiler/fileio_missing_file_ioerr_test.has`.
   - Corrected seek constants to canonical DOS values (`OFFSET_BEGINNING=-1`, `OFFSET_CURRENT=0`, `OFFSET_END=1`).
   - Added helper build script: `scripts/build_fileio_demo.sh`.
+  - Added loading-UI hook pattern in `examples/fileio_demo.has` (example-level, not library-level) and documented the flow in `docs/FILE_IO_LIBRARY.md`.
   - Added dedicated API guide: `docs/FILE_IO_LIBRARY.md` and linked it from `docs/LIBRARY_REFERENCE.md`.
   - Intended runtime pattern is explicit: `ReleaseSystem()` before DOS I/O, `TakeSystem()` after DOS I/O.
 

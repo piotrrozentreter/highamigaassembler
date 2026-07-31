@@ -27,6 +27,10 @@ code demo:
         var readn: int;
         var ioerr: int = 0;
 
+        // Optional UI pattern: draw a loading marker while still in game context.
+        // Keep renderer-specific code out of fileio.s and place it in game code.
+        call ShowLoadingUi();
+
         // Leave takeover mode before any DOS interaction.
         call ReleaseSystem();
 
@@ -68,11 +72,24 @@ code demo:
         // Resume takeover mode for game-side hardware access.
         call TakeSystem();
 
+        // Hide loading marker after returning to game/hardware context.
+        call HideLoadingUi();
+
         if (readn != DEMO_LEN) {
             ioerr = FileIoErr();
             return -5;
         }
 
+        return 0;
+    }
+
+    // Example hook points for screen feedback during file I/O.
+    // In a real game replace these with your rendering/UI calls.
+    proc ShowLoadingUi() -> int {
+        return 0;
+    }
+
+    proc HideLoadingUi() -> int {
         return 0;
     }
 

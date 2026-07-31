@@ -13,6 +13,12 @@ Safe pattern:
 3. `FileIoDone()`
 4. `TakeSystem()`
 
+For screen feedback, keep it at example/game level (not inside `lib/fileio.s`):
+
+1. Draw "Loading..." (or set a loading flag) while takeover rendering is active.
+2. Call `ReleaseSystem()` and perform DOS I/O.
+3. Call `TakeSystem()` and clear/update the loading marker.
+
 See also the runtime example in `examples/fileio_demo.has`.
 
 ## Include declarations
