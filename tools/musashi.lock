@@ -1,6 +1,6 @@
 # Musashi source pin for HAS runtime emulation tests
 # Update using: ./scripts/update_musashi_pin.sh <git-ref>
 MUSASHI_REPO=https://github.com/kstenerud/Musashi.git
-MUSASHI_REF=313ebf1ad8f0f9dfc0b5a596f9e9d97f317f93ec
-MUSASHI_PINNED_ON=2026-07-28
-MUSASHI_NOTES=Pinned commit for Linux runtime test reproducibility.
+MUSASHI_REF=313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd
+MUSASHI_PINNED_ON=2026-08-01
+MUSASHI_NOTES=Pinned to upstream Musashi master merge commit for reproducible Linux runtime tests.

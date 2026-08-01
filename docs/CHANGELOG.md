@@ -6,6 +6,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Musashi runtime user guide** for Linux-only virtual CPU execution testing:
+  - Added `docs/MUSASHI_USER_GUIDE.md` with quickstart, prerequisites,
+    expected outputs, troubleshooting, and MMIO PASS/FAIL runtime test authoring.
+  - Updated Musashi documentation discoverability links in `README.md` and
+    `docs/MUSASHI_RUNTIME_TESTING.md`.
+
 - **Debug logging library documentation** `docs/DEBUG_LIBRARY.md`:
   - Full API reference for `lib/debug.s`: `DebugSetEnabled`, `DebugClear`, `DebugLogStr`, `DebugLogStrRaw`, `DebugLogHex`, `DebugLogInt`, `DebugFlushToDos`.
   - Explains the buffered design and why OS calls cannot be made during OS takeover.
