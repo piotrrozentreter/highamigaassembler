@@ -9,6 +9,7 @@ pixel row: plane0, plane1, plane2, plane3, plane4).
 from pathlib import Path
 import os
 from typing import Optional
+import re
 try:
     from PIL import Image
 except Exception:
@@ -28,7 +29,149 @@ def _ensure_dir(p: Path):
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def export_tileset_asm(png_path: str, out_label: str, tile_width: int = 8, tile_height: int = 8, planes: int = 5, use_dither: bool = False) -> str:
+def _rgb4_word_to_tuple(rgb4_word: int):
+    """Convert 12-bit Amiga RGB4 word ($RGB) to a (r,g,b) tuple in 0..15."""
+    r = (rgb4_word >> 8) & 0xF
+    g = (rgb4_word >> 4) & 0xF
+    b = rgb4_word & 0xF
+    return (r, g, b)
+
+
+def _parse_first_palette_from_asm(asm_path: str, palette_label: Optional[str] = None):
+    """
+    Parse first *_palette block from an assembler include.
+
+    Expected format:
+      label_palette:
+          DC.W $RGB ; color N
+          ...
+    """
+    p = Path(asm_path)
+    if not p.exists():
+        raise FileNotFoundError(asm_path)
+
+    text = p.read_text(encoding='utf-8')
+
+    if palette_label:
+        wanted = palette_label[:-1] if palette_label.endswith(':') else palette_label
+        pattern = rf'^({re.escape(wanted)}):\s*$'
+        palette_label_match = re.search(pattern, text, flags=re.MULTILINE)
+        if not palette_label_match:
+            raise ValueError(f"Palette label '{wanted}' not found in {asm_path}")
+    else:
+        palette_label_match = re.search(r'^([A-Za-z_][A-Za-z0-9_]*_palette):\s*$', text, flags=re.MULTILINE)
+    if not palette_label_match:
+        raise ValueError(f"No *_palette label found in {asm_path}")
+
+    start = palette_label_match.end()
+    following = text[start:]
+
+    values = []
+    for line in following.splitlines():
+        m = re.match(r'\s*DC\.W\s+\$([0-9A-Fa-f]{1,3})\b', line)
+        if m:
+            values.append(int(m.group(1), 16) & 0xFFF)
+            continue
+        if values:
+            break
+        if line.strip() == '':
+            continue
+        # Skip comment-only lines before first DC.W.
+        if line.lstrip().startswith(';'):
+            continue
+        # Any other content before palette values means malformed block.
+        raise ValueError(f"Palette label found in {asm_path}, but no DC.W palette values followed")
+
+    if not values:
+        raise ValueError(f"No palette DC.W values found in {asm_path}")
+
+    return values
+
+
+def _build_palette_index_remap(src_rgb4_words, dst_rgb4_words, strict_exact_match: bool = False, used_src_indices=None):
+    """
+    Build index remap table from source palette indices to destination palette indices.
+
+        Strategy:
+        - Prefer exact RGB4 word matches.
+        - For missing colors, either:
+            - strict mode: raise ValueError (used source indices only), or
+            - non-strict mode: fall back to nearest RGB4 color (Manhattan distance in 4-bit RGB).
+        - Keep source color 0 mapped to destination color 0 when both are zero if possible.
+    """
+    if not dst_rgb4_words:
+        raise ValueError("Destination palette is empty")
+
+    dst_by_word = {}
+    for i, w in enumerate(dst_rgb4_words):
+        dst_by_word.setdefault(w, []).append(i)
+
+    remap = []
+    missing_exact = []
+    used_set = set(used_src_indices) if used_src_indices is not None else None
+    for src_idx, src_word in enumerate(src_rgb4_words):
+        exact_candidates = dst_by_word.get(src_word)
+        if exact_candidates:
+            if src_idx == 0 and src_word == 0 and 0 in exact_candidates:
+                remap.append(0)
+            else:
+                remap.append(exact_candidates[0])
+            continue
+
+        if strict_exact_match and (used_set is None or src_idx in used_set):
+            missing_exact.append((src_idx, src_word))
+            remap.append(0)
+            continue
+
+        sr, sg, sb = _rgb4_word_to_tuple(src_word)
+        best_idx = 0
+        best_dist = 1_000_000
+        for dst_idx, dst_word in enumerate(dst_rgb4_words):
+            dr, dg, db = _rgb4_word_to_tuple(dst_word)
+            dist = abs(sr - dr) + abs(sg - dg) + abs(sb - db)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = dst_idx
+        remap.append(best_idx)
+
+    if missing_exact:
+        missing_desc = ', '.join([f"idx {idx}=$${word:03X}".replace('$$', '$') for idx, word in missing_exact])
+        raise ValueError(
+            "Strict palette match failed: source colors used by tiles are missing in target palette: "
+            f"{missing_desc}"
+        )
+
+    return remap
+
+
+def _remap_indices_by_row(indices_by_row, remap):
+    """Apply palette index remap to quantized image rows."""
+    max_idx = len(remap) - 1
+    remapped = []
+    for row in indices_by_row:
+        new_row = []
+        for idx in row:
+            if idx < 0:
+                new_row.append(0)
+            elif idx > max_idx:
+                new_row.append(remap[max_idx])
+            else:
+                new_row.append(remap[idx])
+        remapped.append(new_row)
+    return remapped
+
+
+def export_tileset_asm(
+    png_path: str,
+    out_label: str,
+    tile_width: int = 8,
+    tile_height: int = 8,
+    planes: int = 5,
+    use_dither: bool = False,
+    match_bob_palette_from_asm: Optional[str] = None,
+    match_bob_palette_label: Optional[str] = None,
+    strict_palette_match: bool = False,
+) -> str:
     """
     Export PNG tile strip or grid to tile-by-tile row-interleaved format.
     
@@ -61,6 +204,37 @@ def export_tileset_asm(png_path: str, out_label: str, tile_width: int = 8, tile_
     indices_by_row = quant['indices_by_row']
     final_palette = quant['final_palette']
     max_colors = quant.get('max_colors', 2 ** planes)
+
+    if strict_palette_match and not match_bob_palette_from_asm:
+        raise ValueError("--strict-palette-match requires --match-bob-palette")
+
+    if match_bob_palette_from_asm:
+        # Convert generated palette to RGB4 words.
+        src_rgb4_words = []
+        palette_entry_count = min(max_colors, len(final_palette) // 3)
+        for i in range(palette_entry_count):
+            r = int(round(final_palette[i * 3] / 17.0))
+            g = int(round(final_palette[i * 3 + 1] / 17.0))
+            b = int(round(final_palette[i * 3 + 2] / 17.0))
+            src_rgb4_words.append((r << 8) | (g << 4) | b)
+
+        used_src_indices = set()
+        for row in indices_by_row:
+            for idx in row:
+                if idx >= 0:
+                    used_src_indices.add(idx)
+
+        dst_rgb4_words = _parse_first_palette_from_asm(
+            match_bob_palette_from_asm,
+            palette_label=match_bob_palette_label,
+        )
+        remap = _build_palette_index_remap(
+            src_rgb4_words,
+            dst_rgb4_words,
+            strict_exact_match=strict_palette_match,
+            used_src_indices=used_src_indices,
+        )
+        indices_by_row = _remap_indices_by_row(indices_by_row, remap)
     
     if img_w % tile_width != 0:
         raise ValueError(f"Image width {img_w} must be multiple of tile_width {tile_width}")
@@ -139,7 +313,19 @@ def export_tileset_asm(png_path: str, out_label: str, tile_width: int = 8, tile_
     return '\n'.join(lines)
 
 
-def import_tileset_to_include(png_path: str, label_prefix: str = 'tileset', tile_width: int = 8, tile_height: int = 8, planes: int = 5, force: bool = False, use_dither: bool = False, out_dir: Optional[str] = None):
+def import_tileset_to_include(
+    png_path: str,
+    label_prefix: str = 'tileset',
+    tile_width: int = 8,
+    tile_height: int = 8,
+    planes: int = 5,
+    force: bool = False,
+    use_dither: bool = False,
+    out_dir: Optional[str] = None,
+    match_bob_palette_from_asm: Optional[str] = None,
+    match_bob_palette_label: Optional[str] = None,
+    strict_palette_match: bool = False,
+):
     """
     Import PNG tileset and generate assembly include file.
     
@@ -197,7 +383,17 @@ def import_tileset_to_include(png_path: str, label_prefix: str = 'tileset', tile
     num_tiles_y = img_h // tile_height if img_h % tile_height == 0 else 0
     
     if regenerate or force:
-        asm = export_tileset_asm(str(p), label, tile_width=tile_width, tile_height=tile_height, planes=planes, use_dither=use_dither)
+        asm = export_tileset_asm(
+            str(p),
+            label,
+            tile_width=tile_width,
+            tile_height=tile_height,
+            planes=planes,
+            use_dither=use_dither,
+            match_bob_palette_from_asm=match_bob_palette_from_asm,
+            match_bob_palette_label=match_bob_palette_label,
+            strict_palette_match=strict_palette_match,
+        )
         with open(out_file, 'w', encoding='utf-8') as f:
             f.write('; Auto-generated tileset include\n')
             f.write(asm)
@@ -237,6 +433,9 @@ if __name__ == '__main__':
     parser.add_argument('--label-prefix', type=str, default='tileset', help='Label prefix for generated symbols')
     parser.add_argument('--dither', action='store_true', help='Enable Floyd–Steinberg dithering')
     parser.add_argument('--outdir', type=str, default=None, help='Directory to write generated include files')
+    parser.add_argument('--match-bob-palette', type=str, default=None, help='Path to BOB ASM include used as palette index target')
+    parser.add_argument('--match-bob-palette-label', type=str, default=None, help='Specific palette label in BOB ASM (for example: jetpacspritesheet_flyl_001_palette)')
+    parser.add_argument('--strict-palette-match', action='store_true', help='Fail if a used tile color has no exact match in target BOB palette')
     parser.add_argument('--force', action='store_true', help='Force regeneration')
     args = parser.parse_args()
     
@@ -248,6 +447,9 @@ if __name__ == '__main__':
         planes=args.planes,
         force=args.force,
         use_dither=args.dither,
-        out_dir=args.outdir
+        out_dir=args.outdir,
+        match_bob_palette_from_asm=args.match_bob_palette,
+        match_bob_palette_label=args.match_bob_palette_label,
+        strict_palette_match=args.strict_palette_match,
     )
     print(f"Generated: {result[0]} with label {result[1]}")
