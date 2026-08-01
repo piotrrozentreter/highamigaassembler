@@ -130,9 +130,9 @@ python -m hasc.cli hello.has -o hello.s
 - **[docs/SHIFT_OPERATORS.md](docs/SHIFT_OPERATORS.md)** - Shift operation details
 - **[docs/PYTHON_INTEGRATION.md](docs/PYTHON_INTEGRATION.md)** - Using Python for code generation
 - **[docs/PYTHON_GENERATION_TUTORIAL.md](docs/PYTHON_GENERATION_TUTORIAL.md)** - Step-by-step Python integration
-- **[docs/MUSASHI_RUNTIME_TESTING.md](docs/MUSASHI_RUNTIME_TESTING.md)** - Linux-only runtime tests with Musashi m68k emulation
+- **[docs/MUSASHI_USER_GUIDE.md](docs/MUSASHI_USER_GUIDE.md)** - User guide: test generated code on a virtual m68k CPU (Linux-only)
+- **[docs/MUSASHI_RUNTIME_TESTING.md](docs/MUSASHI_RUNTIME_TESTING.md)** - Technical Musashi runtime integration overview
 - **[docs/TERMINOLOGY.md](docs/TERMINOLOGY.md)** - Language and architecture terminology
-- **[MUSASHI_LINUX_HANDOFF.md](MUSASHI_LINUX_HANDOFF.md)** - Linux/WSL resume checklist for Musashi runtime workflow
 
 ### Implementation Details
 
@@ -282,20 +282,24 @@ python -m hasc.cli program.has -o program.s
 ./scripts/tests/test_vbcc_interop.ps1
 ```
 
-### Run Selected Runtime Tests With Musashi (Linux only)
+### Musashi Quickstart (Linux only)
 
 ```bash
-# Linux/WSL only
+# Linux/WSL only: prepare pinned Musashi source, build runner, run runtime tests
+./scripts/setup_musashi.sh
+./scripts/build_musashi_runner.sh
 ./scripts/test_runtime_musashi.sh
 
-# Optional pytest wrapper
+# Optional pytest wrappers
 python -m pytest tests/test_runtime_musashi.py -v
+python -m pytest -m "runtime and musashi" -v
 ```
 
 This runtime tier is intentionally optional and focused on selected execution
 tests that need CPU emulation. See
-`docs/MUSASHI_RUNTIME_TESTING.md` for the MMIO pass/fail protocol and the
-pinned-update workflow.
+`docs/MUSASHI_USER_GUIDE.md` for Linux quickstart, prerequisites, expected
+outputs, troubleshooting, and adding MMIO PASS/FAIL tests. For integration
+details and pin-management internals, see `docs/MUSASHI_RUNTIME_TESTING.md`.
 
 ## 🏗️ Project Structure
 

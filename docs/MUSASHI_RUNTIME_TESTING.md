@@ -3,6 +3,9 @@
 This document describes an optional runtime-test tier for HAS using the
 Musashi Motorola 68000 CPU emulator core.
 
+For day-to-day usage, see `docs/MUSASHI_USER_GUIDE.md`.
+This file focuses on technical integration details.
+
 ## Scope
 
 - Focus: selected runtime tests that require real m68k instruction execution.
