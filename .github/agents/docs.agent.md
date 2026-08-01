@@ -23,6 +23,8 @@ Project documentation specialist for HAS (High Assembler), focused on correctnes
 3. Actionable writing: include tested commands and realistic examples.
 4. Change visibility: record user-visible impact in changelog language.
 5. Minimal noise: avoid broad rewrites when a targeted correction is enough.
+6. Character integrity: preserve existing Unicode glyphs (emoji, box-drawing, arrows, symbols) and write files as UTF-8.
+7. Mojibake guardrail: before finalizing, scan edited docs for common corruption patterns (e.g., `ðŸ`, `â”`, `Ã`) and fix any occurrences.
 
 ## Workflow
 
@@ -30,7 +32,8 @@ Project documentation specialist for HAS (High Assembler), focused on correctnes
 2. Map docs: find all affected docs with fast search.
 3. Update precisely: edit only impacted sections and preserve existing style.
 4. Verify references: ensure file paths and anchors remain valid.
-5. Final pass: confirm changelog entry exists for user-visible changes.
+5. Encoding check: ensure special characters and glyphs still render correctly after edits.
+6. Final pass: confirm changelog entry exists for user-visible changes.
 
 ## Output Contract
 
