@@ -450,6 +450,10 @@ class ASTBuilder(Transformer):
         # items[1] = size suffix (optional, e.g., '.b')
         # items[2] = array_dims (optional)
         # items[3] = value list (list of values from data_value_list)
+        # Lark optional groups may inject None placeholders for omitted parts
+        # (e.g., missing [SIZE_SUFFIX]); strip them to keep positional parsing stable.
+        items = [item for item in items if item is not None]
+
         name = self._val(items[0])
         size_suffix = None
         value = None
@@ -538,6 +542,7 @@ class ASTBuilder(Transformer):
 
     def data_var_uninit(self, items):
         # Uninitialized data var defaults to zero
+        items = [item for item in items if item is not None]
         name = self._val(items[0])
         size_suffix = None
         is_array = False
@@ -611,6 +616,7 @@ class ASTBuilder(Transformer):
         return ast.StructVarDecl(name=name, fields=fields, dimensions=dimensions, init_values=None, is_array=is_array, is_bss=True)
 
     def bss_var(self, items):
+        items = [item for item in items if item is not None]
         name = self._val(items[0])
         dimensions = None
         byte_count = None
@@ -717,6 +723,7 @@ class ASTBuilder(Transformer):
     
     def macro_def(self, items):
         """macro_def: "macro" CNAME "(" [macro_params] ")" "{" stmt* "}" """
+        items = [item for item in items if item is not None]
         name = self._val(items[0])
         params = []
         body_idx = 1

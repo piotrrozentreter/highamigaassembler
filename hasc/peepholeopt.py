@@ -464,6 +464,16 @@ def _optimize_branch_to_branch(lines):
                 
                 # Verify that label1 matches the actual label on line3
                 if label1 == actual_label and cond_branch in invert_map:
+                    # Keep explicit loop-continue branches intact. Rewriting
+                    #   bCC <endif>; bra <forcont/while/...>; <endif>:
+                    # into an inverted conditional removes the explicit
+                    # continue jump, which makes continue-path control flow
+                    # harder to reason about and has caused regressions.
+                    if re.match(r"^(forcont|repeatcont|dowhilecont|while)\d+$", label2):
+                        optimized.append(lines[i])
+                        i += 1
+                        continue
+
                     # Found the pattern! Replace with inverted conditional branch
                     inverted = invert_map[cond_branch]
                     

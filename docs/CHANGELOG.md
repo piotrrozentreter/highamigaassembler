@@ -27,6 +27,25 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     - `tests/test_codegen_basic.py` (`test_complex_index_store_preserves_left_index_operand`)
     - `examples/tests/compiler/index_expr_store_regression.has`
 
+- **Loop `continue` control-flow hardening in optimized assembly**:
+  - Prevented a peephole branch-inversion rewrite from collapsing explicit loop-continue jumps in patterns like `if (guard) { continue; }`.
+  - This keeps a direct unconditional branch on continue paths to the loop continuation/check label, avoiding rare fallthrough-style regressions in frame-critical update loops.
+  - Added dedicated regression tests in `tests/test_codegen_continue_regression.py` covering:
+    - single-level `for` continue guard
+    - nested `if/else` with continue
+    - continue before inline `asm`
+    - continue with subsequent array writes
+    - continue behavior in `while`, `do-while`, and `repeat` loops
+
+- **Parser optional-slot normalization for declarations and macros**:
+  - Fixed transformer handling of Lark optional placeholders so omitted optional grammar parts no longer leak `None` into AST construction.
+  - This resolves parse/codegen failures seen in array declarations without explicit size suffixes and in included macro bodies.
+  - Affected examples now compile cleanly again:
+    - `examples/tests/compiler/array_access_test.has`
+    - `examples/tests/compiler/array_comprehensive_test.has`
+    - `examples/tests/compiler/arrays_test.has`
+    - `examples/tests/compiler/include_test.has`
+
 ## [0.8] - 2026-07-31
 
 ### Added
