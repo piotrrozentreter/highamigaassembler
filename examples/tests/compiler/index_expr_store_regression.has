@@ -1,0 +1,26 @@
+// Regression test: complex index store must preserve intermediate index values.
+
+code main:
+    asm {
+        jmp test_index_expr_store
+    }
+
+    proc test_index_expr_store() -> int {
+        var pos: int = 20;
+        var digit_idx: int;
+        var rem: int = 7;
+
+        for digit_idx = 0 to 3 {
+            test_buf[pos + (3 - digit_idx)] = 48 + rem;
+        }
+
+        if (test_buf[23] != 55) { return -1; }
+        if (test_buf[22] != 55) { return -2; }
+        if (test_buf[21] != 55) { return -3; }
+        if (test_buf[20] != 55) { return -4; }
+
+        return 0;
+    }
+
+bss test_bss:
+    test_buf.b[64]

@@ -58,7 +58,38 @@ def normalize_expr(expr):
             return normalize_expr(children[0])
         return expr
     
-    # Already an AST node or primitive
+    # Recursively normalize known AST node children.
+    if isinstance(expr, ast.BinOp):
+        return ast.BinOp(
+            op=expr.op,
+            left=normalize_expr(expr.left),
+            right=normalize_expr(expr.right),
+        )
+    if isinstance(expr, ast.UnaryOp):
+        return ast.UnaryOp(op=expr.op, operand=normalize_expr(expr.operand))
+    if isinstance(expr, ast.ArrayAccess):
+        return ast.ArrayAccess(
+            name=expr.name,
+            indices=[normalize_expr(idx) for idx in expr.indices],
+        )
+    if isinstance(expr, ast.MemberAccess):
+        return ast.MemberAccess(base=normalize_expr(expr.base), field=expr.field)
+    if isinstance(expr, ast.Call):
+        return ast.Call(name=expr.name, args=[normalize_expr(arg) for arg in expr.args])
+    if isinstance(expr, ast.GetReg):
+        return expr
+    if isinstance(expr, ast.SetReg):
+        return ast.SetReg(register=expr.register, value=normalize_expr(expr.value))
+    if isinstance(expr, ast.PreIncr):
+        return ast.PreIncr(operand=normalize_expr(expr.operand))
+    if isinstance(expr, ast.PreDecr):
+        return ast.PreDecr(operand=normalize_expr(expr.operand))
+    if isinstance(expr, ast.PostIncr):
+        return ast.PostIncr(operand=normalize_expr(expr.operand))
+    if isinstance(expr, ast.PostDecr):
+        return ast.PostDecr(operand=normalize_expr(expr.operand))
+
+    # Already a leaf AST node or primitive
     return expr
 
 

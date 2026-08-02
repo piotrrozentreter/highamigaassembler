@@ -280,7 +280,45 @@ code main:
 class TestArrayOps:
     """Tests for array operations."""
     
-    # Array tests skipped - complex syntax in data section
+    def test_complex_index_store_preserves_left_index_operand(self):
+        """Complex index stores should preserve partial index values across nested rhs eval."""
+        src = """
+code main:
+    proc index_bug_regression() -> int {
+        var pos: int = 20;
+        var digit_idx: int = 1;
+        var rem: int = 7;
+
+        test_buf[pos + (3 - digit_idx)] = 48 + rem;
+        return test_buf[pos + (3 - digit_idx)];
+    }
+
+bss test_bss:
+    test_buf.b[64]
+        """
+        asm = compile_src(src)
+        body = proc_body(asm, "index_bug_regression")
+
+        # The top-level index expression must preserve d1 while evaluating (3 - digit_idx).
+        assert_contains(body, r"move\.l\s+d1,-\(a7\)\s+; preserve left operand")
+        assert_contains(body, r"move\.l\s+\(a7\)\+,d1\s+; restore left operand")
+        assert_contains(body, r"move\.b\s+d0,\(a0,d1\.l\)")
+        assert_contains(body, r"move\.b\s+\(a0,d1\.l\),d0")
+
+        # Ensure preserve/restore brackets nested index evaluation before final add/store.
+        store_anchor = body.find("lea test_buf,a0")
+        preserve_idx = body.find("move.l d1,-(a7)  ; preserve left operand", store_anchor)
+        sub_idx = body.find("sub.l d1,d2", preserve_idx)
+        restore_idx = body.find("move.l (a7)+,d1  ; restore left operand", sub_idx)
+        add_idx = body.find("add.l d2,d1", restore_idx)
+        store_idx = body.find("move.b d0,(a0,d1.l)", add_idx)
+
+        assert store_anchor != -1
+        assert preserve_idx != -1
+        assert sub_idx != -1
+        assert restore_idx != -1
+        assert add_idx != -1
+        assert store_idx != -1
 
 
 # ---------------------------------------------------------------------------

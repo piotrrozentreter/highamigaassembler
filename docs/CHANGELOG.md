@@ -18,6 +18,15 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Documents buffer limits, overflow policy, and release-build zero-cost pattern.
   - Added `debug.s` row to `docs/LIBRARY_REFERENCE.md`.
 
+### Fixed
+
+- **Codegen register-clobber fix for complex indexed array stores**:
+  - Fixed expression normalization so nested parser `Tree` nodes inside `ast.BinOp` are recursively converted before code generation.
+  - This prevents losing the left index operand in patterns like `buf[pos + (3 - digit_idx)] = value`, which could previously emit incorrect address computation.
+  - Added regression coverage:
+    - `tests/test_codegen_basic.py` (`test_complex_index_store_preserves_left_index_operand`)
+    - `examples/tests/compiler/index_expr_store_regression.has`
+
 ## [0.8] - 2026-07-31
 
 ### Added
