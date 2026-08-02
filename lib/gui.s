@@ -690,7 +690,7 @@ DrawMsgBoxCaption:
 
     ; ---- Optional caption at the top row (truncated to max_cols) ----
     move.l 32(a6),a0               ; caption_ptr
-    tst.l a0
+    cmpa.l #0,a0
     beq .dmbc_render_body
     tst.b (a0)
     beq .dmbc_render_body
@@ -1383,7 +1383,8 @@ DrawEditBox:
     sub.l d1,d0                    ; remaining columns on screen
     tst.l d0
     ble .deb_exit
-    cmp.l d0,-8(a6)
+    move.l -8(a6),d2
+    cmp.l d0,d2
     ble .deb_cols_ok
     move.l d0,-8(a6)
 .deb_cols_ok:
