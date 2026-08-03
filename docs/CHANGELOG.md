@@ -6,6 +6,15 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **DOS-free custom track loader stack** for takeover-mode games:
+  - Added runtime library `lib/trackio.s` with direct floppy hardware reads and MFM decode path (no `dos.library` calls):
+    - `TrackIoInit`, `TrackIoDone`, `TrackIoGetLastError`, `TrackIoGetFileSize`, `TrackIoReadSector`, `TrackIoReadFile`.
+    - Added pre-read size query API so game code can validate destination buffers before `TrackIoReadFile`.
+  - Added HAS declarations/constants include: `examples/includes/trackio_defs.has`.
+  - Added focused usage example: `examples/trackio_demo.has`.
+  - Added ADF container builder: `tools/create_trackio_adf.py` for generating custom data disks compatible with `TrackIoReadFile`.
+  - Added dedicated documentation: `docs/TRACKIO_LIBRARY.md` and linked it from `docs/LIBRARY_REFERENCE.md`.
+
 - **Musashi runtime user guide** for Linux-only virtual CPU execution testing:
   - Added `docs/MUSASHI_USER_GUIDE.md` with quickstart, prerequisites,
     expected outputs, troubleshooting, and MMIO PASS/FAIL runtime test authoring.
