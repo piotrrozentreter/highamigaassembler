@@ -1,0 +1,20 @@
+// HAS <-> lib/trackio.s interop declarations.
+// These APIs are designed for takeover mode (no dos.library usage).
+
+const TRACKIO_OK = 0;
+
+const TRACKIO_ERR_NOT_INIT = -1;
+const TRACKIO_ERR_BAD_LBA = -2;
+const TRACKIO_ERR_SECTOR_NOT_FOUND = -3;
+const TRACKIO_ERR_DMA_TIMEOUT = -4;
+const TRACKIO_ERR_BAD_CONTAINER = -5;
+const TRACKIO_ERR_FILE_NOT_FOUND = -6;
+const TRACKIO_ERR_DST_TOO_SMALL = -7;
+
+extern func TrackIoInit() -> int;
+extern func TrackIoDone() -> int;
+extern func TrackIoGetLastError() -> int;
+extern func TrackIoGetFileSize(file_id: int) -> int;
+
+extern func TrackIoReadSector(lba: int, dst: ptr) -> int;
+extern func TrackIoReadFile(file_id: int, dst: ptr, max_bytes: int) -> int;

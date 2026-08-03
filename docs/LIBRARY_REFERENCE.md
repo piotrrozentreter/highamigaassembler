@@ -23,6 +23,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `keyboard.s`      | Keyboard interrupt driver                 | this file                                            |
 | `takeover.s`      | Amiga OS takeover/release                 | this file                                            |
 | `fileio.s`        | AmigaDOS file I/O wrappers                | [FILE_IO_LIBRARY.md](FILE_IO_LIBRARY.md)             |
+| `trackio.s`       | DOS-free raw floppy loader                | [TRACKIO_LIBRARY.md](TRACKIO_LIBRARY.md)             |
 | `ptplayer.s`      | ProTracker 2.3B music player              | this file                                            |
 | `font8x8.s`       | 8×8 pixel bitmap font data               | used via `SetFont` in `graphics.s`                   |
 | `font8x8_2.s`     | Alternative 8×8 font data                | used via `SetFont` in `graphics.s`                   |
@@ -94,6 +95,31 @@ call TakeSystem();
 ```
 
 See [FILE_IO_LIBRARY.md](FILE_IO_LIBRARY.md) for full API details and constants.
+
+---
+
+## trackio.s — DOS-Free Track Loader
+
+Reads custom asset data directly from floppy tracks while takeover is active.
+No `dos.library` calls are used at runtime.
+
+Typical flow:
+
+```has
+#include "includes/trackio_defs.has";
+
+if (TrackIoInit() == 0) {
+    var size: int = TrackIoGetFileSize(1);
+    if (size >= 0 && size <= BUF_SIZE) {
+        var n: int = TrackIoReadFile(1, &buf, BUF_SIZE);
+    }
+    call TrackIoDone();
+}
+```
+
+Use `TrackIoGetFileSize` for bounds checks before full-file reads.
+
+See [TRACKIO_LIBRARY.md](TRACKIO_LIBRARY.md) for container format, API, and ADF build workflow.
 
 ---
 

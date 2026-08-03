@@ -1,0 +1,68 @@
+// trackio_demo.has
+// Demonstrates DOS-free custom data loading from DF0 while takeover is active.
+
+#include "includes/trackio_defs.has";
+
+const TITLE_BUF_SIZE = 32768;
+const LEVEL_BUF_SIZE = 16384;
+
+code demo:
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    public main;
+
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    proc main() -> int {
+        var readn: int;
+        var need: int;
+
+        if (TrackIoInit() != 0) {
+            return TrackIoGetLastError();
+        }
+
+        // File ids match --asset ids used in tools/create_trackio_adf.py.
+        need = TrackIoGetFileSize(1);
+        if (need < 0) {
+            call TrackIoDone();
+            return need;
+        }
+        if (need > TITLE_BUF_SIZE) {
+            call TrackIoDone();
+            return TRACKIO_ERR_DST_TOO_SMALL;
+        }
+
+        readn = TrackIoReadFile(1, &title_buf, TITLE_BUF_SIZE);
+        if (readn < 0) {
+            call TrackIoDone();
+            return readn;
+        }
+
+        need = TrackIoGetFileSize(2);
+        if (need < 0) {
+            call TrackIoDone();
+            return need;
+        }
+        if (need > LEVEL_BUF_SIZE) {
+            call TrackIoDone();
+            return TRACKIO_ERR_DST_TOO_SMALL;
+        }
+
+        readn = TrackIoReadFile(2, &level_buf, LEVEL_BUF_SIZE);
+        if (readn < 0) {
+            call TrackIoDone();
+            return readn;
+        }
+
+        call TrackIoDone();
+        return 0;
+    }
+
+bss demo_bss:
+    title_buf.b[TITLE_BUF_SIZE]
+    level_buf.b[LEVEL_BUF_SIZE]
