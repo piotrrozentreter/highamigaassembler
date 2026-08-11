@@ -50,6 +50,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
 - **Constants**: Compile-time constant evaluation
+- **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
 - **Register Locking**: `#pragma lockreg()` to protect registers from compiler allocation
 - **Dead-Code Elimination**: `--strip-unused-procs` removes unreachable internal procedures before assembly emission
@@ -170,6 +171,7 @@ The `examples/` directory contains numerous demonstrations:
 
 - `include_test.has` - Include system and reusable definitions (including macros)
 - `python_directive.has` - @python directive examples
+- `conditional_compilation_demo.has` - #ifdef/#ifndef/#else feature gating
 - `asm_comprehensive_test.has` - Inline assembly
 - `all_features_demo.has` - Combined language feature demonstration
 

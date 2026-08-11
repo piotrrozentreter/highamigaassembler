@@ -869,6 +869,27 @@ code math_safe:
 #pragma strict16arith(off);
 ```
 
+Conditional compilation directives are resolved at compile time:
+
+```has
+const USE_FAST_PATH = 1;
+
+#ifdef USE_FAST_PATH
+const MODE = 1;
+#else
+const MODE = 0;
+#endif
+
+#ifndef DEBUG_BUILD
+#warning "DEBUG_BUILD is not set";
+#endif
+```
+
+- `#ifdef NAME` is true only when `const NAME` exists and its folded value equals `1`.
+- `#ifndef NAME` is true when `NAME` is not defined.
+- `#else` selects the opposite branch within the current conditional block.
+- `#endif` closes the current conditional block.
+
 ---
 
 ## Code Execution Order
