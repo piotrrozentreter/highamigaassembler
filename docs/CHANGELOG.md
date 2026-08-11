@@ -6,6 +6,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Conditional compilation directives** `#ifdef`, `#ifndef`, `#else`, `#endif`:
+  - Added compile-time branch gating based on `const` declarations.
+  - `#ifdef NAME` is true only when `const NAME` is defined and equals `1`.
+  - `#ifndef NAME` is true when `NAME` is not defined.
+  - Supports nested conditional blocks with optional `#else` branches.
+
 - **DOS-free custom track loader stack** for takeover-mode games:
   - Added runtime library `lib/trackio.s` with direct floppy hardware reads and MFM decode path (no `dos.library` calls):
     - `TrackIoInit`, `TrackIoDone`, `TrackIoGetLastError`, `TrackIoGetFileSize`, `TrackIoReadSector`, `TrackIoReadFile`.

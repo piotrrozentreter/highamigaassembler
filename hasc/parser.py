@@ -1122,49 +1122,265 @@ setattr(ASTBuilder, 'not', ASTBuilder.not_)
 def parse(text: str, base_dir: str = None) -> ast.Module:
     import re
     import os
-    
-    # Step 0: Expand #include directives before any other preprocessing
-    # Supports lines like: #include "path/to/file.has" [with or without trailing ;]
-    # Paths are resolved relative to base_dir if provided; otherwise CWD.
-    seen_files = set()
 
-    include_pattern = re.compile(r"^\s*#include\s+\"([^\"]+)\"\s*;?\s*$", re.M)
+    def _blank_for_line(line: str) -> str:
+        if line.endswith("\r\n"):
+            return "\r\n"
+        if line.endswith("\n"):
+            return "\n"
+        return ""
 
-    def _read_file_include(path: str) -> str:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
-        except FileNotFoundError:
-            raise SyntaxError(f"#include: file not found: {path}")
-        except IOError as e:
-            raise SyntaxError(f"#include: failed to read {path}: {e}")
+    def _parse_preproc_number(token: str):
+        if token.startswith('0x') or token.startswith('0X'):
+            return int(token, 16)
+        if token.startswith('$'):
+            return int(token[1:], 16)
+        if token.startswith('%'):
+            return int(token[1:], 2)
+        if '.' in token:
+            return float(token)
+        return int(token)
 
-    def _resolve(path: str) -> str:
-        if os.path.isabs(path):
-            return path
-        root = base_dir if base_dir else os.getcwd()
-        return os.path.normpath(os.path.join(root, path))
+    def _eval_preproc_const_expr(expr: str, line_no: int) -> int:
+        token_re = re.compile(
+            r"""\s*(
+                0x[0-9a-fA-F]+ | \$[0-9a-fA-F]+ | %[01]+ | [0-9]+\.[0-9]+ | [0-9]+ | [()+\-*/%]
+            )""",
+            re.X,
+        )
+        number_re = re.compile(r"^(0x[0-9a-fA-F]+|\$[0-9a-fA-F]+|%[01]+|[0-9]+\.[0-9]+|[0-9]+)$")
 
-    def _expand_includes(text_in: str) -> str:
-        # Replace includes recursively until none remain
-        while True:
-            m = include_pattern.search(text_in)
+        tokens = []
+        pos = 0
+        while pos < len(expr):
+            m = token_re.match(expr, pos)
             if not m:
-                return text_in
-            inc_path_raw = m.group(1)
-            inc_path = _resolve(inc_path_raw)
-            # Detect simple cycles
-            if inc_path in seen_files:
-                raise SyntaxError(f"#include cycle detected for {inc_path}")
-            seen_files.add(inc_path)
-            inc_text = _read_file_include(inc_path)
-            inc_expanded = _expand_includes(inc_text)
-            # Splice included text in place of the directive
-            start, end = m.span()
-            text_in = text_in[:start] + inc_expanded + text_in[end:]
-        return text_in
+                bad = expr[pos:].strip()
+                if not bad:
+                    break
+                raise SyntaxError(
+                    f"Preprocessor error at line {line_no}: invalid token in const expression near '{bad}'"
+                )
+            tok = m.group(1)
+            if tok:
+                tokens.append(tok)
+            pos = m.end()
 
-    text = _expand_includes(text)
+        if not tokens:
+            raise SyntaxError(f"Preprocessor error at line {line_no}: empty const expression")
+
+        class ConstExprParser:
+            def __init__(self, token_list):
+                self.tokens = token_list
+                self.i = 0
+
+            def _peek(self):
+                return self.tokens[self.i] if self.i < len(self.tokens) else None
+
+            def _eat(self):
+                t = self._peek()
+                self.i += 1
+                return t
+
+            def parse_expr(self):
+                left = self.parse_term()
+                while self._peek() in ('+', '-'):
+                    op = self._eat()
+                    right = self.parse_term()
+                    if op == '+':
+                        left = left + right
+                    else:
+                        left = left - right
+                return left
+
+            def parse_term(self):
+                left = self.parse_unary()
+                while self._peek() in ('*', '/', '%'):
+                    op = self._eat()
+                    right = self.parse_unary()
+                    if op == '*':
+                        left = left * right
+                    elif op == '/':
+                        if right == 0:
+                            raise ValueError("Division by zero in constant expression")
+                        if isinstance(left, float) or isinstance(right, float):
+                            left = left / right
+                        else:
+                            left = left // right
+                    else:
+                        if right == 0:
+                            raise ValueError("Modulo by zero in constant expression")
+                        left = left % right
+                return left
+
+            def parse_unary(self):
+                if self._peek() == '-':
+                    self._eat()
+                    return -self.parse_unary()
+                return self.parse_atom()
+
+            def parse_atom(self):
+                tok = self._peek()
+                if tok is None:
+                    raise SyntaxError(f"Preprocessor error at line {line_no}: incomplete const expression")
+                if tok == '(':
+                    self._eat()
+                    value = self.parse_expr()
+                    if self._peek() != ')':
+                        raise SyntaxError(
+                            f"Preprocessor error at line {line_no}: missing ')' in const expression"
+                        )
+                    self._eat()
+                    return value
+                if not number_re.match(tok):
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: unsupported token '{tok}' in const expression"
+                    )
+                self._eat()
+                return _parse_preproc_number(tok)
+
+        parser = ConstExprParser(tokens)
+        value = parser.parse_expr()
+        if parser._peek() is not None:
+            raise SyntaxError(
+                f"Preprocessor error at line {line_no}: unexpected token '{parser._peek()}' in const expression"
+            )
+        if isinstance(value, float):
+            # Keep parity with const_decl folding: float constants become Q16.16 integers.
+            return int(value * 65536)
+        return value
+
+    def _preprocess_source(
+        text_in: str,
+        current_dir: str,
+        const_values: dict,
+        include_stack: list,
+    ) -> str:
+        const_re = re.compile(r"^\s*const\s+([A-Za-z_]\w*)\s*=\s*(.+?)\s*;?\s*$")
+        ident_re = re.compile(r"^[A-Za-z_]\w*$")
+        include_re = re.compile(r'^\s*#include\s+"([^\"]+)"\s*;?\s*$')
+        lines = text_in.splitlines(keepends=True)
+        output = []
+        cond_stack = []
+        active = True
+
+        for line_no, raw_line in enumerate(lines, start=1):
+            no_comment = raw_line.split('//', 1)[0]
+            stripped = no_comment.strip()
+
+            m_if = re.match(r"^#(ifdef|ifndef)\b(.*)$", stripped)
+            if m_if:
+                kind = m_if.group(1)
+                arg = m_if.group(2).strip()
+                if arg.endswith(';'):
+                    arg = arg[:-1].strip()
+                if not arg:
+                    raise SyntaxError(f"Preprocessor error at line {line_no}: '#{kind}' requires a name")
+                if not ident_re.match(arg):
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: invalid identifier '{arg}' in '#{kind}'"
+                    )
+
+                condition = (arg in const_values and const_values[arg] == 1) if kind == 'ifdef' else (arg not in const_values)
+                cond_stack.append(
+                    {
+                        'kind': kind,
+                        'name': arg,
+                        'line_opened': line_no,
+                        'parent_active': active,
+                        'condition': condition,
+                        'else_seen': False,
+                    }
+                )
+                active = active and condition
+                output.append(_blank_for_line(raw_line))
+                continue
+
+            m_else = re.match(r"^#else\s*;?\s*$", stripped)
+            if m_else:
+                if not cond_stack:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: '#else' without matching '#ifdef/#ifndef'"
+                    )
+                frame = cond_stack[-1]
+                if frame['else_seen']:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: multiple '#else' for conditional opened at line {frame['line_opened']}"
+                    )
+                frame['else_seen'] = True
+                active = frame['parent_active'] and (not frame['condition'])
+                output.append(_blank_for_line(raw_line))
+                continue
+
+            m_endif = re.match(r"^#endif\s*;?\s*$", stripped)
+            if m_endif:
+                if not cond_stack:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: '#endif' without matching '#ifdef/#ifndef'"
+                    )
+                frame = cond_stack.pop()
+                active = frame['parent_active']
+                output.append(_blank_for_line(raw_line))
+                continue
+
+            m_include = include_re.match(stripped)
+            if m_include:
+                if not active:
+                    output.append(_blank_for_line(raw_line))
+                    continue
+                inc_path_raw = m_include.group(1)
+                if os.path.isabs(inc_path_raw):
+                    inc_path = os.path.normpath(inc_path_raw)
+                else:
+                    inc_path = os.path.normpath(os.path.join(current_dir, inc_path_raw))
+                if inc_path in include_stack:
+                    raise SyntaxError(f"#include cycle detected for {inc_path}")
+                try:
+                    with open(inc_path, "r", encoding="utf-8") as f:
+                        inc_text = f.read()
+                except FileNotFoundError:
+                    raise SyntaxError(f"#include: file not found: {inc_path}")
+                except IOError as e:
+                    raise SyntaxError(f"#include: failed to read {inc_path}: {e}")
+
+                output.append(
+                    _preprocess_source(
+                        inc_text,
+                        os.path.dirname(inc_path),
+                        const_values,
+                        include_stack + [inc_path],
+                    )
+                )
+                continue
+
+            if active:
+                m_const = const_re.match(no_comment)
+                if m_const:
+                    const_name = m_const.group(1)
+                    const_expr = m_const.group(2)
+                    try:
+                        const_values[const_name] = _eval_preproc_const_expr(const_expr, line_no)
+                    except (ValueError, SyntaxError):
+                        # Keep preprocessing permissive so parser/transformer continue to
+                        # report canonical constant-expression diagnostics.
+                        pass
+                output.append(raw_line)
+            else:
+                output.append(_blank_for_line(raw_line))
+
+        if cond_stack:
+            frame = cond_stack[-1]
+            raise SyntaxError(
+                "Preprocessor error: unterminated "
+                f"'#{frame['kind']} {frame['name']}' opened at line {frame['line_opened']} (missing '#endif')"
+            )
+
+        return ''.join(output)
+
+    # Preprocess #ifdef/#ifndef/#else/#endif and #include together so
+    # directives inside inactive branches are not expanded.
+    root_dir = base_dir if base_dir else os.getcwd()
+    text = _preprocess_source(text, root_dir, {}, [])
     # Targeted preprocessing:
     # Extract `asm { ... }` blocks (preserving their content including newlines)
     # and replace them with a placeholder token that Lark can lex as ASM_BLOCK.

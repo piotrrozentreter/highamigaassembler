@@ -1,0 +1,25 @@
+// Demonstrates #ifdef/#ifndef/#else/#endif based on const declarations.
+
+const BUILD_FAST = 1;
+
+#ifndef DEBUG_BUILD
+const DEBUG_ENABLED = 0;
+#else
+const DEBUG_ENABLED = 1;
+#endif
+
+code conditional_demo:
+#ifdef BUILD_FAST
+    proc selected_mode() -> int {
+        return 1;
+    }
+#else
+    proc selected_mode() -> int {
+        return 0;
+    }
+#endif
+
+    proc main() -> int {
+        // Returns 1 for fast mode + optional debug flag.
+        return selected_mode() + DEBUG_ENABLED;
+    }
