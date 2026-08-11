@@ -202,6 +202,10 @@ These examples demonstrate game-related concepts and systems, but they are not r
     - Input-driven interactions
     - Compiler feature integration in a larger example
 
+### Full Games Built with HAS
+
+- [Astronaut Jet Pac](https://github.com/rozensoftware/astronautjetpac) - A complete Amiga game created with HAS.
+
 ### Code Generation
 
 - `code_generator.py` - External Python code generation
