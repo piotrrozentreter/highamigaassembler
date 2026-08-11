@@ -34,6 +34,9 @@ pip install -r requirements.txt
 ### Your First Program
 ```has
 code main:
+    call main();
+    asm "rts";
+
     proc main() -> long {
         return 42;
     }
@@ -241,16 +244,17 @@ code register_params:
 
 **Important Optimization Note:**
 
-Register parameters (`__reg(d0)`, `__reg(d1)`, etc.) provide **maximum performance benefit only when used with assembly-body procedures**:
+Register parameters (`__reg(d0)`, `__reg(d1)`, etc.) provide **maximum performance benefit only when used with native assembly-body procedures**:
 
 ```has
-proc vector_mult(__reg(a0) vec: ptr, __reg(d0) scale: long) -> void {
+native proc vector_mult(__reg(a0) vec: ptr, __reg(d0) scale: long) -> void {
     asm {
         ; Direct register access - optimal performance
         move.l (a0),d1
         muls.l d0,d1
         move.l d1,(a0)
     }
+    return;
 }
 ```
 
@@ -270,7 +274,7 @@ proc vec_add(__reg(d0) a: long, __reg(d1) b: long) -> long {
 
 **Best Practices:**
 - Use `__reg()` for **external functions** (library calls) where calling convention is fixed
-- Use `__reg()` for **assembly-only procedures** where you directly access registers
+- Use `__reg()` with **native assembly-only procedures** where you directly access registers
 - For **HAS-body procedures**: Register parameters provide no optimization, stick with stack parameters
 
 ---
@@ -1067,6 +1071,10 @@ const TRUE = 1;
 const FALSE = 0;
 
 code game:
+    ; Entry point - execution starts here
+    call main();
+    asm "rts";
+
     proc shutdown() -> long {
         // Restore all hardware state
         ReleaseSystem();        // Re-enable OS
@@ -1083,7 +1091,7 @@ code game:
             running = FALSE;        // Exit when done
         }
         
-        ReleaseSystem();        // Always restore!
+        shutdown();             // Always restore!
         return 0;
     }
 ```
