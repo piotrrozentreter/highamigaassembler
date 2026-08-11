@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the HAS (High Assembler) project!
 
 ## Project Status
 
-**Version 0.8 - In Constant Development**
+**Version 0.9.0 - In Constant Development**
 
 This compiler is actively being developed. We welcome contributions, bug reports, and suggestions.
 
@@ -149,7 +149,7 @@ Explain the problem this commit solves and why this approach was chosen.
 
 ### Areas Needing Help
 
-Current focus areas (Version 0.8):
+Current focus areas (Version 0.9.0):
 
 #### High Priority
 - **Test Suite**: Automated testing framework
@@ -175,13 +175,13 @@ Understanding the codebase:
 
 ```
 hasc/
-â”œâ”€â”€ cli.py              # Command-line interface
-â”œâ”€â”€ parser.py           # Lark grammar and AST builder
-â”œâ”€â”€ ast.py              # AST node definitions
-â”œâ”€â”€ validator.py        # Semantic analysis (2-pass)
-â”œâ”€â”€ codegen.py          # Code generation
-â”œâ”€â”€ macro_expander.py   # Macro expansion support
-â””â”€â”€ reachability.py     # Dead-procedure reachability analysis
+├── cli.py              # Command-line interface
+├── parser.py           # Lark grammar and AST builder
+├── ast.py              # AST node definitions
+├── validator.py        # Semantic analysis (2-pass)
+├── codegen.py          # Code generation
+├── macro_expander.py   # Macro expansion support
+└── reachability.py     # Dead-procedure reachability analysis
 ```
 
 ### Compilation Pipeline

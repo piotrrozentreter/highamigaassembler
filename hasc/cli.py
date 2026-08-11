@@ -6,7 +6,7 @@ from . import reachability
 import os
 from lark.exceptions import LarkError, UnexpectedInput, UnexpectedToken, UnexpectedCharacters
 
-_internal_version = "0.8"
+_internal_version = "0.9.0"
 
 # Read version from VERSION file
 def _get_version():

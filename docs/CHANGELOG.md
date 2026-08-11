@@ -4,6 +4,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-11
+
 ### Added
 
 - **Conditional compilation directives** `#ifdef`, `#ifndef`, `#else`, `#endif`:
@@ -292,7 +294,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - **Automatic Q16.16 Floating-Point Conversion**: Natural decimal syntax
   - Write floating-point literals directly: `2.5`, `0.98`, `43.55`
   - Compiler automatically converts to Q16.16 fixed-point format at compile-time
-  - Formula: `Q16.16 = int(float_value Ã— 65536)`
+  - Formula: `Q16.16 = int(float_value × 65536)`
   - Works in constants, data sections, and inline literals
   - Zero runtime overhead - all conversion happens during compilation
   - See [docs/Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) for details
