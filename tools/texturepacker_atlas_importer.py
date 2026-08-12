@@ -114,11 +114,16 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
         TexturePacker rotates sprites 90° CW to fit the atlas better.
         If sprite['rotated'] is True, the stored region is rotated CW; we
         rotate it back CCW (rotate 90° counter-clockwise) to restore the
-        original orientation.  PIL Image.rotate(90) rotates CCW.
+        original orientation. PIL Image.rotate(90) rotates CCW.
 
-    Trim restoration:
-        If restore_original_size=True and the sprite was trimmed, the extracted
-        region is pasted at (oX, oY) inside a transparent oW×oH canvas.
+    Scaling/trim semantics:
+        - Default behavior (restore_original_size=False): keep the atlas-trimmed
+          region exactly as exported by TexturePacker, including any in-atlas
+          scaling / cropping, which preserves the sprite's effective size in the
+          atlas.
+        - If restore_original_size=True and the sprite was trimmed, the extracted
+          region is pasted at (oX, oY) inside a transparent oW×oH canvas to
+          recover the full untrimmed original sprite size.
     """
     x, y, w, h = sprite['x'], sprite['y'], sprite['w'], sprite['h']
 
@@ -301,12 +306,22 @@ def quantize_sprite_with_palette(
 # ---------------------------------------------------------------------------
 
 def _safe_label(name: str, prefix: str) -> str:
-    """Convert a sprite name (e.g. 'bird_left.png') to a valid assembly label."""
-    stem = Path(name).stem               # drop extension
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', stem)
-    if sanitized and sanitized[0].isdigit():
-        sanitized = '_' + sanitized
-    return f"{prefix}_{sanitized}"
+    """Convert a sprite name to a valid assembly label.
+
+    TexturePacker may store sprite names with path-like folders such as
+    'dead/east/frame_003'. Those separators must become underscores so the
+    generated symbol is assembly-safe and does not contain operators like '-'
+    or '#'.
+    """
+    candidate = name.replace('\\', '/')
+    candidate = re.sub(r'\.[^.\/]+$', '', candidate)  # drop final extension only
+    candidate = re.sub(r'[^A-Za-z0-9_]+', '_', candidate)
+    candidate = re.sub(r'_+', '_', candidate).strip('_')
+    if not candidate:
+        candidate = 'sprite'
+    if candidate[0].isdigit():
+        candidate = '_' + candidate
+    return f"{prefix}_{candidate}"
 
 
 # ---------------------------------------------------------------------------
@@ -679,8 +694,12 @@ def main() -> int:
         help='Label prefix for generated symbols (default: XML filename stem)',
     )
     parser.add_argument(
-        '--restore-original-size', action='store_true',
-        help='Reconstruct full untrimmed sprite dimensions (pads with transparency)',
+        '--keep-scaled', dest='restore_original_size', action='store_false', default=False,
+        help='Keep the atlas-trimmed/scaled sprite region as exported (default behavior)',
+    )
+    parser.add_argument(
+        '--restore-original-size', dest='restore_original_size', action='store_true',
+        help='Reconstruct full untrimmed sprite dimensions by padding back to oW x oH',
     )
     parser.add_argument(
         '--dither', action='store_true',
