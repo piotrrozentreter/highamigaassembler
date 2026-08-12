@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 TexturePacker Atlas Importer for Amiga BOBs
 
@@ -33,12 +35,14 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from PIL import Image
+    from PIL import Image as PILImage
 except ImportError:
-    Image = None
+    PILImage = None
+
+Image: Any = PILImage
 
 # ---------------------------------------------------------------------------
 # Import helpers from bob_importer (same directory)
@@ -48,6 +52,20 @@ from bob_importer import (  # type: ignore
     export_bob_asm_from_quantized,
     quantize_image,
 )
+
+
+def _flatten_image_pixels(img: Any) -> List[Tuple[int, ...]]:
+    """Return a flat list of RGBA or RGB pixels across Pillow versions."""
+    if hasattr(img, 'get_flattened_data'):
+        return list(img.get_flattened_data())
+    return list(img.getdata())
+
+
+def _new_rgba_image(width: int, height: int, color: Tuple[int, int, int, int]) -> Any:
+    """Create an RGBA image with a runtime guard for optional Pillow installs."""
+    if Image is None:
+        raise RuntimeError('Pillow is required (pip install pillow)')
+    return Image.new('RGBA', (width, height), color)
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +124,7 @@ def parse_atlas_xml(xml_path: str) -> Tuple[str, List[Dict]]:
 # Sprite extraction
 # ---------------------------------------------------------------------------
 
-def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size: bool) -> 'Image.Image':
+def extract_sprite(atlas_img: Any, sprite: Dict, restore_original_size: bool) -> Any:
     """
     Extract a single sprite from the atlas as an RGBA PIL image.
 
@@ -138,7 +156,7 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
     # Restore original untrimmed size (pad with transparency)
     if restore_original_size and sprite.get('trimmed'):
         oX, oY, oW, oH = sprite['oX'], sprite['oY'], sprite['oW'], sprite['oH']
-        full_img = Image.new('RGBA', (oW, oH), (0, 0, 0, 0))
+        full_img = _new_rgba_image(oW, oH, (0, 0, 0, 0))
         full_img.paste(region, (oX, oY))
         return full_img
 
@@ -150,7 +168,7 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
 # ---------------------------------------------------------------------------
 
 def build_shared_palette(
-    sprite_imgs: List['Image.Image'],
+    sprite_imgs: List[Any],
     planes: int,
     use_dither: bool,
 ) -> Tuple[List[int], bool]:
@@ -172,14 +190,14 @@ def build_shared_palette(
     has_transparent = any(
         a < ALPHA_THRESHOLD
         for img in sprite_imgs
-        for _r, _g, _b, a in img.convert('RGBA').getdata()
+        for _r, _g, _b, a in _flatten_image_pixels(img.convert('RGBA'))
     )
 
     max_w = max(img.width for img in sprite_imgs)
     total_h = sum(img.height for img in sprite_imgs)
     # Use an opaque fill colour so the padding rows do not influence the
     # transparency flag inside quantize_image.
-    combined = Image.new('RGBA', (max_w, total_h), (0, 0, 0, 255))
+    combined = _new_rgba_image(max_w, total_h, (0, 0, 0, 255))
     y = 0
     for img in sprite_imgs:
         combined.paste(img, (0, y))
@@ -235,7 +253,7 @@ def build_shared_palette(
 
 
 def quantize_sprite_with_palette(
-    sprite_img: 'Image.Image',
+    sprite_img: Any,
     shared_palette: List[int],
     has_transparent: bool,
     planes: int,
@@ -260,7 +278,7 @@ def quantize_sprite_with_palette(
         pal_entries.append((r, g, b))
 
     w, h = sprite_img.size
-    rgba_data = list(sprite_img.convert('RGBA').getdata())
+    rgba_data = _flatten_image_pixels(sprite_img.convert('RGBA'))
 
     def nearest_index(r: int, g: int, b: int) -> int:
         best_idx = 1 if has_transparent else 0
@@ -538,7 +556,7 @@ def process_atlas(
         return [], [], False
 
     # ---- Step 1: Extract all sprites as PIL images ----
-    sprite_imgs: List['Image.Image'] = []
+    sprite_imgs: List[Any] = []
     valid_sprites: List[Dict] = []
 
     for s in sprites:
