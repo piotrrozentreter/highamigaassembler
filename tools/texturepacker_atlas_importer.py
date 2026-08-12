@@ -14,6 +14,8 @@ Key features:
   de-rotated before conversion.
 - Master include: optionally writes a single .s file with INCLUDE directives for
   every generated BOB, plus the shared palette as a standalone block.
+- Duplicate-frame aliases: --deduplicate-frames stores repeated frame pixels once
+    while exporting every TexturePacker frame name as an assembly label.
 
 Usage:
     python texturepacker_atlas_importer.py atlas.xml [options]
@@ -320,6 +322,7 @@ def write_bob_file(
     has_transparent: bool,
     planes: int,
     add_word: bool,
+    alias_labels: Optional[List[str]] = None,
 ) -> Dict:
     """Write a BOB assembly include file for one sprite. Returns metadata dict."""
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -327,12 +330,14 @@ def write_bob_file(
     asm = export_bob_asm_from_quantized(
         sprite_name, label,
         indices_by_row, shared_palette, has_transparent,
-        planes=planes, add_word=add_word,
+        planes=planes, add_word=add_word, alias_labels=alias_labels,
     )
 
     with open(out_file, 'w', encoding='utf-8') as f:
         f.write('; Auto-generated BOB include from TexturePacker atlas\n')
         f.write(f'; Source sprite: {sprite_name}\n')
+        if alias_labels:
+            f.write(f"; Alias labels: {', '.join(alias_labels)}\n")
         f.write(asm)
         f.write('\n')
 
@@ -391,7 +396,11 @@ def write_master_include(
             f'\tINCLUDE\t"{shared_palette_file.name}"',
             '',
         ]
+    included_paths = set()
     for include_path, label, meta in results:
+        if include_path in included_paths:
+            continue
+        included_paths.add(include_path)
         w = meta.get('width', '?')
         h = meta.get('height', '?')
         src = meta.get('source_sprite', label)
@@ -453,6 +462,7 @@ def process_atlas(
     out_dir: Optional[str] = None,
     only_sprites: Optional[List[str]] = None,
     force: bool = False,
+    deduplicate_frames: bool = False,
 ) -> Tuple[List[Tuple[Path, str, Dict]], List[int], bool]:
     """
     Parse a TexturePacker XML atlas and generate one BOB .s file per sprite.
@@ -536,6 +546,50 @@ def process_atlas(
     # ---- Step 3: Generate one BOB file per sprite ----
     results: List[Tuple[Path, str, Dict]] = []
 
+    if deduplicate_frames:
+        quantized_frames = [
+            quantize_sprite_with_palette(img, shared_palette, has_transparent, planes)
+            for img in sprite_imgs
+        ]
+        groups: Dict[Tuple, List[int]] = {}
+        for index, rows in enumerate(quantized_frames):
+            key = (len(rows[0]) if rows else 0, len(rows), tuple(tuple(row) for row in rows))
+            groups.setdefault(key, []).append(index)
+
+        for frame_indices in groups.values():
+            canonical_index = frame_indices[0]
+            sprite = valid_sprites[canonical_index]
+            name = sprite['n']
+            label = _safe_label(name, prefix)
+            aliases = [
+                _safe_label(valid_sprites[index]['n'], prefix)
+                for index in frame_indices[1:]
+            ]
+            out_file = out_path / f"{label}.s"
+            meta = write_bob_file(
+                out_file, name, label, quantized_frames[canonical_index],
+                shared_palette, has_transparent, planes, add_word, aliases,
+            )
+
+            for index in frame_indices:
+                frame_sprite = valid_sprites[index]
+                frame_label = _safe_label(frame_sprite['n'], prefix)
+                alias_file = out_path / f"{frame_label}.s"
+                if index != canonical_index and alias_file.exists():
+                    alias_file.unlink()
+                frame_meta = dict(meta)
+                frame_meta['source_sprite'] = frame_sprite['n']
+                frame_meta['trimmed'] = frame_sprite.get('trimmed', False)
+                frame_meta['rotated'] = frame_sprite.get('rotated', False)
+                frame_meta['original_size'] = (frame_sprite['oW'], frame_sprite['oH'])
+                frame_meta['atlas_region'] = (
+                    frame_sprite['x'], frame_sprite['y'], frame_sprite['w'], frame_sprite['h']
+                )
+                frame_meta['alias_of'] = None if index == canonical_index else label
+                results.append((out_file, frame_label, frame_meta))
+
+        return results, shared_palette, has_transparent
+
     for s, sprite_img in zip(valid_sprites, sprite_imgs):
         name = s['n']
         label = _safe_label(name, prefix)
@@ -549,6 +603,8 @@ def process_atlas(
                 atlas_mtime = atlas_png_path.stat().st_mtime
                 script_mtime = Path(__file__).stat().st_mtime
                 if out_mtime >= max(xml_mtime, atlas_mtime, script_mtime):
+                    if '; Alias labels:' in out_file.read_text(encoding='utf-8'):
+                        raise OSError('regenerate deduplicated output in default mode')
                     print(f"  [SKIP] {out_file.name}  (up-to-date)")
                     # Still need metadata — re-derive it cheaply
                     w = sprite_img.width
@@ -651,6 +707,10 @@ def main() -> int:
         help='Write a standalone shared palette .s file (referenced from master include)',
     )
     parser.add_argument(
+        '--deduplicate-frames', action='store_true',
+        help='Store identical frames once and emit extra labels as aliases',
+    )
+    parser.add_argument(
         '--force', action='store_true',
         help='Force regeneration even if output files are already up-to-date',
     )
@@ -675,6 +735,7 @@ def main() -> int:
             out_dir=args.outdir,
             only_sprites=only_sprites,
             force=args.force,
+            deduplicate_frames=args.deduplicate_frames,
         )
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

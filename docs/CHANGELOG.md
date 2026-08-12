@@ -4,6 +4,17 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **BOB frame-sequence animation runtime** in `lib/bob_animation.s`:
+  - Added create, append, play-once, loop, stop, tick, and destroy operations.
+  - `AnimateBob` returns the current BOB handle for direct use with `PasteBob`.
+  - Build scripts automatically include the animation, BOB, and heap libraries from `extern` usage.
+- **TexturePacker repeated-frame deduplication**:
+  - Added opt-in `--deduplicate-frames` to store identical quantized BOB data once.
+  - Repeated frames retain descriptor, data, mask, and palette labels as aliases.
+  - Default importer behavior remains one complete output file per XML frame.
+
 ## [0.9.0] - 2026-08-11
 
 ### Added

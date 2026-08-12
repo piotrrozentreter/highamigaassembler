@@ -1,0 +1,64 @@
+// Regression test: BOB frame animation APIs compile and link.
+// The sequence plays once, freezes on its final frame, then is destroyed.
+
+code main:
+    extern func HeapInit() -> void;
+    extern func CreateBobAnimation(descriptor: int, delay: int, save_background: int) -> int;
+    extern func AddBobAnimationFrame(animation: int, descriptor: int, delay: int) -> int;
+    extern func PlayBobAnimation(animation: int, mode: int) -> int;
+    extern func StopBobAnimation(animation: int) -> void;
+    extern func AnimateBob(animation: int) -> int;
+    extern func DestroyBobAnimation(animation: int) -> void;
+    extern var bob_animation_test_desc: int;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        var animation: int;
+        var frame: int;
+
+        call HeapInit();
+        animation = CreateBobAnimation(&bob_animation_test_desc, 2, 0);
+        if (animation == -1) {
+            return -1;
+        }
+
+        if (AddBobAnimationFrame(animation, &bob_animation_test_desc, 2) == -1) {
+            call DestroyBobAnimation(animation);
+            return -2;
+        }
+
+        call PlayBobAnimation(animation, 0);
+        frame = AnimateBob(animation);
+        frame = AnimateBob(animation);
+        frame = AnimateBob(animation);
+        frame = AnimateBob(animation);
+        call StopBobAnimation(animation);
+        call DestroyBobAnimation(animation);
+        return frame;
+    }
+
+    asm {
+bob_animation_test_data:
+        dc.w 16,1
+        dc.w $8000,$4000,$2000,$1000,$0800
+
+bob_animation_test_mask:
+        dc.w 16,1
+        dc.w $F000
+
+bob_animation_test_palette:
+        dc.w $000,$00F
+        even
+
+bob_animation_test_desc:
+        dc.l bob_animation_test_data
+        dc.l bob_animation_test_mask
+        dc.l bob_animation_test_palette
+        dc.w 16
+        dc.w 1
+        dc.w 2
+    }
