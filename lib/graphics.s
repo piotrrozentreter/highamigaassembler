@@ -20,6 +20,14 @@
 GFX_FONT_PLANES      EQU 5                ; Font assets are always expanded to 5 planes
     endif
 
+    ifnd GFX_SPACE_CODE
+GFX_SPACE_CODE       EQU 32               ; Input byte used for a space
+    endif
+
+    ifnd GFX_SPACE_GLYPH
+GFX_SPACE_GLYPH      EQU 16               ; Font glyph used for a space
+    endif
+
     SECTION graphics_code,CODE
 
 ; =============================================================================
@@ -961,11 +969,17 @@ _DrawChar:
     move.l a0,d1
     tst.l d1
     beq .dc_done
-    move.l d0,d1
+    moveq #0,d1
+    move.b d0,d1
+    cmp.l #GFX_SPACE_CODE,d1
+    beq.s .dc_space
     sub.l #32,d1
     tst.l d1
     bge .dc_index_ok
     moveq #0,d1
+    bra.s .dc_index_ok
+.dc_space:
+    moveq #GFX_SPACE_GLYPH,d1
 .dc_index_ok:
     move.l a0,a1
     move.l d1,d2
