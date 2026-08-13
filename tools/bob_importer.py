@@ -80,17 +80,16 @@ def export_bob_asm(png_path: str, out_label: str, planes: int = 5, use_dither: b
     chunks = padded_w // 16
 
     lines = []
+    data_label = f"{out_label}_data"
+    mask_label = f"{out_label}_mask"
+    bg_label = f"{out_label}_background"
+    palette_label = f"{out_label}_palette"
     lines.append(f"; BOB data generated from {Path(png_path).name}")
     lines.append(f"; Row-interleaved format: {planes} bitplanes, original width={w}px, converted width={conv_w}px ({chunks} chunks)")
     lines.append(f"; Layout: For each image row (0..{conv_h-1}): plane0 row, plane1 row, ... plane{planes-1} row")
     lines.append(f"\tSECTION bobs,DATA_C")
     lines.append(f"\tCNOP\t0,4")
     lines.append(f"\tXDEF\t{out_label}, {data_label}, {mask_label}, {palette_label}")
-
-    data_label = f"{out_label}_data"
-    mask_label = f"{out_label}_mask"
-    bg_label = f"{out_label}_background"
-    palette_label = f"{out_label}_palette"
 
     # -- Palette block (Amiga 12-bit RGB format) --
     lines.append(f"{palette_label}:")
@@ -284,7 +283,16 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
     }
 
 
-def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row, final_palette, has_transparent: bool, planes: int = 5, add_word: bool = False) -> str:
+def export_bob_asm_from_quantized(
+    src_name: str,
+    out_label: str,
+    indices_by_row,
+    final_palette,
+    has_transparent: bool,
+    planes: int = 5,
+    add_word: bool = False,
+    alias_labels=None,
+) -> str:
     """Export assembly using pre-quantized indices and a shared palette.
 
     `indices_by_row` is a list of rows, each row a list of palette indices (0..).
@@ -303,6 +311,8 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
     chunks = padded_w // 16
 
     lines = []
+    alias_labels = alias_labels or []
+    all_labels = [out_label, *alias_labels]
     data_label = f"{out_label}_data"
     mask_label = f"{out_label}_mask"
     palette_label = f"{out_label}_palette"
@@ -311,9 +321,12 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
     lines.append(f"; Layout: For each image row (0..{conv_h-1}): plane0 row, plane1 row, ... plane{planes-1} row")
     lines.append(f"\tSECTION bobs,DATA_C")
     lines.append(f"\tCNOP\t0,4")
-    lines.append(f"\tXDEF\t{out_label}, {data_label}, {mask_label}, {palette_label}")
+    exported_labels = []
+    for label in all_labels:
+        exported_labels.extend([label, f"{label}_data", f"{label}_mask", f"{label}_palette"])
+    lines.append(f"\tXDEF\t{', '.join(exported_labels)}")
 
-    lines.append(f"{palette_label}:")
+    lines.extend(f"{label}_palette:" for label in all_labels)
     max_colors = 2 ** planes
     for i in range(0, min(max_colors, len(final_palette) // 3)):
         # Use rounding to better match amigeconv's conversion
@@ -326,7 +339,7 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
 
     stored_width = w + (16 if add_word else 0)
 
-    lines.append(f"{data_label}:")
+    lines.extend(f"{label}_data:" for label in all_labels)
     # Store frame width (include extra 16px when add_word is requested); planar rows remain padded to conv_w
     lines.append(f"\tDC.W\t{stored_width}")
     lines.append(f"\tDC.W\t{conv_h}")
@@ -344,7 +357,8 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
                     word = (word << 1) | plane_bit
                 lines.append(f"\tDC.W\t%{word:016b}\t; y={y} pl={plane_idx} chunk={chunk_x//16}")
 
-    lines.append(f"\n{mask_label}:")
+    lines.append("")
+    lines.extend(f"{label}_mask:" for label in all_labels)
     lines.append(f"\tDC.W\t{stored_width}")
     lines.append(f"\tDC.W\t{conv_h}")
 
@@ -360,7 +374,8 @@ def export_bob_asm_from_quantized(src_name: str, out_label: str, indices_by_row,
                     m = (m << 1) | (1 if idx != 0 else 0)
                 lines.append(f"\tDC.W\t%{m:016b}\t; y={y} pl={plane_idx} chunk={chunk_x//16}")
 
-    lines.append(f"\n{out_label}:")
+    lines.append("")
+    lines.extend(f"{label}:" for label in all_labels)
     lines.append(f"\tDC.L\t{data_label}, {mask_label}, {palette_label}")
     lines.append(f"\tDC.W\t{conv_w}, {conv_h}, {max_colors}")
 

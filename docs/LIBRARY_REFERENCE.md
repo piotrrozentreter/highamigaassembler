@@ -299,6 +299,24 @@ Returns `1` if the left mouse button is pressed, `0` otherwise.
 
 Returns `1` if the right mouse button is pressed, `0` otherwise.
 
+### `GetMouseLBtnPressed() -> int`
+
+Returns `1` only when the left button changed from released to pressed during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseLBtnReleased() -> int`
+
+Returns `1` only when the left button changed from pressed to released during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseRBtnPressed() -> int`
+
+Returns `1` only when the right button changed from released to pressed during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseRBtnReleased() -> int`
+
+Returns `1` only when the right button changed from pressed to released during the latest `ReadMouse()` call, `0` otherwise.
+
+The edge values remain available until the next `ReadMouse()` call, so call it once per frame before polling these accessors.
+
 **Typical mouse loop:**
 
 ```has
@@ -306,11 +324,15 @@ extern func ReadMouse() -> void;
 extern func GetMouseX() -> int;
 extern func GetMouseY() -> int;
 extern func GetMouseLBtn() -> int;
+extern func GetMouseLBtnPressed() -> int;
+extern func GetMouseLBtnReleased() -> int;
 
 call ReadMouse();
 var mx: int = GetMouseX();
 var my: int = GetMouseY();
 if GetMouseLBtn() == 1 { ... }
+if GetMouseLBtnPressed() == 1 { ... }
+if GetMouseLBtnReleased() == 1 { ... }
 ```
 
 ---
@@ -619,7 +641,7 @@ Returns the BOB width in pixels (word, zero-extended).
 
 Returns the BOB height in pixels (word, zero-extended).
 
-**Complete BOB animation loop example:**
+**Complete BOB movement loop example:**
 
 ```has
 extern func WaitVBlank() -> void;
@@ -631,7 +653,7 @@ var bob: int = CreateBob(player_desc, 1);
 var px: int = 100;
 var py: int = 100;
 
-while 1 == 1 {
+while (1) {
     call WaitVBlank();
     call PasteBackground(bob, px, py);   // erase
     px = px + 2;
@@ -639,6 +661,49 @@ while 1 == 1 {
     call PasteBob(bob, px, py, 1);       // draw
 }
 ```
+
+---
+
+## bob_animation.s — BOB frame-sequence animation
+
+This library creates a timed sequence from importer-generated BOB descriptor labels. It owns one
+BOB handle per logical frame. Call `HeapInit` before creating animations; the build scripts select
+`bob.s` and `heap.s` automatically when an animation function is declared as `extern`.
+
+```has
+extern func CreateBobAnimation(descriptor: int, delay: int, save_background: int) -> int;
+extern func AddBobAnimationFrame(animation: int, descriptor: int, delay: int) -> int;
+extern func PlayBobAnimation(animation: int, mode: int) -> int;
+extern func StopBobAnimation(animation: int) -> void;
+extern func AnimateBob(animation: int) -> int;
+extern func DestroyBobAnimation(animation: int) -> void;
+```
+
+- `CreateBobAnimation` creates the list and its first frame. It returns an animation handle or `-1`.
+- `AddBobAnimationFrame` appends a descriptor and delay. It returns `0` or `-1`.
+- `PlayBobAnimation(animation, 0)` rewinds and plays once, stopping on the last frame.
+- `PlayBobAnimation(animation, 1)` rewinds and loops until `StopBobAnimation` is called.
+- `AnimateBob` advances one game tick and returns the BOB handle to pass to `PasteBob`.
+- `DestroyBobAnimation` destroys all owned BOB handles and animation allocations.
+
+Delays are measured in calls to `AnimateBob` and clamped to `1..65535`. A frame with delay `2` is
+returned twice before the following call returns the next frame. A stopped or completed animation
+continues to return its current frame.
+
+```has
+var walk: int = CreateBobAnimation(&walk_0, 4, 0);
+call AddBobAnimationFrame(walk, &walk_1, 4);
+call AddBobAnimationFrame(walk, &walk_2, 6);
+call PlayBobAnimation(walk, 1); // 0 = once, 1 = loop
+
+var frame: int = AnimateBob(walk); // call once per game tick
+call PasteBob(frame, 100, 80, 1);
+
+call StopBobAnimation(walk);
+call DestroyBobAnimation(walk);
+```
+
+Do not destroy individual frame BOBs returned by `AnimateBob`; the animation owns them.
 
 ---
 

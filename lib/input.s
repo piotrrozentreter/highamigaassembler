@@ -20,6 +20,12 @@ mouse_dx    dc.w       0                    ; difference between current and old
 mouse_dy    dc.w       0
 mouse_lbtn  dc.w       0                    ; state of left mouse button: 1 pressed, 0 not pressed
 mouse_rbtn  dc.w       0                    ; state of left right button: 1 pressed, 0 not pressed
+mouse_lbtn_prev      dc.w 0                 ; previous left mouse button state
+mouse_lbtn_pressed   dc.w 0                 ; left mouse button press edge
+mouse_lbtn_released  dc.w 0                 ; left mouse button release edge
+mouse_rbtn_prev      dc.w 0                 ; previous right mouse button state
+mouse_rbtn_pressed   dc.w 0                 ; right mouse button press edge
+mouse_rbtn_released  dc.w 0                 ; right mouse button release edge
             SECTION    code,CODE
 
 ;****************************************************************
@@ -108,6 +114,9 @@ ReadMouse:
             move.w     d1,mouse_dx          ; saves mouse_dx (word)
             move.w     d0,mouse_x           ; saves position (word)
 
+            move.w     mouse_lbtn,mouse_lbtn_prev
+            move.w     mouse_rbtn,mouse_rbtn_prev
+
 ; if bit 6 of CIAAPRA = 0, then left mouse button is pressed
             btst       #6,CIAAPRA
             beq        .lbtn_pressed
@@ -124,6 +133,25 @@ ReadMouse:
             bra        .return
 .rbtn_pressed:
             move.w     #1,mouse_rbtn            
+
+.update_btn_edges:
+            move.w     mouse_lbtn_prev,d0
+            not.w      d0
+            and.w      mouse_lbtn,d0
+            move.w     d0,mouse_lbtn_pressed
+            move.w     mouse_lbtn,d0
+            not.w      d0
+            and.w      mouse_lbtn_prev,d0
+            move.w     d0,mouse_lbtn_released
+
+            move.w     mouse_rbtn_prev,d0
+            not.w      d0
+            and.w      mouse_rbtn,d0
+            move.w     d0,mouse_rbtn_pressed
+            move.w     mouse_rbtn,d0
+            not.w      d0
+            and.w      mouse_rbtn_prev,d0
+            move.w     d0,mouse_rbtn_released
 
 .return:
             movem.l    (sp)+,d0-d1
@@ -204,5 +232,57 @@ GetMouseLBtn:
             xdef       GetMouseRBtn
 GetMouseRBtn:
             move.w     mouse_rbtn,d0
+            ext.l      d0
+            rts
+
+;----------------------------------------------------------------
+; Function: GetMouseLBtnPressed
+; Input: none
+; Output: d0=1 on left mouse button press edge, 0 otherwise
+; Description: Returns the left mouse button press edge from the latest ReadMouse call.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
+            xdef       GetMouseLBtnPressed
+GetMouseLBtnPressed:
+            move.w     mouse_lbtn_pressed,d0
+            ext.l      d0
+            rts
+
+;----------------------------------------------------------------
+; Function: GetMouseLBtnReleased
+; Input: none
+; Output: d0=1 on left mouse button release edge, 0 otherwise
+; Description: Returns the left mouse button release edge from the latest ReadMouse call.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
+            xdef       GetMouseLBtnReleased
+GetMouseLBtnReleased:
+            move.w     mouse_lbtn_released,d0
+            ext.l      d0
+            rts
+
+;----------------------------------------------------------------
+; Function: GetMouseRBtnPressed
+; Input: none
+; Output: d0=1 on right mouse button press edge, 0 otherwise
+; Description: Returns the right mouse button press edge from the latest ReadMouse call.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
+            xdef       GetMouseRBtnPressed
+GetMouseRBtnPressed:
+            move.w     mouse_rbtn_pressed,d0
+            ext.l      d0
+            rts
+
+;----------------------------------------------------------------
+; Function: GetMouseRBtnReleased
+; Input: none
+; Output: d0=1 on right mouse button release edge, 0 otherwise
+; Description: Returns the right mouse button release edge from the latest ReadMouse call.
+; Notes: Value is sign-extended to long.
+;----------------------------------------------------------------
+            xdef       GetMouseRBtnReleased
+GetMouseRBtnReleased:
+            move.w     mouse_rbtn_released,d0
             ext.l      d0
             rts

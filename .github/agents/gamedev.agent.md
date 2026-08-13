@@ -103,11 +103,18 @@ proc blit_bob(int src, int dst, word width_words, word height) {
 
 ## Approach
 
+### Python Environment on Linux
+
+- Never use the bare `python` command on Linux.
+- Use the project virtual environment's interpreter for compiler runs, tests, and Python tools: `.venv/bin/python3`.
+- If the virtual environment is activated, `python3` is acceptable only after confirming `command -v python3` resolves to this project's `.venv/bin/python3`.
+- Do not run Python tooling with the system interpreter or an unrelated virtual environment.
+
 1. **Understand the goal** — identify which hardware subsystem is involved (Blitter, Copper, sprites, audio, input).
 2. **Check local and external examples** — read relevant `.has` files, and when helpful also inspect assembly examples in `/run/media/piotr/Rozen/Programy/Amiga/Projects/amiga_game_prog_assembly/`.
 3. **Propose hardware-first solutions** — offload to custom chips before using the CPU.
 4. **Write or edit HAS code** — use HAS structs, procs, and inline `asm` blocks appropriately.
-5. **Validate assembly output** — compile with `python -m hasc.cli` and check with vasm when hardware correctness matters.
+5. **Validate assembly output** — compile with `.venv/bin/python3 -m hasc.cli` and check with vasm when hardware correctness matters.
 6. **Flag cycle costs** — call out hot-path code that will stress a 7 MHz 68000.
 
 ## Output Format

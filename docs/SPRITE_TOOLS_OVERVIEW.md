@@ -60,16 +60,30 @@ python3 tools/bob_strip_importer.py player_walk.png 32 --planes 5 --label-prefix
 
 ---
 
+### texturepacker_atlas_importer.py
+**Purpose**: Convert TexturePacker XML/PNG atlases to shared-palette BOB frames
+**Location**: `tools/texturepacker_atlas_importer.py`
+**Documentation**: [TEXTUREPACKER_ATLAS_IMPORTER.md](TEXTUREPACKER_ATLAS_IMPORTER.md)
+
+**Use case**: Named BOB animation frames packed into an atlas, including repeated-frame aliases
+
+**Example**:
+```bash
+python3 tools/texturepacker_atlas_importer.py walk.xml --outdir build/gen --deduplicate-frames
+```
+
+---
+
 ## Quick Comparison
 
-| Feature | sprite_importer | sprite_strip_importer | bob_importer | bob_strip_importer |
-|---------|----------------|----------------------|--------------|-------------------|
-| Input | Single PNG | Strip PNG | Single PNG | Strip PNG |
-| Output | 1 .s file | Multiple .s files | 1 .s file | Multiple .s files |
-| Type | Hardware sprite | Hardware sprite | BOB (software) | BOB (software) |
-| Width | 16px fixed | 16px fixed | Any width | Any width |
-| Colors | 4 (2 bitplanes) | 4 (2 bitplanes) | Up to 32 (5 bitplanes) | Up to 32 (5 bitplanes) |
-| Use Case | Static HW sprites | HW sprite animations | Static BOBs | BOB animations |
+| Feature | sprite_importer | sprite_strip_importer | bob_importer | bob_strip_importer | TexturePacker atlas |
+|---------|----------------|----------------------|--------------|-------------------|---------------------|
+| Input | Single PNG | Strip PNG | Single PNG | Strip PNG | XML + atlas PNG |
+| Output | 1 .s file | Multiple .s files | 1 .s file | Multiple .s files | Named BOB files |
+| Type | Hardware sprite | Hardware sprite | BOB (software) | BOB (software) | BOB (software) |
+| Width | 16px fixed | 16px fixed | Any width | Any width | Any width |
+| Colors | 4 | 4 | Up to 32 | Up to 32 | Up to 32, shared palette |
+| Use Case | Static HW sprites | HW sprite animations | Static BOBs | BOB animations | Packed named animations |
 
 ## When to Use Which Tool
 

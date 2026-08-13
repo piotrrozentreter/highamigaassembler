@@ -53,6 +53,13 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 - Internal helpers may use short one-line comments only; do not give them the full public-function header unless they are part of the exported API.
 - Keep the header and function comments aligned with the existing file style and avoid reformatting unrelated code.
 
+## Python Environment on Linux
+
+- Never use the bare `python` command on Linux.
+- Use the project virtual environment's interpreter for compiler runs, tests, and Python tools: `.venv/bin/python3`.
+- If the virtual environment is activated, `python3` is acceptable only after confirming `command -v python3` resolves to this project's `.venv/bin/python3`.
+- Do not run Python tooling with the system interpreter or an unrelated virtual environment.
+
 ## Standard Workflow
 
 1. Reproduce and scope

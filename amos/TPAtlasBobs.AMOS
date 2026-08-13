@@ -1,0 +1,266 @@
+Rem ***********************************************************************
+Rem *  TPAtlasBobs - TexturePacker XML atlas -> AMOS Bob bank importer    *
+Rem *                                                                     *
+Rem *  Reads a TexturePacker XML export (plain ASCII), then grabs every   *
+Rem *  <sprite> rectangle out of the atlas IFF picture with Get Bob.      *
+Rem *  The result is a standard AMOS Object bank (bank 1) which can be    *
+Rem *  saved as an .Abk file and reloaded by any other AMOS program.      *
+Rem *                                                                     *
+Rem *  Only the sprite rectangles (x,y,w,h) and the rotation flag are     *
+Rem *  used. Trimming/offset attributes (oX,oY,oW,oH) are read but not    *
+Rem *  applied - the atlas region is grabbed exactly as it is stored.     *
+Rem ***********************************************************************
+
+Rem Set Buffer must stay the first instruction of the program.
+Set Buffer 96
+
+Rem --- Configuration ----------------------------------------------------
+XML_FILE$="Atlas:heli_exp.xml"
+IFF_FILE$="Atlas:heli_exp.iff"
+BANK_FILE$="Atlas:heli_exp.Abk"
+SAVE_BANK=1                        : Rem 1=save the object bank when done
+SHOW_PREVIEW=1                     : Rem 1=display the grabbed bobs at the end
+KEEP_NAMES=1                       : Rem 0=do not store sprite names (saves string space)
+MAX_BOBS=256
+ATLAS_SCREEN=7                     : Rem work screen used for the IFF picture
+
+Rem --- Sprite table -----------------------------------------------------
+Rem Arrays are dimensioned here and reached from the procedures with Shared.
+NSIZE=1
+If KEEP_NAMES=1 Then NSIZE=MAX_BOBS
+Dim SPR_N$(NSIZE)
+Dim SPR_X(MAX_BOBS),SPR_Y(MAX_BOBS),SPR_W(MAX_BOBS),SPR_H(MAX_BOBS),SPR_R(MAX_BOBS)
+
+NBOB=0
+
+Rem --- Go ---------------------------------------------------------------
+Screen Open 0,640,200,4,Hires
+Curs Off : Flash Off : Cls 0 : Paper 0 : Pen 1
+Print "TexturePacker atlas importer"
+Print "----------------------------"
+Print
+
+PARSE_XML[XML_FILE$]
+If NBOB=0
+   Print "No <sprite> entries found - nothing to do."
+   Edit
+End If
+Print "Sprites found : ";NBOB
+
+LOAD_ATLAS[IFF_FILE$]
+GRAB_BOBS
+
+Print "Bobs in bank  : ";Length(1)
+Print
+
+If SAVE_BANK=1
+   If Exist(BANK_FILE$) Then Kill BANK_FILE$
+   Save BANK_FILE$,1
+   Print "Saved bank    : ";BANK_FILE$
+End If
+
+If SHOW_PREVIEW=1
+   PREVIEW
+End If
+
+Print
+Print "Done. Press a key."
+Wait Key
+End
+
+Rem ***********************************************************************
+Rem *  PARSE_XML - scan the XML file and fill the sprite table            *
+Rem *                                                                     *
+Rem *  The file is streamed through a sliding string buffer, so atlases   *
+Rem *  larger than the AMOS string limit are handled correctly and the    *
+Rem *  layout of the XML (one tag per line or everything on one line)     *
+Rem *  does not matter.                                                   *
+Rem ***********************************************************************
+Procedure PARSE_XML[F$]
+   Shared SPR_N$(),SPR_X(),SPR_Y(),SPR_W(),SPR_H(),SPR_R()
+   Shared NBOB,MAX_BOBS
+
+   If Exist(F$)=0
+      Print "ERROR: XML file not found: ";F$
+      Edit
+   End If
+
+   KEEP=64                                  : Rem overlap kept when no tag is found
+   LIMIT=2048                               : Rem never let the work buffer grow past this
+
+   Open In 1,F$
+   BUF$="" : FIN=0 : DONE=0
+
+   Repeat
+      Rem --- top up the buffer, lines are joined with a space ---
+      While FIN=0 and Len(BUF$)<LIMIT
+         If Eof(1)<>0
+            FIN=1
+         Else
+            Line Input #1,L$
+            BUF$=BUF$+L$+" "
+         End If
+      Wend
+
+      P=Instr(BUF$,"<sprite")
+      If P=0
+         Rem --- no tag start in the buffer ---
+         If FIN=1
+            DONE=1
+         Else
+            If Len(BUF$)>KEEP Then BUF$=Right$(BUF$,KEEP)
+         End If
+      Else
+         E=Instr(BUF$,">",P)
+         If E=0
+            Rem --- tag is truncated, drop what precedes it and read more ---
+            If FIN=1
+               DONE=1
+            Else
+               BUF$=Mid$(BUF$,P)
+            End If
+         Else
+            TAG$=Mid$(BUF$,P,E-P+1)
+            BUF$=Mid$(BUF$,E+1)
+            ADD_SPRITE[TAG$]
+         End If
+      End If
+   Until DONE=1
+
+   Close 1
+   BUF$=""
+End Proc
+
+Rem ***********************************************************************
+Rem *  ADD_SPRITE - decode a single <sprite .../> tag                     *
+Rem ***********************************************************************
+Procedure ADD_SPRITE[T$]
+   Shared SPR_N$(),SPR_X(),SPR_Y(),SPR_W(),SPR_H(),SPR_R()
+   Shared NBOB,MAX_BOBS,KEEP_NAMES
+
+   If NBOB>=MAX_BOBS
+      Print "WARNING: more than ";MAX_BOBS;" sprites - the rest is ignored."
+      Pop Proc
+   End If
+
+   ATTRIB[T$,"w"] : W=Val(Param$)
+   ATTRIB[T$,"h"] : H=Val(Param$)
+   If W<=0 or H<=0 Then Pop Proc         : Rem skip degenerate entries
+
+   ATTRIB[T$,"x"] : X=Val(Param$)
+   ATTRIB[T$,"y"] : Y=Val(Param$)
+   ATTRIB[T$,"r"] : R$=Lower$(Param$)
+
+   NBOB=NBOB+1
+   If KEEP_NAMES=1
+      ATTRIB[T$,"n"] : SPR_N$(NBOB)=Left$(Param$,20)
+   End If
+   SPR_X(NBOB)=X
+   SPR_Y(NBOB)=Y
+   SPR_W(NBOB)=W
+   SPR_H(NBOB)=H
+   SPR_R(NBOB)=(R$="y")*-1               : Rem 1 when stored rotated 90 CW
+End Proc
+
+Rem ***********************************************************************
+Rem *  ATTRIB - return the value of attribute A$ inside tag T$            *
+Rem *  Matches ' name="' so that 'w' never matches inside 'oW' etc.       *
+Rem ***********************************************************************
+Procedure ATTRIB[T$,A$]
+   Q$=Chr$(34)
+   K$=" "+A$+"="+Q$
+   V$=""
+   P=Instr(T$,K$)
+   If P>0
+      P=P+Len(K$)
+      E=Instr(T$,Q$,P)
+      If E>0 Then V$=Mid$(T$,P,E-P)
+   End If
+End Proc[V$]
+
+Rem ***********************************************************************
+Rem *  LOAD_ATLAS - load the atlas IFF into the work screen               *
+Rem ***********************************************************************
+Procedure LOAD_ATLAS[F$]
+   Shared ATLAS_SCREEN
+
+   If Exist(F$)=0
+      Print "ERROR: IFF file not found: ";F$
+      Edit
+   End If
+
+   Load Iff F$,ATLAS_SCREEN
+   Screen ATLAS_SCREEN
+   Screen Hide ATLAS_SCREEN
+   Print "Atlas         : ";Screen Width;" x ";Screen Height;" , ";Screen Colour;" colours"
+End Proc
+
+Rem ***********************************************************************
+Rem *  GRAB_BOBS - cut every atlas rectangle into the object bank         *
+Rem *                                                                     *
+Rem *  Get Bob takes the bottom/right corner as exclusive, so the region  *
+Rem *  is x,y To x+w,y+h. Colour 0 becomes the transparent mask colour.   *
+Rem ***********************************************************************
+Procedure GRAB_BOBS
+   Shared SPR_N$(),SPR_X(),SPR_Y(),SPR_W(),SPR_H(),SPR_R()
+   Shared NBOB,ATLAS_SCREEN,KEEP_NAMES
+
+   Erase 1                               : Rem drop any previous object bank
+
+   Screen ATLAS_SCREEN
+   SW=Screen Width : SH=Screen Height
+
+   For I=1 To NBOB
+      X=SPR_X(I) : Y=SPR_Y(I)
+      W=SPR_W(I) : H=SPR_H(I)
+
+      Rem TexturePacker stores rotated sprites turned 90 degrees clockwise,
+      Rem so the region occupied in the atlas has width and height swapped.
+      If SPR_R(I)=1
+         T=W : W=H : H=T
+      End If
+
+      If X<0 or Y<0 or X+W>SW or Y+H>SH
+         Print "SKIP sprite ";I;" - region outside the atlas"
+      Else
+         Get Bob ATLAS_SCREEN,I,X,Y To X+W,Y+H
+         Hot Spot I,0,0
+      End If
+   Next I
+
+   Rem Keep the atlas palette so the bobs display with the right colours.
+   Get Palette
+End Proc
+
+Rem ***********************************************************************
+Rem *  PREVIEW - quick visual check of the imported bobs                  *
+Rem ***********************************************************************
+Procedure PREVIEW
+   Shared SPR_N$(),NBOB,ATLAS_SCREEN,KEEP_NAMES
+
+   Screen Open 1,320,256,32,Lowres
+   Curs Off : Flash Off : Cls 0
+   Get Palette ATLAS_SCREEN
+   Double Buffer
+
+   I=1
+   Repeat
+      Bob 1,160,128,I
+      N$="" : If KEEP_NAMES=1 Then N$=SPR_N$(I)
+      Screen 1 : Locate 0,0 : Print "Bob ";I;"/";NBOB;" ";Left$(N$+Space$(24),24)
+      Wait Vbl
+
+      If Jleft(1) or Key State(79)
+         I=I-1 : If I<1 Then I=NBOB
+         Wait 8
+      End If
+      If Jright(1) or Key State(78)
+         I=I+1 : If I>NBOB Then I=1
+         Wait 8
+      End If
+   Until Mouse Key<>0 or Inkey$<>""
+
+   Bob Off 1
+   Screen Close 1
+   Screen 0
+End Proc

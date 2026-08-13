@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 TexturePacker Atlas Importer for Amiga BOBs
 
@@ -14,6 +16,8 @@ Key features:
   de-rotated before conversion.
 - Master include: optionally writes a single .s file with INCLUDE directives for
   every generated BOB, plus the shared palette as a standalone block.
+- Duplicate-frame aliases: --deduplicate-frames stores repeated frame pixels once
+    while exporting every TexturePacker frame name as an assembly label.
 
 Usage:
     python texturepacker_atlas_importer.py atlas.xml [options]
@@ -31,12 +35,14 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from PIL import Image
+    from PIL import Image as PILImage
 except ImportError:
-    Image = None
+    PILImage = None
+
+Image: Any = PILImage
 
 # ---------------------------------------------------------------------------
 # Import helpers from bob_importer (same directory)
@@ -46,6 +52,20 @@ from bob_importer import (  # type: ignore
     export_bob_asm_from_quantized,
     quantize_image,
 )
+
+
+def _flatten_image_pixels(img: Any) -> List[Tuple[int, ...]]:
+    """Return a flat list of RGBA or RGB pixels across Pillow versions."""
+    if hasattr(img, 'get_flattened_data'):
+        return list(img.get_flattened_data())
+    return list(img.getdata())
+
+
+def _new_rgba_image(width: int, height: int, color: Tuple[int, int, int, int]) -> Any:
+    """Create an RGBA image with a runtime guard for optional Pillow installs."""
+    if Image is None:
+        raise RuntimeError('Pillow is required (pip install pillow)')
+    return Image.new('RGBA', (width, height), color)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +124,7 @@ def parse_atlas_xml(xml_path: str) -> Tuple[str, List[Dict]]:
 # Sprite extraction
 # ---------------------------------------------------------------------------
 
-def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size: bool) -> 'Image.Image':
+def extract_sprite(atlas_img: Any, sprite: Dict, restore_original_size: bool) -> Any:
     """
     Extract a single sprite from the atlas as an RGBA PIL image.
 
@@ -112,11 +132,16 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
         TexturePacker rotates sprites 90° CW to fit the atlas better.
         If sprite['rotated'] is True, the stored region is rotated CW; we
         rotate it back CCW (rotate 90° counter-clockwise) to restore the
-        original orientation.  PIL Image.rotate(90) rotates CCW.
+        original orientation. PIL Image.rotate(90) rotates CCW.
 
-    Trim restoration:
-        If restore_original_size=True and the sprite was trimmed, the extracted
-        region is pasted at (oX, oY) inside a transparent oW×oH canvas.
+    Scaling/trim semantics:
+        - Default behavior (restore_original_size=False): keep the atlas-trimmed
+          region exactly as exported by TexturePacker, including any in-atlas
+          scaling / cropping, which preserves the sprite's effective size in the
+          atlas.
+        - If restore_original_size=True and the sprite was trimmed, the extracted
+          region is pasted at (oX, oY) inside a transparent oW×oH canvas to
+          recover the full untrimmed original sprite size.
     """
     x, y, w, h = sprite['x'], sprite['y'], sprite['w'], sprite['h']
 
@@ -131,7 +156,7 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
     # Restore original untrimmed size (pad with transparency)
     if restore_original_size and sprite.get('trimmed'):
         oX, oY, oW, oH = sprite['oX'], sprite['oY'], sprite['oW'], sprite['oH']
-        full_img = Image.new('RGBA', (oW, oH), (0, 0, 0, 0))
+        full_img = _new_rgba_image(oW, oH, (0, 0, 0, 0))
         full_img.paste(region, (oX, oY))
         return full_img
 
@@ -143,7 +168,7 @@ def extract_sprite(atlas_img: 'Image.Image', sprite: Dict, restore_original_size
 # ---------------------------------------------------------------------------
 
 def build_shared_palette(
-    sprite_imgs: List['Image.Image'],
+    sprite_imgs: List[Any],
     planes: int,
     use_dither: bool,
 ) -> Tuple[List[int], bool]:
@@ -165,14 +190,14 @@ def build_shared_palette(
     has_transparent = any(
         a < ALPHA_THRESHOLD
         for img in sprite_imgs
-        for _r, _g, _b, a in img.convert('RGBA').getdata()
+        for _r, _g, _b, a in _flatten_image_pixels(img.convert('RGBA'))
     )
 
     max_w = max(img.width for img in sprite_imgs)
     total_h = sum(img.height for img in sprite_imgs)
     # Use an opaque fill colour so the padding rows do not influence the
     # transparency flag inside quantize_image.
-    combined = Image.new('RGBA', (max_w, total_h), (0, 0, 0, 255))
+    combined = _new_rgba_image(max_w, total_h, (0, 0, 0, 255))
     y = 0
     for img in sprite_imgs:
         combined.paste(img, (0, y))
@@ -228,7 +253,7 @@ def build_shared_palette(
 
 
 def quantize_sprite_with_palette(
-    sprite_img: 'Image.Image',
+    sprite_img: Any,
     shared_palette: List[int],
     has_transparent: bool,
     planes: int,
@@ -253,7 +278,7 @@ def quantize_sprite_with_palette(
         pal_entries.append((r, g, b))
 
     w, h = sprite_img.size
-    rgba_data = list(sprite_img.convert('RGBA').getdata())
+    rgba_data = _flatten_image_pixels(sprite_img.convert('RGBA'))
 
     def nearest_index(r: int, g: int, b: int) -> int:
         best_idx = 1 if has_transparent else 0
@@ -299,12 +324,22 @@ def quantize_sprite_with_palette(
 # ---------------------------------------------------------------------------
 
 def _safe_label(name: str, prefix: str) -> str:
-    """Convert a sprite name (e.g. 'bird_left.png') to a valid assembly label."""
-    stem = Path(name).stem               # drop extension
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', stem)
-    if sanitized and sanitized[0].isdigit():
-        sanitized = '_' + sanitized
-    return f"{prefix}_{sanitized}"
+    """Convert a sprite name to a valid assembly label.
+
+    TexturePacker may store sprite names with path-like folders such as
+    'dead/east/frame_003'. Those separators must become underscores so the
+    generated symbol is assembly-safe and does not contain operators like '-'
+    or '#'.
+    """
+    candidate = name.replace('\\', '/')
+    candidate = re.sub(r'\.[^.\/]+$', '', candidate)  # drop final extension only
+    candidate = re.sub(r'[^A-Za-z0-9_]+', '_', candidate)
+    candidate = re.sub(r'_+', '_', candidate).strip('_')
+    if not candidate:
+        candidate = 'sprite'
+    if candidate[0].isdigit():
+        candidate = '_' + candidate
+    return f"{prefix}_{candidate}"
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +355,7 @@ def write_bob_file(
     has_transparent: bool,
     planes: int,
     add_word: bool,
+    alias_labels: Optional[List[str]] = None,
 ) -> Dict:
     """Write a BOB assembly include file for one sprite. Returns metadata dict."""
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -327,12 +363,14 @@ def write_bob_file(
     asm = export_bob_asm_from_quantized(
         sprite_name, label,
         indices_by_row, shared_palette, has_transparent,
-        planes=planes, add_word=add_word,
+        planes=planes, add_word=add_word, alias_labels=alias_labels,
     )
 
     with open(out_file, 'w', encoding='utf-8') as f:
         f.write('; Auto-generated BOB include from TexturePacker atlas\n')
         f.write(f'; Source sprite: {sprite_name}\n')
+        if alias_labels:
+            f.write(f"; Alias labels: {', '.join(alias_labels)}\n")
         f.write(asm)
         f.write('\n')
 
@@ -391,7 +429,11 @@ def write_master_include(
             f'\tINCLUDE\t"{shared_palette_file.name}"',
             '',
         ]
+    included_paths = set()
     for include_path, label, meta in results:
+        if include_path in included_paths:
+            continue
+        included_paths.add(include_path)
         w = meta.get('width', '?')
         h = meta.get('height', '?')
         src = meta.get('source_sprite', label)
@@ -453,6 +495,7 @@ def process_atlas(
     out_dir: Optional[str] = None,
     only_sprites: Optional[List[str]] = None,
     force: bool = False,
+    deduplicate_frames: bool = False,
 ) -> Tuple[List[Tuple[Path, str, Dict]], List[int], bool]:
     """
     Parse a TexturePacker XML atlas and generate one BOB .s file per sprite.
@@ -513,7 +556,7 @@ def process_atlas(
         return [], [], False
 
     # ---- Step 1: Extract all sprites as PIL images ----
-    sprite_imgs: List['Image.Image'] = []
+    sprite_imgs: List[Any] = []
     valid_sprites: List[Dict] = []
 
     for s in sprites:
@@ -536,6 +579,50 @@ def process_atlas(
     # ---- Step 3: Generate one BOB file per sprite ----
     results: List[Tuple[Path, str, Dict]] = []
 
+    if deduplicate_frames:
+        quantized_frames = [
+            quantize_sprite_with_palette(img, shared_palette, has_transparent, planes)
+            for img in sprite_imgs
+        ]
+        groups: Dict[Tuple, List[int]] = {}
+        for index, rows in enumerate(quantized_frames):
+            key = (len(rows[0]) if rows else 0, len(rows), tuple(tuple(row) for row in rows))
+            groups.setdefault(key, []).append(index)
+
+        for frame_indices in groups.values():
+            canonical_index = frame_indices[0]
+            sprite = valid_sprites[canonical_index]
+            name = sprite['n']
+            label = _safe_label(name, prefix)
+            aliases = [
+                _safe_label(valid_sprites[index]['n'], prefix)
+                for index in frame_indices[1:]
+            ]
+            out_file = out_path / f"{label}.s"
+            meta = write_bob_file(
+                out_file, name, label, quantized_frames[canonical_index],
+                shared_palette, has_transparent, planes, add_word, aliases,
+            )
+
+            for index in frame_indices:
+                frame_sprite = valid_sprites[index]
+                frame_label = _safe_label(frame_sprite['n'], prefix)
+                alias_file = out_path / f"{frame_label}.s"
+                if index != canonical_index and alias_file.exists():
+                    alias_file.unlink()
+                frame_meta = dict(meta)
+                frame_meta['source_sprite'] = frame_sprite['n']
+                frame_meta['trimmed'] = frame_sprite.get('trimmed', False)
+                frame_meta['rotated'] = frame_sprite.get('rotated', False)
+                frame_meta['original_size'] = (frame_sprite['oW'], frame_sprite['oH'])
+                frame_meta['atlas_region'] = (
+                    frame_sprite['x'], frame_sprite['y'], frame_sprite['w'], frame_sprite['h']
+                )
+                frame_meta['alias_of'] = None if index == canonical_index else label
+                results.append((out_file, frame_label, frame_meta))
+
+        return results, shared_palette, has_transparent
+
     for s, sprite_img in zip(valid_sprites, sprite_imgs):
         name = s['n']
         label = _safe_label(name, prefix)
@@ -549,6 +636,8 @@ def process_atlas(
                 atlas_mtime = atlas_png_path.stat().st_mtime
                 script_mtime = Path(__file__).stat().st_mtime
                 if out_mtime >= max(xml_mtime, atlas_mtime, script_mtime):
+                    if '; Alias labels:' in out_file.read_text(encoding='utf-8'):
+                        raise OSError('regenerate deduplicated output in default mode')
                     print(f"  [SKIP] {out_file.name}  (up-to-date)")
                     # Still need metadata — re-derive it cheaply
                     w = sprite_img.width
@@ -623,8 +712,12 @@ def main() -> int:
         help='Label prefix for generated symbols (default: XML filename stem)',
     )
     parser.add_argument(
-        '--restore-original-size', action='store_true',
-        help='Reconstruct full untrimmed sprite dimensions (pads with transparency)',
+        '--keep-scaled', dest='restore_original_size', action='store_false', default=False,
+        help='Keep the atlas-trimmed/scaled sprite region as exported (default behavior)',
+    )
+    parser.add_argument(
+        '--restore-original-size', dest='restore_original_size', action='store_true',
+        help='Reconstruct full untrimmed sprite dimensions by padding back to oW x oH',
     )
     parser.add_argument(
         '--dither', action='store_true',
@@ -651,6 +744,10 @@ def main() -> int:
         help='Write a standalone shared palette .s file (referenced from master include)',
     )
     parser.add_argument(
+        '--deduplicate-frames', action='store_true',
+        help='Store identical frames once and emit extra labels as aliases',
+    )
+    parser.add_argument(
         '--force', action='store_true',
         help='Force regeneration even if output files are already up-to-date',
     )
@@ -675,6 +772,7 @@ def main() -> int:
             out_dir=args.outdir,
             only_sprites=only_sprites,
             force=args.force,
+            deduplicate_frames=args.deduplicate_frames,
         )
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
