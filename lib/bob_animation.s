@@ -13,6 +13,7 @@
     XDEF AddBobAnimationFrame
     XDEF PlayBobAnimation
     XDEF StopBobAnimation
+    XDEF IsBobAnimationPlaying
     XDEF AnimateBob
     XDEF DestroyBobAnimation
 
@@ -212,6 +213,33 @@ StopBobAnimation:
     beq .sba_done
     andi.w #$FFFE,ANIM_FLAGS(a0)
 .sba_done:
+    move.l (sp)+,a0
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: IsBobAnimationPlaying
+; Input: 8(a6)=animation
+; Output: d0=1 if playing, 0 if stopped or handle invalid
+; Description: Reports the current playback state set by Play/StopBobAnimation.
+; Notes: Play-once mode reads 0 again once it freezes on the final frame.
+; -----------------------------------------------------------------------------
+IsBobAnimationPlaying:
+    link a6,#0
+    move.l a0,-(sp)
+    move.l 8(a6),a0
+    cmpa.l #0,a0
+    beq .ibap_not_playing
+    cmpa.l #-1,a0
+    beq .ibap_not_playing
+    moveq #0,d0
+    btst #ANIM_PLAYING,ANIM_FLAGS(a0)
+    beq .ibap_done
+    moveq #1,d0
+    bra .ibap_done
+.ibap_not_playing:
+    moveq #0,d0
+.ibap_done:
     move.l (sp)+,a0
     unlk a6
     rts

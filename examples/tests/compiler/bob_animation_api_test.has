@@ -7,6 +7,7 @@ code main:
     extern func AddBobAnimationFrame(animation: int, descriptor: int, delay: int) -> int;
     extern func PlayBobAnimation(animation: int, mode: int) -> int;
     extern func StopBobAnimation(animation: int) -> void;
+    extern func IsBobAnimationPlaying(animation: int) -> int;
     extern func AnimateBob(animation: int) -> int;
     extern func DestroyBobAnimation(animation: int) -> void;
     extern var bob_animation_test_desc: int;
@@ -32,11 +33,19 @@ code main:
         }
 
         call PlayBobAnimation(animation, 0);
+        if (IsBobAnimationPlaying(animation) == 0) {
+            call DestroyBobAnimation(animation);
+            return -3;
+        }
         frame = AnimateBob(animation);
         frame = AnimateBob(animation);
         frame = AnimateBob(animation);
         frame = AnimateBob(animation);
         call StopBobAnimation(animation);
+        if (IsBobAnimationPlaying(animation) == 1) {
+            call DestroyBobAnimation(animation);
+            return -4;
+        }
         call DestroyBobAnimation(animation);
         return frame;
     }

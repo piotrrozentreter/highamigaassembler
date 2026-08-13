@@ -675,6 +675,7 @@ extern func CreateBobAnimation(descriptor: int, delay: int, save_background: int
 extern func AddBobAnimationFrame(animation: int, descriptor: int, delay: int) -> int;
 extern func PlayBobAnimation(animation: int, mode: int) -> int;
 extern func StopBobAnimation(animation: int) -> void;
+extern func IsBobAnimationPlaying(animation: int) -> int;
 extern func AnimateBob(animation: int) -> int;
 extern func DestroyBobAnimation(animation: int) -> void;
 ```
@@ -683,6 +684,7 @@ extern func DestroyBobAnimation(animation: int) -> void;
 - `AddBobAnimationFrame` appends a descriptor and delay. It returns `0` or `-1`.
 - `PlayBobAnimation(animation, 0)` rewinds and plays once, stopping on the last frame.
 - `PlayBobAnimation(animation, 1)` rewinds and loops until `StopBobAnimation` is called.
+- `IsBobAnimationPlaying` returns `1` while playing, `0` once stopped or after a play-once sequence freezes on its final frame.
 - `AnimateBob` advances one game tick and returns the BOB handle to pass to `PasteBob`.
 - `DestroyBobAnimation` destroys all owned BOB handles and animation allocations.
 
