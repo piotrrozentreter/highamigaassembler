@@ -6,6 +6,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Mouse button edge API** in `lib/input.s`:
+  - Added `GetMouseLBtnPressed`, `GetMouseLBtnReleased`, `GetMouseRBtnPressed`, and `GetMouseRBtnReleased`.
+  - Each accessor reports a transition from the latest `ReadMouse` poll and remains valid until the next poll.
 - **BOB frame-sequence animation runtime** in `lib/bob_animation.s`:
   - Added create, append, play-once, loop, stop, tick, and destroy operations.
   - `AnimateBob` returns the current BOB handle for direct use with `PasteBob`.

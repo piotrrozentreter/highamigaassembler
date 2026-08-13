@@ -299,6 +299,24 @@ Returns `1` if the left mouse button is pressed, `0` otherwise.
 
 Returns `1` if the right mouse button is pressed, `0` otherwise.
 
+### `GetMouseLBtnPressed() -> int`
+
+Returns `1` only when the left button changed from released to pressed during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseLBtnReleased() -> int`
+
+Returns `1` only when the left button changed from pressed to released during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseRBtnPressed() -> int`
+
+Returns `1` only when the right button changed from released to pressed during the latest `ReadMouse()` call, `0` otherwise.
+
+### `GetMouseRBtnReleased() -> int`
+
+Returns `1` only when the right button changed from pressed to released during the latest `ReadMouse()` call, `0` otherwise.
+
+The edge values remain available until the next `ReadMouse()` call, so call it once per frame before polling these accessors.
+
 **Typical mouse loop:**
 
 ```has
@@ -306,11 +324,15 @@ extern func ReadMouse() -> void;
 extern func GetMouseX() -> int;
 extern func GetMouseY() -> int;
 extern func GetMouseLBtn() -> int;
+extern func GetMouseLBtnPressed() -> int;
+extern func GetMouseLBtnReleased() -> int;
 
 call ReadMouse();
 var mx: int = GetMouseX();
 var my: int = GetMouseY();
 if GetMouseLBtn() == 1 { ... }
+if GetMouseLBtnPressed() == 1 { ... }
+if GetMouseLBtnReleased() == 1 { ... }
 ```
 
 ---
