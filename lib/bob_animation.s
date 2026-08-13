@@ -226,21 +226,25 @@ StopBobAnimation:
 ; -----------------------------------------------------------------------------
 IsBobAnimationPlaying:
     link a6,#0
-    move.l a0,-(sp)
+    movem.l d1/a0,-(sp)
     move.l 8(a6),a0
     cmpa.l #0,a0
     beq .ibap_not_playing
     cmpa.l #-1,a0
     beq .ibap_not_playing
     moveq #0,d0
-    btst #ANIM_PLAYING,ANIM_FLAGS(a0)
+    ; btst on a memory operand is always byte-sized on 68000, so testing
+    ; ANIM_FLAGS(a0) directly hit the wrong (high) byte of the flags word.
+    ; Load the word into a register first, where btst can address any bit.
+    move.w ANIM_FLAGS(a0),d1
+    btst #ANIM_PLAYING,d1
     beq .ibap_done
     moveq #1,d0
     bra .ibap_done
 .ibap_not_playing:
     moveq #0,d0
 .ibap_done:
-    move.l (sp)+,a0
+    movem.l (sp)+,d1/a0
     unlk a6
     rts
 
