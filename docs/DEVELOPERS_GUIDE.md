@@ -353,6 +353,7 @@ code locals:
 ```has
 const MAX_SIZE = 1024;
 const BUFFER_SIZE = 256;
+const TOTAL_SIZE = MAX_SIZE + BUFFER_SIZE;
 const TRUE = 1;      ; Boolean constants for readability
 const FALSE = 0;
 
@@ -362,6 +363,11 @@ code with_constants:
         return MAX_SIZE;
     }
 ```
+
+Constant initializers support compile-time numeric expressions with `+`, `-`, `*`, `/`, `%`,
+unary signs, and parentheses. References are resolved in declaration order, so a constant may
+use an earlier constant but not a later one. Decimal values use the compiler's Q16 fixed-point
+representation.
 
 ### Variable Initialization
 ```has

@@ -5,6 +5,8 @@
 const MAGIC_NUMBER = 42;
 const MAX_VALUE = 100;
 const MIN_VALUE = 0;
+const BUFFER_START = MAGIC_NUMBER + 10;
+const BUFFER_END = BUFFER_START + MAX_VALUE;
 
 code main:
     proc main() -> int {
@@ -15,7 +17,7 @@ code main:
         result = MAGIC_NUMBER;
         
         // Use const in expressions
-        temp = MAGIC_NUMBER + 10;
+        temp = BUFFER_START;
         temp = MAGIC_NUMBER * 2;
         
         // Use const in comparisons

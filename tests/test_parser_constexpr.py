@@ -26,6 +26,20 @@ def _const_by_name(module: ast.Module, name: str) -> ast.ConstDecl:
     raise AssertionError(f"Const '{name}' not found")
 
 
+def test_const_expression_can_reference_previous_constant():
+    mod = has_parser.parse("const MY_VAL = 1; const MY_VAL2 = MY_VAL + 1;")
+
+    assert _const_by_name(mod, "MY_VAL2").value == 2
+
+
+def test_const_expression_can_chain_previous_constants():
+    mod = has_parser.parse(
+        "const BASE = 2; const OFFSET = BASE + 3; const SIZE = OFFSET * 4;"
+    )
+
+    assert _const_by_name(mod, "SIZE").value == 20
+
+
 def test_constexpr_integer_precedence_folds_correctly():
     mod = has_parser.parse("const A = 2 + 3 * 4;")
     c = _const_by_name(mod, "A")

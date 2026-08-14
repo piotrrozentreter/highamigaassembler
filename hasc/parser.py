@@ -26,7 +26,7 @@ pragma_args: CNAME ("," CNAME)*
 const_decl: "const" CNAME "=" const_expr ";"
 const_decl_nosemi: "const" CNAME "=" const_expr
 
-// Constant expressions: compile-time arithmetic, no variables allowed
+// Constant expressions: compile-time arithmetic and previously declared constants
 ?const_expr: const_cadd
 ?const_cadd: const_cadd "+" const_cmul  -> const_expr_add
            | const_cadd "-" const_cmul  -> const_expr_sub
@@ -38,6 +38,7 @@ const_decl_nosemi: "const" CNAME "=" const_expr
 ?const_cunary: "-" const_catom -> const_expr_neg
              | const_catom
 ?const_catom: NUMBER            -> const_expr_num
+            | CNAME             -> const_expr_name
             | "(" const_expr ")"
 
 
@@ -194,6 +195,7 @@ COMMENT: /\/\/[^\n]*/
 class ASTBuilder(Transformer):
     def __init__(self):
         self.print_debug = False
+        self.const_values = {}
         super().__init__()
 
     def _val(self, item):
@@ -269,13 +271,17 @@ class ASTBuilder(Transformer):
     def const_decl(self, items):
         """const_decl: "const" CNAME "=" const_expr ";" """
         name = self._val(items[0])
-        value, is_q16 = self._const_to_q16(items[1])
+        raw_value = items[1]
+        value, is_q16 = self._const_to_q16(raw_value)
+        self.const_values[name] = raw_value
         return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
 
     def const_decl_nosemi(self, items):
         """const_decl_nosemi: "const" CNAME "=" const_expr """
         name = self._val(items[0])
-        value, is_q16 = self._const_to_q16(items[1])
+        raw_value = items[1]
+        value, is_q16 = self._const_to_q16(raw_value)
+        self.const_values[name] = raw_value
         return ast.ConstDecl(name=name, value=value, is_q16=is_q16)
 
     # --- Constant expression evaluators (compile-time folding) ---
@@ -291,6 +297,12 @@ class ASTBuilder(Transformer):
         if '.' in s:
             return float(s)
         return self._parse_number(s)  # int (handles 0x, $, %, decimal)
+
+    def const_expr_name(self, items):
+        name = self._val(items[0])
+        if name not in self.const_values:
+            raise ValueError(f"Unknown constant '{name}'")
+        return self.const_values[name]
 
     def const_expr_add(self, items):
         return items[0] + items[1]

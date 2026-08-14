@@ -6,6 +6,10 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Dependent constant expressions**:
+  - `const` initializers may reference constants declared earlier, such as `const B = A + 1;`.
+  - Numeric arithmetic, unary signs, parentheses, and existing Q16 conversion remain supported.
+
 - **Mouse button edge API** in `lib/input.s`:
   - Added `GetMouseLBtnPressed`, `GetMouseLBtnReleased`, `GetMouseRBtnPressed`, and `GetMouseRBtnReleased`.
   - Each accessor reports a transition from the latest `ReadMouse` poll and remains valid until the next poll.

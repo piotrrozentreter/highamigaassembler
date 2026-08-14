@@ -104,11 +104,14 @@ Enhanced the `CodeGen` class to:
 **Syntax:**
 ```has
 const NAME = value;
+const DERIVED = NAME + 1;
 ```
 
 **Behavior:**
 - Declares module-level compile-time constants
-- Constants can only be integer values (NUMBER tokens)
+- Supports numeric expressions with `+`, `-`, `*`, `/`, `%`, unary signs, and parentheses
+- A constant expression can reference constants declared earlier in the source
+- Integer division is evaluated at compile time; decimal values use Q16 fixed-point conversion
 - Constants are automatically substituted wherever they're referenced
 - Work in all expression contexts including arithmetic, comparisons, and compound assignments
 
@@ -116,12 +119,13 @@ const NAME = value;
 ```has
 const BUFFER_SIZE = 1024;
 const MAX_ITERATIONS = 100;
+const TOTAL_SIZE = BUFFER_SIZE + MAX_ITERATIONS;
 
 code main:
     proc init() -> void {
         var i: int;
         i = BUFFER_SIZE;      // Substituted as move.l #1024,d0
-        i += MAX_ITERATIONS;  // Substituted as add.l #100,d0
+        i += TOTAL_SIZE;      // Substituted as add.l #1124,d0
     }
 ```
 
@@ -190,7 +194,7 @@ add.l d1,d0            ; x += result
 
 ### Known Limitations
 
-- Constants are integers only (no float, string, or complex types)
+- Constants are numeric only (no string or complex types)
 - Constants are module-level scope only (no function-level constants)
-- No constant arithmetic or expressions (only literal numeric values)
+- Constant references must refer to constants declared earlier in the source
 - No error recovery (error directive immediately stops all compilation)
