@@ -1,0 +1,81 @@
+;****************************************************************
+; Workbench startup handshake.
+;
+; A program launched by double-clicking its icon is started by
+; Workbench, which sends a WBStartupMessage to the new process and
+; then waits for that message to be replied. A program that never
+; picks up and replies the message locks Workbench and may be
+; unloaded while still executing.
+;
+; Usage (must wrap the whole program):
+;   jsr WBStartup        ; before TakeSystem
+;   jsr TakeSystem
+;   jsr main
+;   jsr ReleaseSystem
+;   jmp WBExit           ; last thing before returning to DOS
+;
+; (c) 2026 by Piotr Rozentreter (Rozsoft)
+;****************************************************************
+
+    include "hardware.i"
+
+pr_MsgPort  EQU $5c                       ; Process.pr_MsgPort
+pr_CLI      EQU $ac                       ; Process.pr_CLI (0 => started from Workbench)
+
+    SECTION wbstartup_data,DATA
+
+wb_msg      dc.l 0                        ; WBStartupMessage, 0 when started from CLI
+
+    SECTION code,CODE
+
+;----------------------------------------------------------------
+; Function: WBStartup
+; Input: none
+; Output: none
+; Description: Receives the Workbench startup message, if any.
+; Notes: Safe to call when started from CLI (does nothing then).
+;        Must be called before disabling multitasking.
+;----------------------------------------------------------------
+            xdef       WBStartup
+WBStartup:
+            movem.l    d1-d7/a0-a5,-(sp)
+            clr.l      wb_msg
+            move.l     ExecBase,a6
+            sub.l      a1,a1
+            jsr        _LVOFindTask(a6)   ; a1=0 => our own task
+            move.l     d0,a5
+            tst.l      pr_CLI(a5)         ; started from a CLI?
+            bne.s      .done              ; yes, no Workbench message to expect
+            lea        pr_MsgPort(a5),a0
+            jsr        _LVOWaitPort(a6)   ; Workbench message is already on its way
+            lea        pr_MsgPort(a5),a0
+            jsr        _LVOGetMsg(a6)
+            move.l     d0,wb_msg
+.done
+            movem.l    (sp)+,d1-d7/a0-a5
+            rts
+
+
+;----------------------------------------------------------------
+; Function: WBExit
+; Input: none
+; Output: none
+; Description: Replies the Workbench startup message and returns.
+; Notes: Forbid() is intentionally not balanced: Workbench may unload
+;        our code as soon as the message is replied, so multitasking
+;        must stay disabled until we rts back to DOS, which permits
+;        again on task exit. Call this as the very last instruction
+;        of the program.
+;----------------------------------------------------------------
+            xdef       WBExit
+WBExit:
+            move.l     wb_msg,d0
+            beq.s      .done
+            move.l     ExecBase,a6
+            jsr        _LVOForbid(a6)
+            move.l     wb_msg,a1
+            clr.l      wb_msg
+            jsr        _LVOReplyMsg(a6)
+.done
+            moveq      #0,d0
+            rts
