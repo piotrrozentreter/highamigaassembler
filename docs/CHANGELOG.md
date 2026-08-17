@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to the HAS (High Assembler) project will be documented in this file.
 
@@ -21,6 +21,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Added opt-in `--deduplicate-frames` to store identical quantized BOB data once.
   - Repeated frames retain descriptor, data, mask, and palette labels as aliases.
   - Default importer behavior remains one complete output file per XML frame.
+- **TexturePacker shared descriptor palettes**:
+  - Added `--shared-palette`, used with `--shared-palette-file`, to make all atlas BOB descriptors reference one palette block.
+  - Avoids duplicate palette words per frame while retaining the existing `CreateBob` descriptor ABI.
 
 ## [0.9.0] - 2026-08-11
 

@@ -16,6 +16,8 @@ Key features:
   de-rotated before conversion.
 - Master include: optionally writes a single .s file with INCLUDE directives for
   every generated BOB, plus the shared palette as a standalone block.
+- Shared descriptor palette: --shared-palette makes every BOB descriptor point
+    at the standalone palette instead of embedding duplicate palette words.
 - Duplicate-frame aliases: --deduplicate-frames stores repeated frame pixels once
     while exporting every TexturePacker frame name as an assembly label.
 
@@ -356,6 +358,7 @@ def write_bob_file(
     planes: int,
     add_word: bool,
     alias_labels: Optional[List[str]] = None,
+    shared_palette_label: Optional[str] = None,
 ) -> Dict:
     """Write a BOB assembly include file for one sprite. Returns metadata dict."""
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -364,6 +367,7 @@ def write_bob_file(
         sprite_name, label,
         indices_by_row, shared_palette, has_transparent,
         planes=planes, add_word=add_word, alias_labels=alias_labels,
+        shared_palette_label=shared_palette_label,
     )
 
     with open(out_file, 'w', encoding='utf-8') as f:
@@ -496,12 +500,15 @@ def process_atlas(
     only_sprites: Optional[List[str]] = None,
     force: bool = False,
     deduplicate_frames: bool = False,
+    shared_palette_label: Optional[str] = None,
 ) -> Tuple[List[Tuple[Path, str, Dict]], List[int], bool]:
     """
     Parse a TexturePacker XML atlas and generate one BOB .s file per sprite.
 
     All sprites are quantized together to share a consistent palette so that
     colour index N means the same Amiga colour in every generated BOB file.
+    When `shared_palette_label` is supplied, every descriptor refers to that
+    external palette instead of storing a private palette copy.
 
     Returns:
         (results, shared_palette, has_transparent)
@@ -602,6 +609,7 @@ def process_atlas(
             meta = write_bob_file(
                 out_file, name, label, quantized_frames[canonical_index],
                 shared_palette, has_transparent, planes, add_word, aliases,
+                shared_palette_label,
             )
 
             for index in frame_indices:
@@ -636,7 +644,10 @@ def process_atlas(
                 atlas_mtime = atlas_png_path.stat().st_mtime
                 script_mtime = Path(__file__).stat().st_mtime
                 if out_mtime >= max(xml_mtime, atlas_mtime, script_mtime):
-                    if '; Alias labels:' in out_file.read_text(encoding='utf-8'):
+                    output_text = out_file.read_text(encoding='utf-8')
+                    has_external_palette = '; External shared palette:' in output_text
+                    if ('; Alias labels:' in output_text
+                            or has_external_palette != (shared_palette_label is not None)):
                         raise OSError('regenerate deduplicated output in default mode')
                     print(f"  [SKIP] {out_file.name}  (up-to-date)")
                     # Still need metadata — re-derive it cheaply
@@ -677,6 +688,7 @@ def process_atlas(
         meta = write_bob_file(
             out_file, name, label, indices_by_row,
             shared_palette, has_transparent, planes, add_word,
+            shared_palette_label=shared_palette_label,
         )
         meta['trimmed'] = s.get('trimmed', False)
         meta['rotated'] = s.get('rotated', False)
@@ -744,6 +756,10 @@ def main() -> int:
         help='Write a standalone shared palette .s file (referenced from master include)',
     )
     parser.add_argument(
+        '--shared-palette', action='store_true',
+        help='Reference the standalone palette from every descriptor; requires --shared-palette-file',
+    )
+    parser.add_argument(
         '--deduplicate-frames', action='store_true',
         help='Store identical frames once and emit extra labels as aliases',
     )
@@ -759,6 +775,10 @@ def main() -> int:
         [s.strip() for s in args.sprites.split(',') if s.strip()]
         if args.sprites else None
     )
+    if args.shared_palette and not args.shared_palette_file:
+        parser.error('--shared-palette requires --shared-palette-file')
+
+    shared_palette_label = f"{label_prefix}_palette" if args.shared_palette else None
 
     try:
         results, shared_palette, has_transparent = process_atlas(
@@ -773,6 +793,7 @@ def main() -> int:
             only_sprites=only_sprites,
             force=args.force,
             deduplicate_frames=args.deduplicate_frames,
+            shared_palette_label=shared_palette_label,
         )
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
