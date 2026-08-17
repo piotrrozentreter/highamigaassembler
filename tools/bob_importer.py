@@ -292,10 +292,13 @@ def export_bob_asm_from_quantized(
     planes: int = 5,
     add_word: bool = False,
     alias_labels=None,
+    shared_palette_label: Optional[str] = None,
 ) -> str:
     """Export assembly using pre-quantized indices and a shared palette.
 
     `indices_by_row` is a list of rows, each row a list of palette indices (0..).
+    When `shared_palette_label` is supplied, descriptors point to that external
+    palette and do not emit duplicate palette words.
     """
     h = len(indices_by_row)
     w = len(indices_by_row[0]) if h > 0 else 0
@@ -326,16 +329,22 @@ def export_bob_asm_from_quantized(
         exported_labels.extend([label, f"{label}_data", f"{label}_mask", f"{label}_palette"])
     lines.append(f"\tXDEF\t{', '.join(exported_labels)}")
 
-    lines.extend(f"{label}_palette:" for label in all_labels)
     max_colors = 2 ** planes
-    for i in range(0, min(max_colors, len(final_palette) // 3)):
-        # Use rounding to better match amigeconv's conversion
-        r = int(round(final_palette[i * 3] / 17.0))
-        g = int(round(final_palette[i * 3 + 1] / 17.0))
-        b = int(round(final_palette[i * 3 + 2] / 17.0))
-        amiga_color = (r << 8) | (g << 4) | b
-        lines.append(f"\tDC.W\t${amiga_color:03X}\t; color {i}")
-    lines.append("")
+    palette_label = shared_palette_label or f"{out_label}_palette"
+    if shared_palette_label:
+        lines.append(f"; External shared palette: {shared_palette_label}")
+        lines.extend(f"{label}_palette EQU {shared_palette_label}" for label in all_labels)
+        lines.append("")
+    else:
+        lines.extend(f"{label}_palette:" for label in all_labels)
+        for i in range(0, min(max_colors, len(final_palette) // 3)):
+            # Use rounding to better match amigeconv's conversion
+            r = int(round(final_palette[i * 3] / 17.0))
+            g = int(round(final_palette[i * 3 + 1] / 17.0))
+            b = int(round(final_palette[i * 3 + 2] / 17.0))
+            amiga_color = (r << 8) | (g << 4) | b
+            lines.append(f"\tDC.W\t${amiga_color:03X}\t; color {i}")
+        lines.append("")
 
     stored_width = w + (16 if add_word else 0)
 
