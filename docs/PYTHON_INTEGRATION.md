@@ -1,481 +1,268 @@
-# Python Integration for High Assembler - Design Suggestions
+# Compile-Time Python Integration
 
-## Overview
+HAS supports two forms of compile-time Python code generation:
 
-Integrating Python code generation into HAS would allow runtime code synthesis at compile time. Here are several approaches with tradeoffs:
+- **External generation with `--generate`** produces an entire HAS source file on standard output before parsing begins.
+- **Inline `@python` directives** produce one or more statements inside the current procedure during code generation.
 
----
+Both mechanisms run Python on the compiler host. They are code-generation tools, not runtime Python support in the generated Amiga program.
 
-## Option 1: `@python` Directive (Recommended)
+## Choosing a Mechanism
 
-**Most flexible and aligned with HAS philosophy**
+| Need | Use |
+|---|---|
+| Generate data sections, constants, procedures, or a complete program | External `--generate` |
+| Read JSON, images, maps, or other build-time assets | External `--generate` |
+| Inspect generated HAS source as a separate debugging step | External `--generate` |
+| Calculate and insert statements inside one existing procedure | Inline `@python` |
+| Unroll a small, fixed sequence using the current parameters or locals | Inline `@python` |
 
-### Syntax
+Use external generation for whole-file structure and asset pipelines. Use inline generation for small procedure-local expansions. Inline directives cannot add top-level data sections, constants, or procedure declarations.
+
+## External Generation with `--generate`
+
+The command-line form is:
+
+```powershell
+python -m hasc.cli ignored.has --generate generator.py -o output.s
+```
+
+The positional input argument is still required by the CLI, but its contents are **ignored** when `--generate` is present. The file does not need to exist. HAS runs the generator as:
+
+```text
+[sys.executable, script]
+```
+
+The generator receives no additional CLI arguments from HAS. It has 30 seconds to finish. HAS captures its complete standard output and treats it as the complete HAS source, then runs the normal parser, validator, unused-procedure handling, and code generator. A nonzero exit code or timeout stops compilation.
+
+Because stdout is the source channel, print only valid HAS source to stdout. Send diagnostics to stderr:
+
+```python
+import sys
+
+print("loading level data", file=sys.stderr)
+print("code generated:")
+print("    proc start() -> int {")
+print("        return 0;")
+print("    }")
+```
+
+### Sine Lookup Table
+
+This generator creates an unsigned 64-entry sine table suitable for game motion. Save it as `generate_sine.py`:
+
+```python
+import math
+
+entries = 64
+values = []
+
+for index in range(entries):
+    angle = index * 2.0 * math.pi / entries
+    values.append(str(int(127 * math.sin(angle)) + 128))
+
+print("data math_tables:")
+print(f"    sin_table.b[{entries}] = {{ {', '.join(values)} }}")
+print()
+print("code generated:")
+print("    proc start() -> int {")
+print("        return 0;")
+print("    }")
+```
+
+Compile it directly:
+
+```powershell
+python -m hasc.cli ignored.has --generate generate_sine.py -o sine_table.s
+```
+
+For debugging, first capture and inspect exactly what the compiler will parse:
+
+```powershell
+python generate_sine.py > generated_sine.has
+python -m hasc.cli generated_sine.has -o sine_table.s
+```
+
+### Level and Tile Data from JSON
+
+External generation is a good fit for converting level-editor output into static HAS arrays. This small example uses a flat tile list.
+
+Save this as `level.json`:
+
+```json
+{
+  "width": 4,
+  "height": 3,
+  "tiles": [0, 0, 1, 0, 2, 2, 1, 0, 0, 3, 3, 0]
+}
+```
+
+Save this as `generate_level.py`:
+
+```python
+import json
+import sys
+
+with open("level.json", "r", encoding="utf-8") as level_file:
+    level = json.load(level_file)
+
+width = int(level["width"])
+height = int(level["height"])
+tiles = [int(tile) for tile in level["tiles"]]
+
+if len(tiles) != width * height:
+    raise ValueError("tile count does not match width * height")
+if any(tile < 0 or tile > 255 for tile in tiles):
+    raise ValueError("tile IDs must fit in a byte")
+
+print(f"generating {width}x{height} level", file=sys.stderr)
+print("data level_data:")
+print(f"    level_width.w = {width}")
+print(f"    level_height.w = {height}")
+print(f"    level_tiles.b[{len(tiles)}] = {{ {', '.join(map(str, tiles))} }}")
+print()
+print("code generated:")
+print("    proc start() -> int {")
+print("        return 0;")
+print("    }")
+```
+
+Run it from the directory containing both files:
+
+```powershell
+python -m hasc.cli ignored.has --generate generate_level.py -o level_data.s
+```
+
+The generator should validate asset shape and value ranges itself. HAS validates the generated HAS program, but it does not know the intended JSON schema.
+
+## Inline `@python`
+
+An inline directive appears where a statement is allowed inside a procedure. Python must assign generated HAS text to the name `generated_code`.
+
+### String Syntax
+
+Use a quoted Python program followed by a semicolon:
 
 ```has
 code generated:
-    proc unrolled_add() -> int {
+    proc calculated_assignment() -> int {
         var result:int = 0;
-        
-        // Inline string syntax
-        @python "result_val = 10 * 4; generated_code = f'result = {result_val};'";
-        
+
+        @python "import math; angle = math.pi / 6; value = int(100 * math.sin(angle)); generated_code = f'result = {value};'";
+
         return result;
     }
-    
-    proc block_example() -> int {
+```
+
+### Block Syntax
+
+Block syntax is easier to read for multiple Python statements:
+
+```has
+code generated:
+    proc add_fixed_steps(step:int) -> int {
         var total:int = 0;
-        
-        // Block syntax for multi-line Python
+
         @python {
-import math
-values = [i * 10 for i in range(5)]
-generated_code = "total = " + str(sum(values)) + ";"
+lines = []
+for index in range(4):
+    lines.append("total = total + step;")
+generated_code = lines
         }
-        
+
         return total;
     }
 ```
 
-### How It Works
+Here `generated_code` is a list of four HAS assignment strings. A single string may also contain multiple statements. Generated statements are emitted in the current procedure context, so they can refer to its existing parameters and locals, such as `step` and `total` above.
 
-```
-HAS Source
-    ↓
-Parser recognizes @python directive
-    ↓
-Extract Python code + context
-    ↓
-Execute Python in isolated environment with HAS API
-    ↓
-Inject generated code back into AST
-    ↓
-Continue normal compilation
-    ↓
-Assembly output
+Compile an inline source normally:
+
+```powershell
+python -m hasc.cli inline_generation.has -o inline_generation.s
 ```
 
-### Implementation
+### Python Environment
 
-```python
-# In parser.py - Grammar (already implemented)
-GRAMMAR = r"""
-...
-?stmt: ... | python_stmt
+Inline code receives `math` directly and these selected builtins:
 
-python_stmt: "@python" STRING ";"
-
-# Block syntax: @python { code } is preprocessed to @python "PYTHON_0";
-...
-"""
-
-# In parser.py - Add transformer
-def python_stmt(self, items):
-    code = items[0]  # Extract Python code
-    return ast.PythonStmt(code=code)
-
-# In ast.py - New AST node
-@dataclass
-class PythonStmt:
-    code: str  # Python code to execute
-
-# In codegen.py - Execute and inject (already implemented)
-elif isinstance(stmt, ast.PythonStmt):
-    # Execute Python code in sandboxed environment
-    sandbox_globals = {
-        '__builtins__': {
-            'range': range, 'len': len, 'list': list, 'dict': dict,
-            'str': str, 'int': int, 'float': float, 'sum': sum,
-            'max': max, 'min': min, 'abs': abs, 'enumerate': enumerate,
-            '__import__': __import__,  # Allow imports
-        },
-        'math': math,  # Common module
-    }
-    exec(stmt.code, sandbox_globals)
-    
-    # Check if 'generated_code' variable was set
-    if 'generated_code' in sandbox_globals:
-        generated = sandbox_globals['generated_code']
-        # Parse and emit the generated HAS code
-        # ... (parsing logic)
+```text
+range, len, list, dict, str, int, float, enumerate, zip,
+sum, max, min, abs, round, pow
 ```
 
-### Advantages
-- ✅ Full Python power at compile time
-- ✅ Clear syntax (clearly marks generated code)
-- ✅ Can generate complex structures
-- ✅ Access to loop unrolling, SIMD patterns, etc.
+Imports are allowed through Python's normal `__import__`, so `import math`, `import json`, and other modules available to the selected interpreter can be used. Inline code has no HAS AST, validator, symbol-table, or compiler API. Its only output contract is the `generated_code` variable.
 
-### Disadvantages
-- ⚠️ Requires sandboxed execution (security concerns)
-- ⚠️ Debugging generated code harder
-- ⚠️ Need to map Python output back to HAS AST
+`generated_code` may be:
 
----
+- A string containing one or more procedure statements.
+- A list whose string elements each contain procedure statements.
 
-## Option 2: Macro System (Simpler)
+If `generated_code` is not assigned, the directive emits nothing. If it has another type, or a list contains non-string elements, those values are silently ignored. Python exceptions and parse/code-generation failures are reported as `@python directive execution failed` code-generation errors.
 
-**Use macros for most common patterns**
+## Validation and Structural Limits
 
-### Syntax
+Inline directives run during code generation, **after the original HAS module has completed semantic validation**. The generated text is parsed as the body of a temporary procedure and then emitted in the current procedure context, but those generated statements do not pass through the semantic validator.
 
-```has
-macro unroll_loop(count, body) {
-    for i in range(count) {
-        @expand: body
-    }
-}
+Consequences include:
 
-proc test() -> int {
-    unroll_loop(4, "add.l #1,d0");
-    return 0;
-}
+- Syntax errors in generated text are caught during code generation.
+- Existing parameters and locals can be referenced because code generation receives the current procedure context.
+- Undefined names, type mismatches, invalid calls, and other semantic mistakes may produce a later code-generation error or incorrect assembly instead of a normal validation diagnostic.
+- Top-level constructs cannot be generated inline because the text is parsed only as procedure statements. Use `--generate` for data sections, constants, procedures, or complete modules.
+- There is no API for querying HAS types or symbols from Python.
+
+Keep inline expansions small and compile representative paths frequently. Prefer external generation when generated structure needs full normal validation.
+
+## Debugging
+
+For external generators:
+
+1. Run `python generator.py > generated.has`.
+2. Open `generated.has` and check that it is the complete intended source.
+3. Compile it normally with `python -m hasc.cli generated.has -o generated.s`.
+4. Keep progress messages, asset statistics, and debug prints on stderr with `print(..., file=sys.stderr)`.
+
+For inline directives:
+
+1. Build `generated_code` in a plainly named variable before assigning it.
+2. Temporarily write that variable to stderr: `__import__('sys').stderr.write(output + '\n')`.
+3. Paste the printed statements into the procedure and compile them normally when diagnosing parser or code-generation failures.
+4. Check the final assembly, especially when generated statements depend on types or calling conventions, because semantic validation is not run on them.
+
+External stdout must contain only HAS source. Inline stdout is not consumed as generated source, but stderr is still the clearest place for diagnostics.
+
+## Security and Reproducibility
+
+Only run trusted generators and inline directives. Python imports are unrestricted, so compile-time code can read or modify files, access the network, inspect environment variables, and execute other processes with the permissions of the compiler user. The selected-builtin dictionary is **not a security sandbox**.
+
+For reproducible builds:
+
+- Pin Python package versions used by generators.
+- Resolve asset paths deliberately and run builds from a known working directory.
+- Validate input schemas and numeric ranges in external generators.
+- Avoid timestamps, random values, and machine-specific paths in generated output.
+- Keep generators and source assets in version control.
+
+## Current Limitations
+
+- `--generate` still requires a positional input argument and ignores it.
+- HAS passes no generator-specific CLI arguments to an external script.
+- External generation is limited to 30 seconds.
+- External stdout replaces the entire HAS input; it is not merged with the positional file.
+- Inline Python can generate only procedure statements, not top-level declarations.
+- Inline Python has no HAS AST, type, symbol, or source-location API.
+- Missing or unsupported `generated_code` values silently emit no statements.
+- Inline generated statements are parsed but not semantically validated.
+
+## Existing Examples
+
+- [`examples/code_generator.py`](../examples/code_generator.py) generates lookup arrays and complete procedures for the external workflow.
+- [`examples/python_directive.has`](../examples/python_directive.has) demonstrates the inline string form and a calculated assignment.
+
+Run the existing examples on Windows with:
+
+```powershell
+python -m hasc.cli ignored.has --generate examples/code_generator.py -o generated_example.s
+python -m hasc.cli examples/python_directive.has -o inline_example.s
 ```
-
-### Implementation
-
-```python
-# In parser.py - Add macro support
-GRAMMAR = r"""
-...
-macro_def: "macro" CNAME "(" params ")" "{" stmt* "}"
-macro_call: CNAME "(" arglist ")"
-...
-"""
-
-# In codegen.py
-elif isinstance(item, ast.MacroCall):
-    macro = self.macros[item.name]
-    # Expand macro with arguments
-    expanded = self._expand_macro(macro, item.args)
-    for stmt in expanded:
-        self._emit_stmt(stmt, ...)
-```
-
-### Advantages
-- ✅ Simpler to implement
-- ✅ No security sandbox needed
-- ✅ Clear syntax
-- ✅ Better for common patterns
-
-### Disadvantages
-- ⚠️ Limited to macro language features
-- ⚠️ Can't use full Python
-- ⚠️ Need to implement macro engine
-
----
-
-## Option 3: External Python Script (Pragmatic)
-
-**Use Python for pre-processing**
-
-### Workflow
-
-```bash
-# Pre-compile: Python generates HAS
-python3 code_generator.py > generated.has
-
-# Compile: Normal HAS compilation
-python3 -m hasc.cli generated.has -o out.s
-
-# Alternative: Integrated
-python3 -m hasc.cli --generate code_generator.py main.has -o out.s
-```
-
-### Example
-
-```python
-# code_generator.py
-def generate_simd_loop():
-    code = """
-    code generated:
-        proc simd_add_vectors() -> int {
-    """
-    for i in range(16):
-        code += f"            var v{i}:int = 0;\n"
-    code += "        }\n"
-    return code
-
-print(generate_simd_loop())
-```
-
-### Implementation
-
-```python
-# In cli.py - Add --generate option
-ap.add_argument("--generate", help="Pre-process with Python script")
-
-if args.generate:
-    # Run Python script to generate HAS code
-    import subprocess
-    result = subprocess.run(['python3', args.generate], capture_output=True)
-    src = result.stdout.decode()
-    # Continue with normal compilation
-```
-
-### Advantages
-- ✅ Easiest to implement
-- ✅ Full Python power
-- ✅ No security concerns
-- ✅ Works today
-
-### Disadvantages
-- ⚠️ Separate build step
-- ⚠️ Harder to debug
-- ⚠️ Less integrated
-
----
-
-## Option 4: Hybrid Approach (Best)
-
-**Combine best features of multiple options**
-
-### Architecture
-
-```
-┌─────────────────────┐
-│  HAS Source Code    │
-└──────────┬──────────┘
-           │
-           ├─→ @python blocks     ──→ Python sandbox execution
-           ├─→ @macro calls       ──→ Macro expansion
-           └─→ Regular code       ──→ Normal compilation
-           │
-           ↓
-    ┌──────────────────┐
-    │   Unified AST    │
-    └────────┬─────────┘
-             │
-             ↓
-    ┌──────────────────┐
-    │    Code Gen      │
-    └────────┬─────────┘
-             │
-             ↓
-    ┌──────────────────┐
-    │  68000 Assembly  │
-    └──────────────────┘
-```
-
-### What To Use When
-
-| Use Case | Method |
-|----------|--------|
-| Loop unrolling | `@python` or `@macro` |
-| SIMD patterns | `@python` |
-| Table generation | `@python` |
-| Simple repetition | `@macro` |
-| Complex logic | Python pre-processor |
-
----
-
-## Recommended Implementation Path
-
-### External Python (Quick Win)
-- Implement `--generate` CLI option
-- Use subprocess to run Python scripts
-- Allows users to generate HAS files before compilation
-- No changes to compiler needed
-
-### Macro System (Foundation)
-- Add macro definitions to grammar
-- Implement macro expansion
-- Perfect for repetitive patterns
-
-### Python Sandbox (Advanced)
-- Add `@python` directive
-- Implement safe execution sandbox
-- Full compile-time code generation
-- Complex patterns possible
-
----
-
-## Detailed Implementation: External Python (Start Here)
-
-### 1. Modify CLI
-
-```python
-# hasc/cli.py
-def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("input")
-    ap.add_argument("-o", "--output", default="out.s")
-    ap.add_argument("--generate", help="Pre-process with Python script")
-    ap.add_argument("--no-validate", action="store_true")
-    args = ap.parse_args(argv)
-
-    src = args.input
-    
-    # If --generate specified, run Python script first
-    if args.generate:
-        import subprocess
-        print(f"Generating code with {args.generate}...", file=sys.stderr)
-        result = subprocess.run(
-            [sys.executable, args.generate],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode != 0:
-            print(f"Generation script failed:", file=sys.stderr)
-            print(result.stderr, file=sys.stderr)
-            sys.exit(1)
-        src = result.stdout
-        print(f"Generated {len(src)} bytes of HAS code", file=sys.stderr)
-    else:
-        with open(args.input, "r", encoding="utf-8") as f:
-            src = f.read()
-    
-    # Continue with normal compilation
-    try:
-        mod = parser.parse(src)
-        # ... rest of compilation
-```
-
-### 2. Example Generator Script
-
-```python
-#!/usr/bin/env python3
-# generate_tables.py
-
-def generate_sin_table():
-    """Generate lookup table for sine approximation"""
-    code = "data sin_table:\n"
-    for i in range(256):
-        angle = (i / 256.0) * 3.14159 * 2
-        value = int(32767 * __import__('math').sin(angle))
-        code += f"    sin_{i}: dc.w {value}\n"
-    return code
-
-def generate_dispatch_table():
-    """Generate opcode dispatch table"""
-    code = "data opcodes:\n"
-    opcodes = ['add', 'sub', 'mul', 'div', 'and', 'or', 'xor']
-    for i, op in enumerate(opcodes):
-        code += f"    opcode_{i}: dc.l {op}_handler\n"
-    return code
-
-if __name__ == "__main__":
-    print("code generated:")
-    print(generate_sin_table())
-    print(generate_dispatch_table())
-```
-
-### 3. Usage
-
-```bash
-# Generate code and compile in one command
-python3 -m hasc.cli main.has --generate generate_tables.py -o out.s
-
-# Or two-step process for debugging
-python3 generate_tables.py > generated.has
-python3 -m hasc.cli generated.has -o out.s
-```
-
----
-
-## Example Use Cases
-
-### Use Case 1: Loop Unrolling (with @python directive)
-
-```has
-code mycode:
-    proc optimized_loop() -> int {
-        var count:int = 0;
-        
-        // Generate 4 unrolled increment statements
-        @python {
-statements = ""
-for i in range(4):
-    statements += "count = count + 1;\n        "
-generated_code = statements
-        }
-        
-        return count;
-    }
-```
-
-### Use Case 1b: External Generator
-
-```python
-# unroll.py - External pre-processor
-print("code mycode:")
-print("    proc optimized_loop() -> int {")
-print("        var count:int = 0;")
-for i in range(4):
-    print("        count = count + 1;")
-print("        return count;")
-print("    }")
-```
-
-### Use Case 2: Table Generation
-
-```python
-# gentables.py
-import math
-
-def gen_exp_table():
-    code = "data math_tables:\n"
-    code += "exp_table:\n"
-    for i in range(256):
-        x = i / 256.0 * 4.0
-        value = int(1000 * math.exp(x))
-        code += f"    dc.l {value}\n"
-    return code
-
-print("data generated:")
-print(gen_exp_table())
-```
-
-### Use Case 3: SIMD Patterns
-
-```python
-# gensimd.py
-def gen_vector_ops(op, count):
-    code = f"code vector_ops:\n"
-    code += f"    proc vector_{op}() -> int {{\n"
-    for i in range(count):
-        code += f"        var v{i}:int = {i};\n"
-    code += f"    }}\n"
-    return code
-
-for op in ['add', 'sub', 'mul']:
-    print(gen_vector_ops(op, 8))
-```
-
----
-
-## Recommendation
-
-Use external Python integration as the baseline workflow:
-
-1. **Use the existing `--generate` option** in CLI
-    - Run Python script via subprocess
-    - Feed output to parser
-
-2. **Create example generators**
-   - Sin/cos tables
-   - Dispatch tables
-   - SIMD patterns
-
-3. **Document the pattern**
-   - Show examples
-   - Explain best practices
-   - Performance tips
-
-**Benefits:**
-- ✅ Minimal changes to HAS core
-- ✅ Full Python power immediately
-- ✅ Easy for users to understand
-- ✅ Can extend with macro and sandbox features later
-- ✅ No security sandbox needed
-- ✅ Can debug generated code easily
-
-Then later add `@macro` directive as needed.
-
----
-
-## Next Steps
-
-1. Reuse `--generate` in build pipelines where generated HAS is part of the source flow.
-2. Add targeted generators for repetitive data and dispatch patterns.
-3. Keep generated examples in version control when reproducibility matters.
