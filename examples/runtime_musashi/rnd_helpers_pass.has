@@ -1,0 +1,142 @@
+// Musashi runtime test: compiler extern calls into the RNG helper library.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_rnd:
+    extern func SeedRnd(seed: int) -> void;
+    extern func RndMaxAMOS(max: int) -> int;
+
+    asm {
+        jsr run_test
+        tst.l d0
+        beq.s .pass
+        move.l #1,$00100000
+        bra.s .stop
+.pass:
+        move.l #1,$00100004
+.stop:
+        stop #$2700
+
+rnd_seed:
+    dc.l $1234ABCD
+
+SeedRnd:
+    link a6,#0
+    move.l 8(a6),d0
+    move.l d0,rnd_seed
+    moveq #0,d0
+    unlk a6
+    rts
+
+_mulu32:
+    move.w d2,d0
+    mulu.w d3,d0
+    move.l d0,d1
+    swap d3
+    move.w d2,d0
+    mulu.w d3,d0
+    lsl.l #8,d0
+    lsl.l #8,d0
+    add.l d0,d1
+    swap d3
+    swap d2
+    move.w d2,d0
+    mulu.w d3,d0
+    lsl.l #8,d0
+    lsl.l #8,d0
+    add.l d0,d1
+    swap d2
+    rts
+
+Rnd:
+    movem.l d1-d3,-(a7)
+    move.l rnd_seed,d2
+    move.l #$BB40E62D,d3
+    bsr _mulu32
+    addq.l #1,d1
+    move.l d1,rnd_seed
+    lsr.l #8,d1
+    move.l d1,d0
+    movem.l (a7)+,d1-d3
+    rts
+
+RndMaxAMOS:
+    link a6,#0
+    movem.l d1-d4,-(a7)
+    move.l 8(a6),d3
+    cmp.l #1,d3
+    ble.s .zero
+    cmp.l #$01000000,d3
+    bls.s .ok
+    bra.s .zero
+.ok:
+    moveq #1,d4
+.mask_loop:
+    cmp.l d3,d4
+    bhs.s .mask_ready
+    lsl.l #1,d4
+    bra.s .mask_loop
+.mask_ready:
+    subq.l #1,d4
+.retry:
+    jsr Rnd
+    and.l d4,d0
+    cmp.l d3,d0
+    bhs.s .retry
+    bra.s .done
+.zero:
+    moveq #0,d0
+.done:
+    movem.l (a7)+,d1-d4
+    unlk a6
+    rts
+    }
+
+    proc test_reseeding() -> int {
+        var first: int;
+        var second: int;
+
+        call SeedRnd(0x13579BDF);
+        first = RndMaxAMOS(257);
+        second = RndMaxAMOS(257);
+
+        call SeedRnd(0x13579BDF);
+        if (first != RndMaxAMOS(257)) {
+            return -1;
+        }
+        if (second != RndMaxAMOS(257)) {
+            return -2;
+        }
+        return 0;
+    }
+
+    proc test_bounds() -> int {
+        var value: int;
+
+        call SeedRnd(0x2468ACE0);
+        value = RndMaxAMOS(2);
+        if (value < 0 || value >= 2) {
+            return -10;
+        }
+        value = RndMaxAMOS(257);
+        if (value < 0 || value >= 257) {
+            return -11;
+        }
+        return 0;
+    }
+
+    proc run_test() -> int {
+        var result: int;
+
+        result = test_reseeding();
+        if (result != 0) {
+            return result;
+        }
+        result = test_bounds();
+        if (result != 0) {
+            return result;
+        }
+        if (RndMaxAMOS(0) != 0 || RndMaxAMOS(1) != 0 || RndMaxAMOS(-1) != 0) {
+            return -20;
+        }
+        return 0;
+    }
