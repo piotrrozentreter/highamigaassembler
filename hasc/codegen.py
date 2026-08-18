@@ -2523,6 +2523,11 @@ class CodeGen:
                             fs = sinfo['fields'][field]
                             stride = sinfo['size']
                             suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
+                            # Evaluate the RHS first so indexed LHS address registers stay intact.
+                            rhs = self._emit_expr(stmt.expr, params, locals_info, "d0", "d2", frame_reg=frame_reg)
+                            for l in rhs:
+                                for sub in str(l).splitlines():
+                                    self.emit(sub if sub.startswith(indent) else indent + sub)
                             # Base and index
                             self.emit(indent + f"lea {name},a0")
                             idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
@@ -2568,11 +2573,6 @@ class CodeGen:
                             off = sinfo['fields'][field]['offset']
                             if off:
                                 self.emit(self._emit_add_immediate(indent, "d1", off))
-                            # Evaluate RHS and store
-                            rhs = self._emit_expr(stmt.expr, params, locals_info, "d0", "d2", frame_reg=frame_reg)
-                            for l in rhs:
-                                for sub in str(l).splitlines():
-                                    self.emit(sub if sub.startswith(indent) else indent + sub)
                             self.emit(indent + f"move{suffix} d0,(a0,d1.l)")
                     else:
                         self.emit(indent + f"; unsupported member assign base: {base}")
