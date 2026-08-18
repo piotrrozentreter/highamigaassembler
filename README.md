@@ -629,19 +629,106 @@ This compiler is actively being developed. Current focus areas:
 
 ## 🛠️ Asset Conversion Tools
 
-The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats:
+The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files that can be included in your HAS projects using `#include` directives.
 
-- **`ham6_gen.py`** - Generate HAM6 (Hold-And-Modify) mode images with 4096 colors
-- **`sprite_importer.py`** - Convert PNG images to Amiga hardware sprites (16-pixel wide, 4 colors)
-- **`sprite_strip_importer.py`** - Convert sprite strip images into multiple hardware sprites (extracts frames by width)
-- **`bob_importer.py`** - Create blitter objects (BOBs) for software sprites (any width, up to 32 colors)
-- **`bob_strip_importer.py`** - Convert BOB strip images into multiple BOBs (extracts frames by width)
-- **`frame_merger.py`** - Merge multiple assembly frame files (e.g., `bob_frame*.s`) into a single file for cleaner project organization
-- **`c64_font_converter.py`** - Import Commodore 64 fonts for Amiga use
-- **`c64_sprites_to_bobs.py`** - Convert C64 sprite data to Amiga BOBs
+### Graphics & Sprite Tools
+
+- **`sprite_importer.py`** - Convert individual PNG images to Amiga hardware sprites
+  - Output: 16-pixel wide, 4-color sprites (2 bitplanes)
+  - Supports color quantization and transparency
+  - Example: `python3 tools/sprite_importer.py pointer.png --label-prefix sprite_pointer`
+  - Documentation: Run with `--help`
+
+- **`sprite_strip_importer.py`** - Convert sprite animation strips to individual hardware sprites
+  - Automatically extracts frames from a horizontal sprite strip
+  - Each frame extracted based on specified width
+  - Supports Floyd-Steinberg dithering for better color approximation
+  - Configurable VSTART/VSTOP positions for vertical positioning
+  - Example: `python3 tools/sprite_strip_importer.py explosion.png 32 --label-prefix explosion`
+  - Documentation: [SPRITE_STRIP_IMPORTER.md](docs/SPRITE_STRIP_IMPORTER.md), [SPRITE_TOOLS_OVERVIEW.md](docs/SPRITE_TOOLS_OVERVIEW.md)
+
+- **`bob_importer.py`** - Convert PNG images to Amiga Blitter Objects (BOBs)
+  - Output: Software sprites with any width and up to 32 colors (1-5 bitplanes configurable)
+  - Supports transparency, color quantization, and dithering
+  - Example: `python3 tools/bob_importer.py player.png 5 --label-prefix bob_player`
+  - Documentation: Run with `--help`
+
+- **`bob_strip_importer.py`** - Convert BOB animation strips to individual BOBs
+  - Extracts animation frames from horizontal BOB strips
+  - Supports any width and 1-5 bitplanes (2-32 colors)
+  - Optional blitter padding with `--add-word` for hardware alignment
+  - Example: `python3 tools/bob_strip_importer.py player_walk.png 32 --planes 5 --label-prefix player`
+  - Documentation: [BOB_STRIP_IMPORTER.md](docs/BOB_STRIP_IMPORTER.md), [SPRITE_TOOLS_OVERVIEW.md](docs/SPRITE_TOOLS_OVERVIEW.md)
+
+- **`texturepacker_atlas_importer.py`** - Convert TexturePacker XML/PNG atlases to shared-palette BOBs
+  - Imports named BOB frames from TexturePacker atlases
+  - Supports shared palette for all frames (eliminating palette duplication)
+  - Handles repeated-frame aliases for animation optimization
+  - Generates master include file with proper palette/frame ordering
+  - Example: `python3 tools/texturepacker_atlas_importer.py walk.xml --outdir build/gen --shared-palette`
+  - Documentation: [TEXTUREPACKER_ATLAS_IMPORTER.md](docs/TEXTUREPACKER_ATLAS_IMPORTER.md)
+
+- **`tile_importer.py`** - Convert PNG tile strips or grids to tilemap graphics
+  - Supports row-interleaved 5-plane format for tile-based rendering
+  - Extracts individual tiles from tile strips
+  - Applies color quantization and supports dithering
+  - Example: `python3 tools/tile_importer.py tileset.png 16` (16x16 tiles)
+
 - **`iff_importer.py`** - Import IFF/ILBM format images
+  - Reads Amiga IFF ILBM (InterLeaved BitMap) files
+  - Supports uncompressed and ByteRun1 (RLE) compressed formats
+  - Converts to BOB assembly format for use in HAS projects
+  - Supports HAM6/HAM8 Hold-And-Modify modes
+  - Example: `python3 tools/iff_importer.py image.iff --label-prefix image`
 
-These tools generate assembly `.s` files that can be included in your HAS projects using `#include` directives. See the `examples/games/launchers/` directory for practical usage examples.
+- **`ham6_gen.py`** - Generate HAM6 (Hold-And-Modify) mode images
+  - Creates 4096-color HAM6 display files
+  - Used with `SetGraphicsMode(2)` for full-color Amiga graphics
+  - Documentation: [HAM6_SUPPORT.md](docs/HAM6_SUPPORT.md)
+
+### Retro Computer Conversion Tools
+
+- **`c64_font_converter.py`** - Convert Commodore 64 fonts to Amiga format
+  - Parses C64 font assembly (dc.b/db.b directives)
+  - Maps C64 screen codes to ASCII 32-127 range
+  - Interleaves into 5 bitplanes for Amiga display
+  - Example: `python3 tools/c64_font_converter.py c64_font.s --label-prefix c64_font`
+
+- **`c64_sprites_to_bobs.py`** - Convert Commodore 64 multicolor sprite data to Amiga BOBs
+  - Decodes C64 multicolor sprite format (24-bit rows, 21 pixels high)
+  - Supports per-sprite and global multicolor settings
+  - Uses built-in C64 color palette, converts to Amiga 12-bit RGB
+  - Example: `python3 tools/c64_sprites_to_bobs.py sprites.s --outdir build --mc1 0xAAFFAA --mc2 0xFF0000`
+
+### File & Assembly Utilities
+
+- **`frame_merger.py`** - Merge multiple assembly frame files into a single file
+  - Combines individual frame `.s` files (e.g., `bob_frame*.s`, `sprite_*.s`) into one assembly file
+  - Removes duplicate section declarations and XDEF labels
+  - Reduces file clutter and simplifies project organization
+  - Example: `python3 tools/frame_merger.py 'bob_frame000_*.s' merged_frames.s`
+  - Documentation: [FRAME_MERGER_README.md](docs/FRAME_MERGER_README.md)
+
+- **`q16_helper.py`** - Convert decimal numbers to Q16.16 fixed-point format
+  - Converts decimal values (e.g., 43.55, 2.5) to 32-bit Q16.16 fixed-point format
+  - Useful for fixed-point math on systems without floating-point hardware
+  - Single or batch conversion modes
+  - Generates HAS constant declarations
+  - Example: `python3 tools/q16_helper.py 43.55` or `python3 tools/q16_helper.py --list 2.50 0.98 0.15`
+  - Documentation: [Q16_HELPER_README.md](docs/Q16_HELPER_README.md)
+
+### Disk & Runtime Tools
+
+- **`create_trackio_adf.py`** - Create custom TrackIo data disks (ADF) for DOS-free runtime loading
+  - Builds compact ADF container files for game asset distribution
+  - Supports file indexing and optional XOR encoding for anti-piracy
+  - Used with `TrackIoReadFile()` for direct floppy disk access without DOS
+  - Example: `python3 tools/create_trackio_adf.py output.adf --asset 1:graphics.bin --asset 2:music.mod`
+  - Documentation: [TRACKIO_LIBRARY.md](docs/TRACKIO_LIBRARY.md)
+
+### Example Usage
+
+See the `examples/games/launchers/` and `examples/games/robots/` directories for practical usage examples of these asset conversion tools in complete game projects.
 
 ## 📄 License
 
