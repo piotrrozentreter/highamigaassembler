@@ -4,6 +4,22 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Changed
+
+- **RNG bounded-value generation fixed** in `lib/helpers.s`:
+  - Corrected rejection-mask construction so `RndMaxAMOS()` remains efficient
+    and uniform for ordinary bounds such as `2`, `3`, `100`, and `256`.
+  - Invalid bounds now return `0`, including values outside the 24-bit source
+    domain; `max == 0x1000000` remains valid.
+  - `SeedRnd()` now explicitly returns `0` in `d0`, matching its documented
+    `void` contract.
+- **RNG runtime contract documented** in `docs/LIBRARY_REFERENCE.md`:
+  - `RndMaxAMOS(max)` uses half-open bounds `[0, max)` and returns `0` for
+    `max <= 1` or `max > 0x1000000`; `max == 0x1000000` is valid.
+  - `Rnd()` and `RndAMOS()` return raw 24-bit LCG output (`0..0xFFFFFF`).
+  - `SeedRnd()` is deterministic for repeatable sequences, and the RNG is not
+    suitable for security or cryptographic use.
+
 ### Added
 
 - **Dependent constant expressions**:

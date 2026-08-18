@@ -1,131 +1,104 @@
-// Random Function Test
-// Tests RndMax to verify it returns different values in range [0, max-1]
+// Focused RNG regression test.
+// Return 0 on success; return a negative code for the first failed contract.
 
 code test:
     extern func SeedRnd(seed: int) -> void;
-    extern func Rnd() -> int;
-    extern func RndMax(max: int) -> int;
+    extern func RndMaxAMOS(max: int) -> int;
 
     asm {
         jmp main
     }
-    
-    // Test procedure: call RndMax multiple times
-    proc test_rndmax() -> int {
-        var i:byte;
-        var val:int;
-        var sum:int = 0;
-        
-        call SeedRnd(0x1A2B3C4D);
-        
-        // Call RndMax(100) multiple times - should return values 0-99
-        i = 0;
-        while (i < 10) {
-            val = RndMax(100);
-            
-            // val should be in [0, 99]
-            if (val < 0 || val >= 100) {
-                return -1;  // Error: out of bounds
-            }
-            
-            sum = sum + val;
-            i = i + 1;
-        }
-        
-        // Return sum of all values - if RndMax always returned same value,
-        // sum would be predictable. With randomness, it should vary.
-        return sum;
-    }
-    
-    proc test_rnd_sequence() -> int {
-        var i:byte;
-        var val1:int;
-        var val2:int;
-        var val3:int;
-        var val4:int;
-        var val5:int;
-        
-        call SeedRnd(0xDEADBEEF);
-        
-        // Get 5 random values - with same seed, should get same sequence
-        val1 = RndMax(256);
-        val2 = RndMax(256);
-        val3 = RndMax(256);
-        val4 = RndMax(256);
-        val5 = RndMax(256);
-        
-        // All should be different (statistically)
-        // If RndMax always returns the same value or 256, this would fail
-        if (val1 < 0 || val1 >= 256) {
+
+    // Reseeding must reproduce the complete sequence, without requiring
+    // any values in the sequence to be different from each other.
+    proc test_reseeding() -> int {
+        var first:int;
+        var second:int;
+        var third:int;
+        var fourth:int;
+
+        call SeedRnd(0x13579BDF);
+        first = RndMaxAMOS(257);
+        second = RndMaxAMOS(257);
+        third = RndMaxAMOS(257);
+        fourth = RndMaxAMOS(257);
+
+        call SeedRnd(0x13579BDF);
+        if (first != RndMaxAMOS(257)) {
             return -1;
         }
-        if (val2 < 0 || val2 >= 256) {
+        if (second != RndMaxAMOS(257)) {
             return -2;
         }
-        if (val3 < 0 || val3 >= 256) {
+        if (third != RndMaxAMOS(257)) {
             return -3;
         }
-        if (val4 < 0 || val4 >= 256) {
+        if (fourth != RndMaxAMOS(257)) {
             return -4;
         }
-        if (val5 < 0 || val5 >= 256) {
-            return -5;
-        }
-        
-        // Return a value indicating success
+
         return 0;
     }
-    
-    proc test_small_ranges() -> int {
-        var i:byte;
-        var val:int;
-        
-        call SeedRnd(0xABCDEF00);
-        
-        // Test RndMax(2) - should return 0 or 1
-        i = 0;
-        while (i < 5) {
-            val = RndMax(2);
-            if (val > 1) {
-                return -1;  // Error: out of bounds for max=2
+
+    // Every returned value must satisfy 0 <= value < max. These maxima
+    // exercise tiny, byte-sized, power-of-two, and just-over-power-of-two ranges.
+    proc test_bounds() -> int {
+        var i:int;
+        var value:int;
+
+        call SeedRnd(0x2468ACE0);
+        for i = 0 to 7 {
+            value = RndMaxAMOS(2);
+            if (value < 0 || value >= 2) {
+                return -10;
             }
-            i = i + 1;
-        }
-        
-        // Test RndMax(1) - should always return 0
-        i = 0;
-        while (i < 5) {
-            val = RndMax(1);
-            if (val != 0) {
-                return -2;  // Error: should be 0 for max=1
+            value = RndMaxAMOS(3);
+            if (value < 0 || value >= 3) {
+                return -11;
             }
-            i = i + 1;
+            value = RndMaxAMOS(100);
+            if (value < 0 || value >= 100) {
+                return -12;
+            }
+            value = RndMaxAMOS(256);
+            if (value < 0 || value >= 256) {
+                return -13;
+            }
+            value = RndMaxAMOS(257);
+            if (value < 0 || value >= 257) {
+                return -14;
+            }
         }
-        
-        return 0;  // Success
+
+        return 0;
+    }
+
+    proc test_invalid_maxima() -> int {
+        if (RndMaxAMOS(0) != 0) {
+            return -20;
+        }
+        if (RndMaxAMOS(1) != 0) {
+            return -21;
+        }
+        if (RndMaxAMOS(-1) != 0) {
+            return -22;
+        }
+        if (RndMaxAMOS(0x01000001) != 0) {
+            return -23;
+        }
+        return 0;
     }
 
     proc main() -> int {
         var result:int;
-        
-        // Test 1: Multiple calls to RndMax(100)
-        result = test_rndmax();
-        if (result < 0) {
-            return result;  // Error in test_rndmax
-        }
-        
-        // Test 2: Sequence of values
-        result = test_rnd_sequence();
-        if (result != 0) {
-            return result;  // Error in test_rnd_sequence
-        }
-        
-        // Test 3: Small ranges
-        result = test_small_ranges();
-        if (result != 0) {
-            return result;  // Error in test_small_ranges
-        }
-        
-        return 0;  // All tests passed
-    }
 
+        result = test_reseeding();
+        if (result != 0) {
+            return result;
+        }
+        result = test_bounds();
+        if (result != 0) {
+            return result;
+        }
+        return test_invalid_maxima();
+    }

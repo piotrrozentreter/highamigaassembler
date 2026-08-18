@@ -58,6 +58,7 @@ SeedRnd:
     link a6,#0
     move.l 8(a6),d0
     move.l d0,rnd_seed
+    moveq #0,d0
     unlk a6
     rts
 
@@ -112,7 +113,8 @@ RndAMOS:
 ; Input: 8(a6)=max
 ; Output: d0=value in [0, max-1]
 ; Description: Returns a bounded random value.
-; Notes: Uses rejection sampling for a more uniform distribution.
+; Notes: max <= 1 or max > $01000000 returns 0; valid bounds use rejection
+;        sampling over the 24-bit Rnd domain.
 ; -----------------------------------------------------------------------------
 RndMaxAMOS:
     link a6,#0
@@ -120,28 +122,32 @@ RndMaxAMOS:
     
     move.l 8(a6),d3        ; d3 = max
     cmp.l #1,d3
-    bgt.s .ok
-    moveq #0,d0            ; return 0 if max <= 1
-    movem.l (a7)+,d1-d4
-    unlk a6
-    rts
+    ble.s .zero
+    cmp.l #$01000000,d3
+    bls.s .ok
+    bra.s .zero             ; Rnd provides only 24 bits
 
 .ok:
-    ; Build rejection mask (24-bit starting mask)
-    move.l #$00FFFFFF,d4
-    moveq #23,d0
+    moveq #1,d4
 .mask_loop:
-    lsr.l #1,d4
     cmp.l d3,d4
-    dbcs d0,.mask_loop
-    roxl.l #1,d4           ; d4 = rejection mask
+    bhs.s .mask_ready
+    lsl.l #1,d4
+    bra.s .mask_loop
+.mask_ready:
+    subq.l #1,d4            ; d4 = smallest power-of-two mask >= max
 
 .retry:
     jsr Rnd                ; d0 = random value
     and.l d4,d0            ; mask it
     cmp.l d3,d0            ; if >= max, retry
     bhs.s .retry
-    
+    bra.s .done
+
+.zero:
+    moveq #0,d0            ; return 0 if max <= 1
+
+.done:
     movem.l (a7)+,d1-d4
     unlk a6
     rts
