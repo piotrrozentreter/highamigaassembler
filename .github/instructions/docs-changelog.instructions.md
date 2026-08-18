@@ -23,11 +23,12 @@ Keep documentation synchronized with actual compiler behavior and keep changelog
 - Record every user-visible behavior change in docs/CHANGELOG.md.
 - Describe what changed, why it matters, and any migration impact.
 - Group entries under clear sections such as Added, Changed, Fixed, and Breaking Changes.
+- For changes that are conditional on flags or platform, note the condition explicitly in the changelog entry and place it in the most severe applicable section (prefer Breaking Changes if any user could be impacted without opt-in).
 
 ## Quality Gate
 
 - If behavior, syntax, or workflow changed, confirm at least one doc location and changelog are updated together.
-- If only internal refactoring occurred, avoid noisy changelog entries.
+- If only internal refactoring occurred with no user-visible effect, omit the changelog entry entirely.
 
 ## Review Output Expectations
 

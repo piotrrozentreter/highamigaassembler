@@ -57,7 +57,7 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 
 - Never use the bare `python` command on Linux.
 - Use the project virtual environment's interpreter for compiler runs, tests, and Python tools: `.venv/bin/python3`.
-- If the virtual environment is activated, `python3` is acceptable only after confirming `command -v python3` resolves to this project's `.venv/bin/python3`.
+- Always use `.venv/bin/python3` explicitly. Never use bare `python` or `python3`.
 - Do not run Python tooling with the system interpreter or an unrelated virtual environment.
 
 ## Standard Workflow
@@ -78,6 +78,7 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 
 4. Validate assembly output
 - When assembler toolchain is available, run `vasmm68k_mot` on generated output.
+- If `vasmm68k_mot` is not available, note this explicitly in the report as an unvalidated assembler step and flag it as a residual risk requiring manual verification before release.
 - Treat assembler errors as release blockers for codegen changes.
 
 5. Report

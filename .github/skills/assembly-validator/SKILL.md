@@ -26,11 +26,11 @@ Specialized workflow for reviewing generated 68000 assembly and identifying corr
 
 ## Procedure
 
-1. Parse context: identify routine boundaries, prologue/epilogue, and data access patterns.
+1. Parse context: identify routine boundaries, prologue/epilogue, and data access patterns. If routine boundaries are not visible in the provided snippet, skip stack-discipline and call-boundary checks and explicitly note in the output that those checks were skipped due to incomplete context.
 2. Validate core semantics: moves, arithmetic, condition codes, branch logic.
 3. Validate memory access: addressing modes, displacement/index usage, alignment assumptions.
 4. Validate call boundaries: argument passing, return registers, preserved state.
-5. Suggest safe optimizations: only where semantics are clearly preserved.
+5. Suggest optimizations only when you can cite the specific instruction sequence before and after and confirm no change to flags, registers, memory, or observable timing.
 
 ## Output Format
 
