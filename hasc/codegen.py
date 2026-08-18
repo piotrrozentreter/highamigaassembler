@@ -6,6 +6,7 @@ from . import ast
 from . import codegen_utils
 from .macro_expander import MacroExpander
 from .asm_substitution import substitute_asm_vars
+from .target import DEFAULT_TARGET, TargetSpec
 
 
 class CodeGenError(Exception):
@@ -14,9 +15,10 @@ class CodeGenError(Exception):
 
 
 class CodeGen:
-    def __init__(self, module: ast.Module):
+    def __init__(self, module: ast.Module, target: TargetSpec = DEFAULT_TARGET):
         self.print_debug = False  # Set to True to enable debug printing
         self.module = module
+        self.target = target
         self.lines = []
         self.proc_sigs = self._build_proc_signatures(module)
         self.array_dims = self._build_array_dimensions(module)
@@ -3729,6 +3731,6 @@ class CodeGen:
                                 self.emit(indent + "unlk a6")
                             self.emit(indent + "rts")
 
-        optimized_lines = peepholeopt.peephole_optimize(self.lines)
+        optimized_lines = peepholeopt.peephole_optimize(self.lines, self.target)
 
         return "\n".join(optimized_lines)

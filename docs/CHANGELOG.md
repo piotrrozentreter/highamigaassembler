@@ -39,6 +39,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Conservative CPU target plumbing**:
+  - Added `--cpu {68000,68020}`, with `68000` remaining the default.
+  - Both targets currently preserve the existing 68000-style generated assembly;
+    68020 scaled indexed addressing is reserved for a later phase.
+
 - **Dependent constant expressions**:
   - `const` initializers may reference constants declared earlier, such as `const B = A + 1;`.
   - Numeric arithmetic, unary signs, parentheses, and existing Q16 conversion remain supported.

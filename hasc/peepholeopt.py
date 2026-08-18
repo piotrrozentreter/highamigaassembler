@@ -1,8 +1,15 @@
 import re
 
+from .target import DEFAULT_TARGET, TargetSpec
 
-def peephole_optimize(lines):
-    """Multi-pass peephole optimizer for 68000 assembly."""
+
+def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
+    """Multi-pass peephole optimizer with explicit CPU target plumbing.
+
+    Target-specific rewrites remain disabled until indexed-address lowering is
+    centralized and independently validated.
+    """
+    del target
     optimized = lines
     changed = True
     passes = 0

@@ -3,6 +3,7 @@ import sys
 import subprocess
 from . import parser, codegen, validator
 from . import reachability
+from .target import CpuTarget, TargetSpec
 import os
 from lark.exceptions import LarkError, UnexpectedInput, UnexpectedToken, UnexpectedCharacters
 
@@ -35,6 +36,12 @@ def main(argv=None):
     ap.add_argument("--generate", help="Pre-process with Python script to generate code")
     ap.add_argument("--no-validate", action="store_true", help="Skip validation checks")
     ap.add_argument(
+        "--cpu",
+        choices=[cpu.value for cpu in CpuTarget],
+        default=CpuTarget.M68000.value,
+        help="CPU target for code generation (default: 68000)",
+    )
+    ap.add_argument(
         "--strip-unused-procs",
         action="store_true",
         help="Remove unreachable internal procedures before code generation",
@@ -45,6 +52,7 @@ def main(argv=None):
         help="Print kept/removed procedure report (implies --strip-unused-procs)",
     )
     args = ap.parse_args(argv)
+    target = TargetSpec.for_cpu(args.cpu)
 
     # If --generate specified, run Python script to generate HAS code
     if args.generate:
@@ -130,7 +138,7 @@ def main(argv=None):
         print(f"Strip report kept: {kept}", file=sys.stderr)
         print(f"Strip report removed: {removed}", file=sys.stderr)
 
-    cg = codegen.CodeGen(mod)
+    cg = codegen.CodeGen(mod, target)
     try:
         asm = cg.gen()
     except codegen.CodeGenError as e:
