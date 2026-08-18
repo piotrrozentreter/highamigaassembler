@@ -1,4 +1,4 @@
-// Visual test: draws random pixels each frame to exercise Rnd/RndMax and graphics
+// Visual test: draws random pixels each frame to exercise RndMaxAMOS and graphics
 
 code main:
     // Graphics helpers (stack-based calling convention)
@@ -12,8 +12,6 @@ code main:
 
     // Random helpers
     extern func SeedRnd(seed: int) -> void;
-    extern func Rnd() -> int;
-    extern func RndMax(max: int) -> int;
     extern func RndMaxAMOS(max: int) -> int;
 
     public main;

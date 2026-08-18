@@ -93,7 +93,7 @@ def test_drawmsgboxcaption_has_bounded_caption_truncation_and_row_reduction():
     )
     _assert_regex(
         block,
-        r"tst\.l\s+a0\s*\n\s*beq\s+\.dmbc_render_body",
+        r"(?:tst\.l\s+a0|cmpa\.l\s+#0,a0)\s*\n\s*beq\s+\.dmbc_render_body",
         "Caption rendering should be skipped for null caption_ptr",
     )
     _assert_regex(

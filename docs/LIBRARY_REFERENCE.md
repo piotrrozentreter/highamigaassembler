@@ -140,7 +140,10 @@ call WaitVBlank();
 
 ### `SeedRnd(seed: int) -> void`
 
-Seeds the AMOS-compatible LCG random number generator.
+Seeds the AMOS-compatible 32-bit LCG random number generator. The seed is
+stored in the runtime's module-local RNG state. Seeding with the same value
+reproduces the same subsequent sequence, so this is useful for deterministic
+effects and tests.
 
 ```has
 extern func SeedRnd(seed: int) -> void;
@@ -149,7 +152,11 @@ call SeedRnd(12345);
 
 ### `Rnd() -> int`
 
-Returns the next random 24-bit value (raw LCG output shifted right 8 bits). Range: 0–16777215.
+Advances the LCG and returns the next raw 24-bit value: the 32-bit LCG state
+shifted right by 8 bits. The inclusive value range is `0..0xFFFFFF`
+(`0..16777215`). This is a deterministic pseudorandom generator, not a
+security or cryptographic RNG; do not use it for secrets, tokens, or other
+security-sensitive decisions.
 
 ```has
 extern func Rnd() -> int;
@@ -162,7 +169,14 @@ Same as `Rnd()` — AMOS-compatible alias.
 
 ### `RndMaxAMOS(max: int) -> int`
 
-Returns a uniform random value in `[0, max-1]` using rejection sampling (avoids modulo bias).
+Returns a uniform random value in the half-open interval `[0, max)` using
+rejection sampling (avoids modulo bias). Because it draws from a 24-bit raw
+source, valid bounds are `2 <= max <= 0x1000000`; `max == 0x1000000` produces
+the full range `0..0xFFFFFF`.
+
+For `max <= 1` or `max > 0x1000000`, the function returns `0`. The function
+uses the same deterministic, non-security LCG as `Rnd()`; call `SeedRnd()` to
+reproduce a bounded sequence.
 
 ```has
 extern func RndMaxAMOS(max: int) -> int;
@@ -579,7 +593,7 @@ call DestroyBob(bob);
 
 ### `MirrorBobHorizontally(handle: int) -> int`
 
-Creates a new BOB handle with horizontally mirrored data and mask copied from `handle`. Preserves the source palette pointer and save-background policy (allocates background when the source handle has it). Returns the new handle on success, `-1` on failure.
+Creates a new BOB handle with horizontally mirrored data and mask copied from `handle`. Preserves the source palette pointer and save-background policy (allocates background when the source handle has it). Mirrors the entire stored row (bit-reversed), so it works whether or not the source BOB was built with `--add-word`. Returns the new handle on success, `-1` on failure.
 
 ```has
 extern func MirrorBobHorizontally(handle: int) -> int;

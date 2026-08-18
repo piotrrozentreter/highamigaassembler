@@ -4,6 +4,39 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Fixed
+
+- **`MirrorBobHorizontally` no longer requires `--add-word`** in `lib/bob.s`:
+  - Previously always subtracted 16px from the source data-header width,
+    assuming every BOB was built with the `--add-word` blitter-scroll padding
+    option. For BOBs built without `--add-word` (the common case), this
+    underflowed the visible-span calculation and made the call fail
+    (return `-1`) for any handle whose stored width was `<= 16`, and produced
+    a horizontally-truncated mirror for wider ones.
+  - Fixed to bit-reverse the entire stored row (all chunks) instead of
+    assuming a trailing 16px scroll chunk, so the function now works
+    regardless of whether the source BOB used `--add-word`.
+  - `examples/tests/compiler/bob_mirror_format_test.has` rewritten with a
+    plain (non-`--add-word`) fixture and hand-verified expected mirrored
+    values; `examples/tests/compiler/bob_mirror_api_test.has` now exercises
+    the previously-broken 16px-wide case successfully.
+
+### Changed
+
+- **RNG bounded-value generation fixed** in `lib/helpers.s`:
+  - Corrected rejection-mask construction so `RndMaxAMOS()` remains efficient
+    and uniform for ordinary bounds such as `2`, `3`, `100`, and `256`.
+  - Invalid bounds now return `0`, including values outside the 24-bit source
+    domain; `max == 0x1000000` remains valid.
+  - `SeedRnd()` now explicitly returns `0` in `d0`, matching its documented
+    `void` contract.
+- **RNG runtime contract documented** in `docs/LIBRARY_REFERENCE.md`:
+  - `RndMaxAMOS(max)` uses half-open bounds `[0, max)` and returns `0` for
+    `max <= 1` or `max > 0x1000000`; `max == 0x1000000` is valid.
+  - `Rnd()` and `RndAMOS()` return raw 24-bit LCG output (`0..0xFFFFFF`).
+  - `SeedRnd()` is deterministic for repeatable sequences, and the RNG is not
+    suitable for security or cryptographic use.
+
 ### Added
 
 - **Dependent constant expressions**:

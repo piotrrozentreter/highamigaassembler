@@ -26,10 +26,10 @@ Make examples reliable as both user documentation and regression tests.
 ## Test Value Requirements
 
 - Demonstrate the intended successful behavior first.
-- For risky features, add small edge-case coverage in the same file when practical.
+- For risky features, add up to 2-3 edge-case inputs in the same file unless doing so requires more than ~20 additional lines or a separate setup.
 - Keep examples deterministic and avoid hidden external dependencies unless explicitly documented.
 
 ## Maintenance Rules
 
-- If compiler behavior changes, update affected examples and expected comments together.
+- If compiler behavior changes, update affected examples and expected comments together. Expected comments must appear on the same line or immediately above the relevant instruction and use the format `; expect: <value or behavior>`.
 - Keep docs references aligned when examples are renamed or moved.

@@ -279,6 +279,39 @@ code main:
 
 class TestArrayOps:
     """Tests for array operations."""
+
+    def test_struct_array_member_store_evaluates_rhs_before_address(self):
+        """RHS calls and indexed reads must not clobber the pending store address."""
+        src = """
+code main:
+    proc get_bonus() -> int {
+        return 5;
+    }
+
+    proc update(index: int) -> int {
+        destination[index].value = source[index].value + get_bonus();
+        return destination[index].value;
+    }
+
+bss test_bss:
+    struct source[4] { value.l }
+    struct destination[4] { value.l }
+        """
+        asm = compile_src(src)
+        body = proc_body(asm, "update")
+
+        rhs_base = body.find("lea source,a0")
+        rhs_call = body.find("jsr get_bonus")
+        destination_base = body.find("lea destination,a0")
+        final_store = body.find("move.l d0,(a0,d1.l)", destination_base)
+
+        assert rhs_base != -1
+        assert rhs_call != -1
+        assert destination_base != -1
+        assert final_store != -1
+        assert rhs_base < destination_base
+        assert rhs_call < destination_base
+        assert destination_base < final_store
     
     def test_complex_index_store_preserves_left_index_operand(self):
         """Complex index stores should preserve partial index values across nested rhs eval."""

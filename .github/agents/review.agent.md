@@ -6,6 +6,8 @@ user-invocable: false
 argument-hint: "Provide the change scope (files, commit, or PR) and desired review depth."
 ---
 
+If the change scope cannot be resolved (e.g., commit not found, files unreadable), halt and ask the invoker to provide a valid scope before proceeding with any analysis.
+
 # HAS Code Review Agent
 
 Code-quality and regression-risk specialist for compiler and generated-assembly behavior.
@@ -36,7 +38,7 @@ Code-quality and regression-risk specialist for compiler and generated-assembly 
 
 - When reviewing assembly files, expect each file to start with a concise module header that identifies the file and purpose.
 - Public assembly functions should have a structured comment header with `Function`, `Input`, `Output`, `Description`, and `Notes` when relevant.
-- Internal helper labels may keep short descriptive comments, but they should not be mistaken for public API documentation.
+- Internal helper labels should have a single-line comment describing their purpose. They must not use the structured `Function/Input/Output/Description/Notes` header format reserved for public functions.
 - If the formatting is inconsistent, call it out as a documentation/style gap separate from behavioral findings.
 
 ## Output Contract

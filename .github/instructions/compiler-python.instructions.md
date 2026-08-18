@@ -13,6 +13,7 @@ Maintain compiler correctness and stable generated assembly while keeping change
 ## Required Engineering Rules
 
 - Preserve parser -> validator -> codegen pipeline behavior unless the task explicitly changes it.
+- When a task explicitly requires changing pipeline behavior or public APIs, document the change rationale in a comment at the change site and call out the deviation explicitly in the review output.
 - Keep validator two-pass semantics intact: symbol collection before semantic checks.
 - Do not store transient validation state inside AST nodes.
 - In code generation, pair every register allocation with release on every control-flow path.
@@ -27,7 +28,7 @@ Maintain compiler correctness and stable generated assembly while keeping change
 
 ## Verification Expectations
 
-- Run at least a smoke compile for representative examples after non-trivial compiler changes.
+- Run a smoke compile after any change to parser, validator, codegen, or allocator logic. Skip only for changes limited to comments, error message text, or CLI help strings.
 - For parser and validator changes, include one valid and one invalid-path check where feasible.
 - For codegen changes, verify generated assembly compiles when assembler tooling is available.
 
