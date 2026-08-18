@@ -1,8 +1,8 @@
 // Regression test for BOB mirror row format.
-// The source BOB stores a 24px image in a 48px runtime row (2 image chunks +
-// 1 blitter scroll chunk, matching --add-word production format).  Horizontal
-// mirroring must ignore the padded and scroll bits; vertical mirroring must
-// preserve plane order inside each image row.
+// The source BOB is a plain 32px, 2-row image built WITHOUT --add-word (the
+// common case). Horizontal mirroring must bit-reverse the entire stored row
+// (no assumption about optional --add-word scroll padding); vertical
+// mirroring must preserve plane order while reversing row order.
 
 code main:
     extern func CreateBob(descriptor_ptr: int, save_background: int) -> int;
@@ -24,25 +24,25 @@ code main:
             move.l (a0),a0
             addq.l #4,a0
 
-            cmpi.w #$6A2C,(a0)     ; row 0, pl 0, w0
+            cmpi.w #$4000,(a0)     ; row 0, pl 0, w0 (mirror of $0001,$0002)
             bne.s .h_fail_10
-            cmpi.w #$4800,2(a0)    ; row 0, pl 0, w1
+            cmpi.w #$8000,2(a0)    ; row 0, pl 0, w1
             bne.s .h_fail_11
-            cmpi.w #$8769,24(a0)   ; row 0, pl 4, w0  (offset = 4*6)
+            cmpi.w #$5000,16(a0)   ; row 0, pl 4, w0  (offset = 4*4)
             bne.s .h_fail_12
-            cmpi.w #$D200,26(a0)   ; row 0, pl 4, w1
+            cmpi.w #$9000,18(a0)   ; row 0, pl 4, w1
             bne.s .h_fail_13
-            cmpi.w #$D9EA,36(a0)   ; row 1, pl 1, w0  (offset = 5*6+6)
+            cmpi.w #$7000,24(a0)   ; row 1, pl 1, w0  (offset = 5*4+4)
             bne.s .h_fail_14
-            cmpi.w #$C800,38(a0)   ; row 1, pl 1, w1
+            cmpi.w #$B000,26(a0)   ; row 1, pl 1, w1
             bne.s .h_fail_15
 
             move.l @handle,a0
             move.l 4(a0),a0
             addq.l #4,a0
-            cmpi.w #$6A2C,(a0)
+            cmpi.w #$4000,(a0)
             bne.s .h_fail_20
-            cmpi.w #$4800,2(a0)
+            cmpi.w #$8000,2(a0)
             bne.s .h_fail_21
             bra.s .h_done
 
@@ -83,27 +83,27 @@ code main:
             move.l (a0),a0
             addq.l #4,a0
 
-            cmpi.w #$2468,(a0)     ; row 0, pl 0, w0  (= src row 1, pl 0, w0)
+            cmpi.w #$000B,(a0)     ; row 0, pl 0, w0  (= src row 1, pl 0, w0)
             bne.s .v_fail_10
-            cmpi.w #$AC00,2(a0)    ; row 0, pl 0, w1
+            cmpi.w #$000C,2(a0)    ; row 0, pl 0, w1
             bne.s .v_fail_11
-            cmpi.w #$1357,6(a0)    ; row 0, pl 1, w0  (offset = 1*6)
+            cmpi.w #$000D,4(a0)    ; row 0, pl 1, w0  (offset = 1*4)
             bne.s .v_fail_12
-            cmpi.w #$0BAD,24(a0)   ; row 0, pl 4, w0  (offset = 4*6)
+            cmpi.w #$0013,16(a0)   ; row 0, pl 4, w0  (offset = 4*4)
             bne.s .v_fail_13
-            cmpi.w #$5E00,26(a0)   ; row 0, pl 4, w1
+            cmpi.w #$0014,18(a0)   ; row 0, pl 4, w1
             bne.s .v_fail_14
-            cmpi.w #$1234,30(a0)   ; row 1, pl 0, w0  (offset = 5*6)
+            cmpi.w #$0001,20(a0)   ; row 1, pl 0, w0  (offset = 5*4)
             bne.s .v_fail_15
-            cmpi.w #$5600,32(a0)   ; row 1, pl 0, w1
+            cmpi.w #$0002,22(a0)   ; row 1, pl 0, w1
             bne.s .v_fail_16
 
             move.l @handle,a0
             move.l 4(a0),a0
             addq.l #4,a0
-            cmpi.w #$2468,(a0)
+            cmpi.w #$000B,(a0)
             bne.s .v_fail_20
-            cmpi.w #$AC00,2(a0)
+            cmpi.w #$000C,2(a0)
             bne.s .v_fail_21
             bra.s .v_done
 
@@ -187,30 +187,30 @@ code main:
 
     asm {
 bob_mirror_format_data:
-        dc.w 40,2                       ; stored_width=40 (=24+16, add_word), height=2
-        dc.w $1234,$5600,$0000           ; row 0, plane 0  (w0,w1,scroll)
-        dc.w $89AB,$CD00,$0000           ; row 0, plane 1
-        dc.w $0FF0,$AA00,$0000           ; row 0, plane 2
-        dc.w $1122,$3300,$0000           ; row 0, plane 3
-        dc.w $4B96,$E100,$0000           ; row 0, plane 4
-        dc.w $2468,$AC00,$0000           ; row 1, plane 0
-        dc.w $1357,$9B00,$0000           ; row 1, plane 1
-        dc.w $55AA,$0F00,$0000           ; row 1, plane 2
-        dc.w $CAFE,$1200,$0000           ; row 1, plane 3
-        dc.w $0BAD,$5E00,$0000           ; row 1, plane 4
+        dc.w 32,2                       ; stored_width=32 (2 chunks, no add_word), height=2
+        dc.w $0001,$0002                 ; row 0, plane 0
+        dc.w $0003,$0004                 ; row 0, plane 1
+        dc.w $0005,$0006                 ; row 0, plane 2
+        dc.w $0007,$0008                 ; row 0, plane 3
+        dc.w $0009,$000A                 ; row 0, plane 4
+        dc.w $000B,$000C                 ; row 1, plane 0
+        dc.w $000D,$000E                 ; row 1, plane 1
+        dc.w $000F,$0010                 ; row 1, plane 2
+        dc.w $0011,$0012                 ; row 1, plane 3
+        dc.w $0013,$0014                 ; row 1, plane 4
 
 bob_mirror_format_mask:
-        dc.w 40,2                       ; stored_width=40 (=24+16, add_word), height=2
-        dc.w $1234,$5600,$0000           ; row 0, plane 0
-        dc.w $89AB,$CD00,$0000           ; row 0, plane 1
-        dc.w $0FF0,$AA00,$0000           ; row 0, plane 2
-        dc.w $1122,$3300,$0000           ; row 0, plane 3
-        dc.w $4B96,$E100,$0000           ; row 0, plane 4
-        dc.w $2468,$AC00,$0000           ; row 1, plane 0
-        dc.w $1357,$9B00,$0000           ; row 1, plane 1
-        dc.w $55AA,$0F00,$0000           ; row 1, plane 2
-        dc.w $CAFE,$1200,$0000           ; row 1, plane 3
-        dc.w $0BAD,$5E00,$0000           ; row 1, plane 4
+        dc.w 32,2                       ; stored_width=32 (2 chunks, no add_word), height=2
+        dc.w $0001,$0002                 ; row 0, plane 0
+        dc.w $0003,$0004                 ; row 0, plane 1
+        dc.w $0005,$0006                 ; row 0, plane 2
+        dc.w $0007,$0008                 ; row 0, plane 3
+        dc.w $0009,$000A                 ; row 0, plane 4
+        dc.w $000B,$000C                 ; row 1, plane 0
+        dc.w $000D,$000E                 ; row 1, plane 1
+        dc.w $000F,$0010                 ; row 1, plane 2
+        dc.w $0011,$0012                 ; row 1, plane 3
+        dc.w $0013,$0014                 ; row 1, plane 4
 
 bob_mirror_format_palette:
         dc.w $000,$111,$222,$333,$444,$555,$666,$777
@@ -222,7 +222,7 @@ bob_mirror_format_desc:
         dc.l bob_mirror_format_data
         dc.l bob_mirror_format_mask
         dc.l bob_mirror_format_palette
-        dc.w 48                         ; conv_w = 48 (3 chunks: 2 image + 1 scroll)
+        dc.w 32                         ; conv_w = 32 (2 chunks, no add_word)
         dc.w 2
         dc.w 32
     }

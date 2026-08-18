@@ -283,9 +283,12 @@ MirrorBobHorizontally:
     move.l d0,a3                   ; a3 = destination handle
 
     ; Read stored_width from source data buffer header (offset 0 of data_ptr).
-    ; BOBs built with --add-word store (w+16) there; subtracting 16 gives the
-    ; real image pixel width to mirror.  The same stored_width is written to
-    ; the new block headers so the mirrored handle blits identically.
+    ; This is the full chunk-aligned row width as stored by the importer -
+    ; whether or not --add-word was used, the whole row is mirrored bit-for-bit
+    ; below, so any trailing padding chunk correctly becomes leading padding in
+    ; the mirrored copy (no assumption about the source BOB's build options).
+    ; The same stored_width is written to the new block headers so the
+    ; mirrored handle blits identically.
     move.l 8(a6),a0
     move.l (a0),a1                 ; a1 = source data_ptr
     move.w (a1),d5                 ; d5 = stored_width from source header
@@ -300,16 +303,9 @@ MirrorBobHorizontally:
     move.w d3,d2
     add.w d2,d2                    ; d2 = total row_bytes
 
-    ; Strip the trailing blitter scroll chunk: stored_width = w+16, visible = w.
-    subi.w #16,d5                  ; d5 = visible_span (actual image pixel width)
-    tst.w d5
-    ble .mbh_fail
-    move.w d5,d4
-    addi.w #15,d4
-    lsr.w #4,d4                    ; d4 = visible chunks to mirror
-    move.w d4,d1
-    lsl.w #4,d1
-    sub.w d5,d1                    ; d1 = logical pad bits
+    ; Mirror the whole row - no scroll-chunk to strip, no logical pad bits.
+    move.w d3,d4                   ; d4 = chunks to mirror (entire row)
+    moveq #0,d1                    ; d1 = logical pad bits (none)
 
     ; Mirror object data payload (height * planes lines)
     move.w gfx_current_mode,d0

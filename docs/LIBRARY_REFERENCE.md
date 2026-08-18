@@ -593,7 +593,7 @@ call DestroyBob(bob);
 
 ### `MirrorBobHorizontally(handle: int) -> int`
 
-Creates a new BOB handle with horizontally mirrored data and mask copied from `handle`. Preserves the source palette pointer and save-background policy (allocates background when the source handle has it). Returns the new handle on success, `-1` on failure.
+Creates a new BOB handle with horizontally mirrored data and mask copied from `handle`. Preserves the source palette pointer and save-background policy (allocates background when the source handle has it). Mirrors the entire stored row (bit-reversed), so it works whether or not the source BOB was built with `--add-word`. Returns the new handle on success, `-1` on failure.
 
 ```has
 extern func MirrorBobHorizontally(handle: int) -> int;

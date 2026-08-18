@@ -4,6 +4,23 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Fixed
+
+- **`MirrorBobHorizontally` no longer requires `--add-word`** in `lib/bob.s`:
+  - Previously always subtracted 16px from the source data-header width,
+    assuming every BOB was built with the `--add-word` blitter-scroll padding
+    option. For BOBs built without `--add-word` (the common case), this
+    underflowed the visible-span calculation and made the call fail
+    (return `-1`) for any handle whose stored width was `<= 16`, and produced
+    a horizontally-truncated mirror for wider ones.
+  - Fixed to bit-reverse the entire stored row (all chunks) instead of
+    assuming a trailing 16px scroll chunk, so the function now works
+    regardless of whether the source BOB used `--add-word`.
+  - `examples/tests/compiler/bob_mirror_format_test.has` rewritten with a
+    plain (non-`--add-word`) fixture and hand-verified expected mirrored
+    values; `examples/tests/compiler/bob_mirror_api_test.has` now exercises
+    the previously-broken 16px-wide case successfully.
+
 ### Changed
 
 - **RNG bounded-value generation fixed** in `lib/helpers.s`:
