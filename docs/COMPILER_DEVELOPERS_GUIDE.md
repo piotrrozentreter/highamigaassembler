@@ -378,6 +378,9 @@ if target_size < expr_size:
 
 ### CPU Targets and Indexed-Address Lowering
 
+Implementation roadmap for upcoming 68020 work:
+[CPU 68020 Implementation Plan](CPU_68020_IMPLEMENTATION_PLAN.md).
+
 `hasc/target.py` defines the closed `CpuTarget` enum and immutable `TargetSpec`.
 The CLI accepts `--cpu 68000` and `--cpu 68020`, defaulting to 68000; `CodeGen(module)`
 also remains a 68000-compatible API call. The 68020 capability model enables
