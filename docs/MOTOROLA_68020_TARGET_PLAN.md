@@ -102,6 +102,37 @@ the 68000 fallback byte-for-byte stable before enabling any 68020 output. That w
 the later assembler/Musashi validation should continue on Linux, where the 68000/68020
 toolchain and runtime checks are available.
 
+### Phase 2 foundation complete; path conversion ready
+
+**Completed**:
+- Implemented `_lower_indexed_address()` helper (line 448 in codegen.py) that centralizes
+  indexed effective-address generation with Phase 4 logic already in place.
+- Fixed critical bugs:
+  - Displacement operand syntax (was invalid, now produces correct `disp(base,index)`).
+  - mulu.w stride limit (was 32767, now 65535 for unsigned compatibility).
+  - Peephole optimizer no longer discards target parameter (preserved for Phase 4+).
+- Added Phase 4 test infrastructure:
+  - vasm assembler validation for both `-m68000` and `-m68020` targets.
+  - Tests confirming 68000 baseline never emits scaled operands.
+  - Test placeholder for 68020 scaled-operand detection (will activate once paths are converted).
+- All Phase 2 baseline compatibility tests passing (10 focused fixtures).
+
+**Next**: Convert 6 codegen paths in sequence, validating each:
+  1. Global 1D array reads (canonical, simplest)
+  2. Global/local typed-pointer reads
+  3. Address-of array elements  
+  4. Struct-array member stores
+  5. 1D/2D array stores
+  6. 2D array linearization + scaling
+
+Each path conversion will:
+- Replace inline `lsl.l` / `mulu.w` with `_lower_indexed_address()` call
+- Validate baseline output remains identical (Phase 2 contract)
+- Add path-specific tests (store operations, nested patterns, struct arrays)
+- Confirm vasm assembly for both targets
+
+Conversion can proceed on Windows with current vasm validation; runtime validation deferred to Phase 8 on Linux.
+
 ## Proposed Target Model
 
 Do not scatter string comparisons such as `if cpu == "68020"` throughout codegen. Introduce a
