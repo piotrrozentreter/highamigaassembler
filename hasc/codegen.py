@@ -445,6 +445,73 @@ class CodeGen:
             self._fail,
         )
 
+    def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0):
+        """Centralized indexed effective-address lowering for Phase 2+.
+
+        Returns (prelude_lines, operand_string) where:
+        - prelude_lines: list of assembly instructions to execute before the access
+          (e.g., scaling instructions for 68000, empty for 68020 with scaled index)
+        - operand_string: the rendered operand for use in a move instruction
+          (e.g., "(a0,d1.l)" for 68000, "(a0,d1.l*4)" for 68020 with stride 4)
+
+        Phase 2 contract: both 68000 and 68020 emit 68000-style output (no scaled index).
+        Phases 3+ will differentiate based on self.target capabilities.
+        """
+        prelude = []
+
+        if stride == 1:
+            # Byte stride: no scaling needed
+            operand = f"({base_reg},{index_reg}.l)"
+        elif stride == 2:
+            # Word stride: need scale-by-2, which is lsl.l #1 for 68000
+            if self.target.supports_scaled_index:
+                # Phase 4+: emit scaled operand
+                operand = f"({base_reg},{index_reg}.l*2)"
+            else:
+                # Phase 2-3: emit shift in prelude
+                prelude.append(f"    lsl.l #1,{index_reg}")
+                operand = f"({base_reg},{index_reg}.l)"
+        elif stride == 4:
+            # Long stride: need scale-by-4, which is lsl.l #2 for 68000
+            if self.target.supports_scaled_index:
+                # Phase 4+: emit scaled operand
+                operand = f"({base_reg},{index_reg}.l*4)"
+            else:
+                # Phase 2-3: emit shift in prelude
+                prelude.append(f"    lsl.l #2,{index_reg}")
+                operand = f"({base_reg},{index_reg}.l)"
+        elif stride == 8:
+            # Quad-word stride (rare, but used by some structs)
+            if self.target.supports_scaled_index:
+                operand = f"({base_reg},{index_reg}.l*8)"
+            else:
+                prelude.append(f"    lsl.l #3,{index_reg}")
+                operand = f"({base_reg},{index_reg}.l)"
+        else:
+            # Arbitrary stride: emit multiply or multiple shifts
+            # Use mulu.w for strides up to 65535 (unsigned 16-bit limit)
+            if stride <= 65535:
+                prelude.append(f"    mulu.w #{stride},{index_reg}")
+                operand = f"({base_reg},{index_reg}.l)"
+            else:
+                # Unsupported stride; caller must handle
+                raise CodeGenError(f"Stride {stride} exceeds 16-bit limit for indexed addressing")
+
+        # Add displacement if nonzero (68000/68020 syntax: disp(base,index))
+        if displacement != 0:
+            # Construct operand with displacement as prefix: disp(base,index) or disp(base,index*scale)
+            # Extract the scale factor if present
+            if "*" in operand:
+                # 68020 scaled form: (base,index.l*scale) -> disp(base,index.l*scale)
+                inner = operand[1:-1]  # Remove outer parens
+                operand = f"{displacement}({inner})"
+            else:
+                # 68000 unscaled form: (base,index.l) -> disp(base,index.l)
+                inner = operand[1:-1]  # Remove outer parens
+                operand = f"{displacement}({inner})"
+
+        return prelude, operand
+
     def _emit_expr(self, expr, params, locals_info, reg_left="d0", reg_right="d1", target_type=None, frame_reg="a6"):
         # Evaluate expr into reg_left (d0). If needing second register, use reg_right (d1).
         # params is now a list of Param objects

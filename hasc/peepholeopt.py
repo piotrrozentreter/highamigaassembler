@@ -8,8 +8,14 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
 
     Target-specific rewrites remain disabled until indexed-address lowering is
     centralized and independently validated.
+    
+    Args:
+        lines: List of assembly instruction strings.
+        target: TargetSpec with CPU capabilities (currently unused but preserved for Phase 4+).
     """
-    del target
+    # NOTE: target parameter is preserved for Phase 4+ when target-specific rewrites
+    # (e.g., avoiding certain shifts for 68020 scaled-operand forms) are implemented.
+    # Currently all optimizations are target-neutral.
     optimized = lines
     changed = True
     passes = 0
