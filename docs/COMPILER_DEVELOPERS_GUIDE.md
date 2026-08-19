@@ -54,7 +54,10 @@ hasc/
 ├── parser.py       # Lark-based parser, converts text → AST
 ├── ast.py          # AST node definitions, type system
 ├── validator.py    # Semantic validation, symbol checking
-└── codegen.py      # Code generation, register allocation
+├── target.py       # Closed CPU target model and capabilities
+├── indexed_address.py       # Pure target-aware indexed-address lowering
+├── codegen_indexed_address.py # Codegen adapters for indexed access paths
+└── codegen.py      # Code generation, register allocation, target plumbing
 ```
 
 ### Data Flow
@@ -68,7 +71,7 @@ hasc/
       ↓
   [Reachability] → Pruned AST  (opt-in; see --strip-unused-procs)
       ↓
-  [CodeGen] ─────→ 68000 Assembly Text
+    [TargetSpec] ───→ [CodeGen] ─────→ 68000/68020 Assembly Text
       ↓
    vasm/vlink ───→ Executable Binary
 
@@ -373,6 +376,34 @@ if target_size < expr_size:
 
 ## Deep Dive: Code Generation Stage
 
+### CPU Targets and Indexed-Address Lowering
+
+`hasc/target.py` defines the closed `CpuTarget` enum and immutable `TargetSpec`.
+The CLI accepts `--cpu 68000` and `--cpu 68020`, defaulting to 68000; `CodeGen(module)`
+also remains a 68000-compatible API call. The 68020 capability model enables
+scaled indexing but deliberately keeps full-extension and memory-indirect forms
+disabled.
+
+`hasc/indexed_address.py` owns the target-dependent lowering contract. It receives
+the base register, long-sized index register, stride, optional displacement, and
+whether the caller has opted into scaled syntax, and returns `(prelude, operand)`.
+Adapters in `hasc/codegen_indexed_address.py` route primitive arrays, typed
+pointers, struct-array members, two-dimensional arrays, stores, and address-of
+operations through this helper. This prevents target-specific string checks from
+being scattered through `codegen.py` and keeps fallback arithmetic in one place.
+
+For 68020, legal strides `2`, `4`, and `8` render as `(a0,dN.l*2|4|8)`; byte
+stride `1` remains unscaled. Struct field displacement is folded only when the
+stride is supported and the displacement fits the signed 8-bit indexed form.
+Other cases retain explicit arithmetic: shifts for `16`/`32`, `mulu.w` through
+`32767`, and full-width shift/add multiplication above that range. Constant
+indexes remain direct offsets. The 68000 target never receives scaled operands.
+
+The peephole optimizer receives the selected `TargetSpec`, but its rewrites remain
+target-neutral; legality is decided before optimization by indexed-address
+lowering. Generated output must be assembled with matching `vasmm68k_mot -m68000`
+or `-m68020` flags.
+
 ### CodeGen Architecture (codegen.py)
 
 The `CodeGen` class is the heart of the compiler (2800+ lines). Understanding its organization is crucial.
@@ -382,8 +413,9 @@ The `CodeGen` class is the heart of the compiler (2800+ lines). Understanding it
 **Purpose**: Build lookup tables for code generation
 
 ```python
-def __init__(self, module: ast.Module):
+def __init__(self, module: ast.Module, target: TargetSpec = DEFAULT_TARGET):
     self.module = module
+    self.target = target
     self.proc_sigs = self._build_proc_signatures(module)    # Function signatures
     self.array_dims = self._build_array_dimensions(module)  # Array dimensions
     self.macros = self._build_macros(module)                # Macro definitions
@@ -533,13 +565,21 @@ code.append(f"    move{suffix} {src},{dst}")
 
 **2D Array**: `array[i][j]` → `base + (i * cols + j) * elem_size`
 
+The final element-size scaling is lowered through the shared indexed-address
+helper. On 68000 it remains an explicit shift or fallback multiply; on 68020 a
+legal final stride can be rendered as a scaled indexed operand.
+
 ```python
 # Calculate offset: (row * num_cols + col) * elem_size
-code.append(f"    mulu.w #{num_cols},{row_reg}")  # row * cols
+code.extend(emit_full_width_multiply(row_reg, num_cols, scratch_reg="d3"))
 code.append(f"    add.l {col_reg},{row_reg}")     # + col
-code.append(f"    mulu.w #{elem_size},{row_reg}") # * elem_size
+prelude, operand = lower_indexed_address(
+    target, base_reg=base, index_reg=row_reg, stride=elem_size,
+    enable_scaled=True,
+)
+code.extend(prelude)
 code.append(f"    lea {base}(pc),{addr_reg}")     # load base
-code.append(f"    adda.l {row_reg},{addr_reg}")   # add offset
+code.append(f"    move{suffix} {operand},{value_reg}")
 ```
 
 ---

@@ -40,25 +40,22 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 ### Added
 
 
-- **Conservative CPU target plumbing (Phases 0–1)**:
-  - Added `--cpu {68000,68020}`, with `68000` remaining the default.
-  - 68020 scaled indexed addressing is now enabled for primitive dynamic 1D
-    word/long array accesses and typed-pointer reads/stores. 68000 output keeps
-    the existing shift-based lowering.
-  - Struct-member displacement folding, 2D scaling, full-extension addressing,
-    and memory-indirect forms remain deferred.
-
-- **Phase 2 Path 1 (global 1D array reads) complete**:
-  - New `codegen_indexed_address.py` module with helper wrappers.
-  - `emit_1d_array_read()` centralizes scaling logic via `_lower_indexed_address()`.
-  - Removes dead code, adds contracts and assertions.
-  - Test confirms byte/word/long arrays identical baseline, vasm validates both targets.
-  - Pattern ready for Paths 2–6 continuation on Linux.
-  - Phase 2 conditionals still disabled (all targets emit 68000-style output).
-
-- **Phase 4 infrastructure complete**: TODO markers in place, awaiting Phase 2 path integration.
-
-- **Remaining Phases deferred to Linux**: Paths 2–6, Phases 3–9 require full toolchain (vasm ≥1.8, Musashi runtime).
+- **Opt-in Motorola 68020 target completed**:
+  - Added `--cpu {68000,68020}`, with `68000` remaining the default. The default
+    output and explicit `--cpu 68000` output remain byte-for-byte identical.
+  - Centralized indexed-address lowering now serves primitive 1D reads/stores,
+    typed-pointer reads/stores, struct-array member reads/stores, two-dimensional
+    reads/stores, and address-of operations.
+  - Under `--cpu 68020`, legal `.l` scaled operands use `*2`, `*4`, or `*8` for
+    supported element/struct strides. Legal struct field displacements can be
+    folded into the same operand; larger or unsupported displacements retain
+    explicit arithmetic.
+  - Arbitrary strides retain `mulu.w` when representable; strides above the
+    16-bit multiply range use full-width shift/add lowering. Constant indexes
+    remain direct offsets, and byte indexing remains unscaled.
+  - Matching assembler selection is required: use `-m68000` for baseline output
+    and `-m68020` for scaled output. Full-extension, memory-indirect, `.w` index,
+    and unrelated 68020 instruction optimizations remain deferred.
 
 - **Bare-metal millisecond delay via CIA-A hardware timer**:
   - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by
@@ -572,7 +569,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - IDE language server support
 - Standard library expansion
 - Profile-guided optimization
-- Additional target platforms (68020, 68030)
+- Additional target platforms (68030 and later)
 - Built-in unit testing framework
 
 ---

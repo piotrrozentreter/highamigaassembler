@@ -107,17 +107,28 @@ code main:
 python -m hasc.cli hello.has -o hello.s
 ```
 
-68000 is the default CPU target. Primitive dynamic word/long array accesses and
-typed-pointer accesses can opt into Motorola 68020 scaled indexing:
+68000 is the default CPU target. Select the opt-in 68020 target when generating
+scaled indexed addressing for dynamic array, typed-pointer, struct-array, and
+two-dimensional accesses:
 
 ```bash
 python -m hasc.cli hello.has --cpu 68020 -o hello-68020.s
 vasmm68k_mot -m68020 -Fhunkexe -o hello-68020.o hello-68020.s
 ```
 
-68020 output is not compatible with 68000/68010 hardware. Source syntax, data
-layout, ABI, and pointer representation are unchanged; inline assembly remains
-the programmer's responsibility.
+The compiler accepts only `--cpu 68000` and `--cpu 68020`. Without the option,
+and with explicit `--cpu 68000`, generated assembly is byte-for-byte identical.
+68020 output uses `.l` indexes with scale factors `*2`, `*4`, or `*8` where the
+selected access path and displacement are legal; byte-sized indexing remains
+unscaled. Unsupported strides and displacements use the existing arithmetic
+fallbacks. Constant indexes remain direct constant offsets.
+
+68020 output is not compatible with 68000/68010 hardware and must be assembled
+with the matching `vasmm68k_mot -m68020` flag. Source syntax, data layout, ABI,
+calling convention, alignment, and pointer representation are unchanged; inline
+assembly remains the programmer's responsibility. Full-extension addressing,
+memory-indirect forms, `.w` index selection, and other 68020 instruction-set
+optimizations are not enabled.
 
 **Assemble and link** (requires vasm/vlink):
 

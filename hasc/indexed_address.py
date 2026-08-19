@@ -49,6 +49,12 @@ def _full_width_stride_fallback(index_reg: str, stride: int, scratch_reg: str) -
     return lines
 
 
+def emit_full_width_multiply(index_reg: str, multiplier: int,
+                             scratch_reg: str = "d3") -> List[str]:
+    """Multiply a long index by a constant without truncating its high word."""
+    return _full_width_stride_fallback(index_reg, multiplier, scratch_reg)
+
+
 def lower_indexed_address(
     target: TargetSpec,
     base_reg: str,
@@ -67,6 +73,15 @@ def lower_indexed_address(
     """
     if stride <= 0:
         raise ValueError(f"Stride must be positive, got {stride}")
+    if (
+        displacement
+        and enable_scaled
+        and target.supports_scaled_index
+        and not -128 <= displacement <= 127
+    ):
+        raise ValueError(
+            "Scaled indexed displacement must fit signed 8-bit brief form"
+        )
 
     prelude: List[str] = []
     scale: Optional[int] = None

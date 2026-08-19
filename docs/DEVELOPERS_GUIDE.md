@@ -1231,8 +1231,35 @@ python -m hasc.cli example.has --generate generator.py -o out.s
 python -m hasc.cli example.has --no-validate -o out.s
 ```
 
+### CPU Targets and Assembler Flags
+
+HAS defaults to Motorola 68000 output. The opt-in 68020 target changes only
+instruction selection for supported indexed-address paths; it does not change
+HAS syntax, data layout, ABI, calling convention, alignment, or pointer size.
+
+```bash
+# Default and explicit baseline output are identical
+python -m hasc.cli example.has -o out-68000.s
+python -m hasc.cli example.has --cpu 68000 -o out-68000-explicit.s
+vasmm68k_mot -m68000 -Fhunkexe -o out-68000.o out-68000.s
+
+# Opt in to 68020 scaled indexed addressing
+python -m hasc.cli example.has --cpu 68020 -o out-68020.s
+vasmm68k_mot -m68020 -Fhunkexe -o out-68020.o out-68020.s
+```
+
+Only `68000` and `68020` are accepted by `--cpu`. On 68020, dynamic array,
+typed-pointer, struct-array, two-dimensional, and address-of paths may use
+`.l` scaled indexes (`*2`, `*4`, or `*8`) where legal. Constant indexes and
+unsupported strides/displacements retain direct-offset or arithmetic fallback
+lowering. Do not assemble 68020 output with `-m68000`; the scaled forms are not
+valid for 68000/68010 hardware. Full-extension and memory-indirect addressing,
+`.w` index selection, and unrelated 68020 instruction optimizations remain
+deferred.
+
 ### Output
-The compiler generates Motorola 68000 assembly compatible with `vasm`:
+The compiler generates Motorola assembly compatible with `vasm`. Select the
+assembler CPU flag to match the compiler target:
 
 ```asm
 ; Generated assembly excerpt

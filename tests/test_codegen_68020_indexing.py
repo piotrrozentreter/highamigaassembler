@@ -42,6 +42,32 @@ def test_scaled_index_can_include_a_displacement():
     ) == ([], "(a0,d1.l*8)")
 
 
+def test_scaled_displacement_requires_brief_index_range():
+    for displacement in (-128, 127):
+        lower_indexed_address(
+            TARGET_68020,
+            "a0",
+            "d1",
+            4,
+            displacement=displacement,
+            enable_scaled=True,
+        )
+    for displacement in (-129, 128):
+        try:
+            lower_indexed_address(
+                TARGET_68020,
+                "a0",
+                "d1",
+                4,
+                displacement=displacement,
+                enable_scaled=True,
+            )
+        except ValueError as error:
+            assert "signed 8-bit" in str(error)
+        else:
+            raise AssertionError("out-of-range scaled displacement was accepted")
+
+
 def test_arbitrary_stride_uses_existing_68000_fallbacks():
     for stride in (3, 6, 10, 12):
         prelude, operand = lower_indexed_address(BASELINE, "a0", "d1", stride)
@@ -137,7 +163,8 @@ code main:
     body = asm_68000[asm_68000.index("address:"):]
     assert body.index("jsr row") < body.index("lea matrix,a0")
     assert body.index("jsr col") < body.index("lea matrix,a0")
-    assert "mulu.w #3,d2" in body
+    assert "mulu.w #3,d2" not in body
+    assert "move.l d2,d3" in body
     assert "add.l d2,a0" in body
     body_20 = asm_68020[asm_68020.index("address:"):]
     assert "lea (a0,d2.l*4),a0" in body_20
@@ -180,6 +207,24 @@ code main:
 
     assert "move.l 8(a6),a0" in asm
     assert "move.l 8(a4),a0" not in asm
+
+
+def test_typed_pointer_stores_load_pointee_before_indexing():
+    source = """
+code main:
+    proc write(pointer: int*, index: int) -> int {
+        pointer[index] = 42;
+        return pointer[index];
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    assert "move.l 8(a6),a0" in asm_68000
+    assert "lea pointer,a0" not in asm_68000
+    assert "(a0,d1.l)" in asm_68000
+    assert "(a0,d1.l*4)" in asm_68020
 
 
 def test_struct_field_displacement_scales_only_on_68020():

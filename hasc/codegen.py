@@ -1251,7 +1251,7 @@ class CodeGen:
 
                     elif len(expr.operand.indices) == 2:
                         elem_bytes = 4
-                        col_count = 10
+                        col_count = None
                         if name in self.struct_info:
                             elem_bytes = self.struct_info[name]['size']
                         elif name in self.array_dims:
@@ -1264,6 +1264,11 @@ class CodeGen:
                                 elem_bytes = 2
                             if len(dims) >= 2:
                                 col_count = dims[1]
+                        if col_count is None:
+                            self._fail(
+                                f"Cannot determine column count for 2D array '{name}'; "
+                                "declare explicit dimensions like 'int[3][5]'"
+                            )
                         code.extend(codegen_indexed_address.emit_2d_array_address_of(
                             self,
                             name,
@@ -2427,17 +2432,38 @@ class CodeGen:
                     size_suffix = {1: '.b', 2: '.w', 4: '.l'}.get(elem_bytes, '.l')
 
                     if len(target.indices) == 1:
-                        store_code = codegen_indexed_address.emit_array_store(
-                            self,
-                            name,
-                            target.indices[0],
-                            params,
-                            locals_info,
-                            "d0",
-                            "d1",
-                            frame_reg,
-                            elem_bytes,
-                        )
+                        pointer_info = next((item for item in locals_info if item[0] == name), None)
+                        pointer_param = next((item for item in params if item.name == name), None)
+                        if pointer_info and pointer_info[1] and pointer_info[1].endswith('*'):
+                            pointer_type = pointer_info[1][:-1]
+                            pointer_bytes = ast.type_size(pointer_type)
+                            pointer_name = self._frame_offset(pointer_info[2], frame_reg)
+                            store_code = codegen_indexed_address.emit_typed_pointer_store(
+                                self, pointer_name, target.indices[0], params,
+                                locals_info, "d0", frame_reg, pointer_bytes
+                            )
+                        elif pointer_param and pointer_param.ptype and pointer_param.ptype.endswith('*'):
+                            pointer_type = pointer_param.ptype[:-1]
+                            pointer_bytes = ast.type_size(pointer_type)
+                            stack_params = [item for item in params if not (item.register and item.register != 'None')]
+                            if pointer_param.register and pointer_param.register != 'None':
+                                pointer_name = pointer_param.register
+                            else:
+                                pointer_name = f"{8 + 4 * stack_params.index(pointer_param)}(a6)"
+                            store_code = codegen_indexed_address.emit_typed_pointer_store(
+                                self, pointer_name, target.indices[0], params,
+                                locals_info, "d0", frame_reg, pointer_bytes
+                            )
+                        elif name not in self.array_dims:
+                            store_code = codegen_indexed_address.emit_typed_pointer_store(
+                                self, name, target.indices[0], params,
+                                locals_info, "d0", frame_reg, 1
+                            )
+                        else:
+                            store_code = codegen_indexed_address.emit_array_store(
+                                self, name, target.indices[0], params, locals_info,
+                                "d0", "d1", frame_reg, elem_bytes
+                            )
                         for line in store_code:
                             self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
                     elif len(target.indices) == 2:

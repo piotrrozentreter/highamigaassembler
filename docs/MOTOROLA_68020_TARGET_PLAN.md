@@ -61,8 +61,8 @@ Other affected surfaces:
 - `hasc/register_allocator.py`: documents intended register roles, although current codegen
   mostly uses hardcoded `d0`-`d3` and `a0` scratch registers.
 - Build scripts and example Makefiles: many assume or explicitly pass `-m68000`.
-- `scripts/test_runtime_musashi.sh`: currently does not propagate a compiler, assembler, or
-  runner CPU target.
+- `scripts/test_runtime_musashi.sh`: propagates `HASC_CPU` to the compiler/assembler and
+  `MUSASHI_CPU` to the runner; the manifest still contains only general smoke cases.
 - `tools/musashi_runner/has_musashi_runner.c`: already accepts
   `--cpu 68000|68010|68EC020|68020`.
 
@@ -77,13 +77,13 @@ The current branch contains the prerequisite fix:
 - `tests/test_codegen_basic.py` contains
   `test_struct_array_member_store_evaluates_rhs_before_address`.
 
-Verify that this test is present and passing before starting target work. On Linux, also add or
-run a Musashi regression that proves the destination changes and the source array remains
-unchanged after a nested RHS read and procedure call.
+The prerequisite test remains part of the regression surface. Runtime validation through
+Musashi is useful follow-up coverage, but it is not required to describe the compiler target
+scope below.
 
 ## Implementation Status
 
-### Phases 0 and 1 complete
+### Implemented target scope
 
 - Added focused tests proving that compiling without `--cpu` and compiling with
   `--cpu 68000` produce byte-for-byte identical assembly.
@@ -94,46 +94,24 @@ unchanged after a nested RHS read and procedure call.
   keeps full extension and memory-indirect forms disabled.
 - Added `--cpu {68000,68020}` to the CLI. Invalid values are rejected by argparse.
 - Passed the selected target explicitly through `CodeGen` into the peephole optimizer.
-- Primitive dynamic 1D reads/stores and typed-pointer reads/stores now use scaled
-  indexed operands for 68020 when the stride is 2, 4, or 8.
+- Primitive dynamic 1D reads/stores, typed-pointer reads/stores, struct-array
+  member reads/stores, two-dimensional reads/stores, and address-of adapters all
+  route through the shared indexed-address lowering module.
+- 68020 scaled operands are emitted for legal strides `2`, `4`, and `8`; byte
+  stride `1` remains unscaled. Struct field displacements are folded only when
+  the displacement fits the signed 8-bit indexed form.
+- Constant indexes remain direct offsets. Unsupported strides and displacements
+  use explicit arithmetic fallbacks: shifts for `16`/`32`, `mulu.w` through
+  `32767`, and full-width shift/add multiplication above that range.
+- Focused tests cover target plumbing, all indexed access families, fallback
+  lowering, complex indexes/calls, displacement-plus-scale forms, and matching
+  vasm CPU validation.
 
-Phase 2 centralization is complete for the current indexed access paths. Phase 4 is
-partially implemented: primitive 1D and typed-pointer accesses are target-dependent,
-while struct-member displacement, 2D row-major scaling, and address-of remain on the
-conservative 68000 lowering. The remaining target work and runtime matrix should continue
-on Linux, where the 68000/68020 toolchain and Musashi checks are available.
+The finished scope is an instruction-selection target, not a general 68020
+instruction-set mode. Source syntax, data layout, ABI, calling convention,
+alignment, and pointer representation remain unchanged.
 
-### Phase 2 complete; Phase 4 primitive scaling in progress
-
-**Path 1 (Global 1D array reads) - COMPLETE**:
-- Implemented `emit_1d_array_read()` in new `codegen_indexed_address.py` module.
-- Converted codegen.py line ~842 to call centralized helper.
-- Fixed dead-code branch (constants filtered before calling helper).
-- Added assertion to enforce variable-index contract.
-- Test passing: byte/word/long arrays produce identical baseline output, vasm validates both targets.
-- Pattern established for remaining paths.
-
-**Centralized paths**:
-- Primitive 1D reads, typed-pointer reads, 1D stores, struct-array reads/stores,
-  2D reads/stores, and address-of adapters use the shared lowering module.
-- 68020 scaling is opt-in for primitive 1D and typed-pointer accesses only.
-- Struct field displacements, 2D row-major multiplication, and address-of scaling
-  remain conservative until separately validated.
-
-**Next steps (on Linux with full toolchain)**:
-1. **Path 2**: Convert local typed-pointer reads (~line 750-790). Complexity: local variable offset handling.
-2. **Path 3**: Convert address-of array elements (~line 1350-1420). Complexity: struct array sizes, non-power-of-2 strides.
-3. **Path 4**: Struct-array member stores (~line 2550-2650). New helper: `emit_struct_array_store()`. Complexity: RHS evaluation ordering.
-4. **Path 5**: 1D array stores (~line 2640-2750). New helper: `emit_array_store()`. Complexity: destination calculation.
-5. **Path 6**: 2D array operations (~line 900-1000). Extend `emit_array_store()` for row-major linearization.
-
-Each path passes through centralized address lowering. The 68000 target retains the
-baseline shift/fallback sequences; the 68020 target may use legal scaled operands for
-the explicitly enabled primitive paths.
-
-**Phase 2 completion criteria**: All 6 paths route through `_lower_indexed_address()`, all tests pass, vasm validates both targets, example suite compiles without regressions.
-
-## Proposed Target Model
+## Target Model
 
 Do not scatter string comparisons such as `if cpu == "68020"` throughout codegen. Introduce a
 small closed target model, for example in `hasc/target.py`:
@@ -166,9 +144,9 @@ Keep full-extension and memory-indirect capabilities disabled until separately i
 validated. The model should allow later targets without turning CPU selection into several
 unrelated booleans.
 
-## Effective-Address Lowering Design
+## Effective-Address Lowering
 
-Centralize target-dependent address selection before enabling scaled output. A helper should own:
+The implemented lowering module owns target-dependent address selection:
 
 - Base register.
 - Index register and index width.
@@ -200,8 +178,8 @@ Expected results:
 ([], "(a0,d1.l*4)")
 ```
 
-The exact API may follow existing code style, but all loads, stores, and address-of operations
-must eventually consume the same legality rules.
+All current loads, stores, and address-of operations consume the shared legality rules. Further
+work is limited to runtime coverage and deferred full-extension or memory-indirect forms.
 
 Do not implement scaled indexing as a global peephole text replacement. Removing a shift changes
 the index register value and condition-code side effects, requiring more context than the current
@@ -276,18 +254,19 @@ Implement the smallest useful 68020 feature set:
 Gate: every 68020 sample assembles with `-m68020`, and at least one scaled-index sample is
 rejected by `-m68000` to prove that the test exercises a 68020 encoding.
 
-### Phase 5: Address-Of and Struct Arrays
+### Completed: Address-Of and Struct Arrays
 
 1. Emit scaled indexed `lea` or equivalent address formation for `&array[index]`.
-2. Optimize struct strides `1`, `2`, `4`, and `8`.
+2. Optimize supported struct strides `2`, `4`, and `8`; stride `1` remains unscaled.
 3. Combine a legal field displacement with the scaled index.
 4. Preserve explicit arithmetic for unsupported strides such as `3`, `6`, `10`, `12`, and `16`.
 5. Cover struct member loads, stores, and address-of.
 6. Include RHS calls and nested indexed expressions in store tests.
 
-Gate: runtime tests prove source and destination arrays retain correct values for multiple indexes.
+Validation: focused code-generation tests cover reads, stores, address formation, nested
+indexes, calls, and displacement folding; runtime coverage remains a separate follow-up.
 
-### Phase 6: Two-Dimensional Arrays
+### Completed: Two-Dimensional Arrays
 
 Keep the existing row-major calculation:
 
@@ -296,17 +275,18 @@ linear_index = row * column_count + column
 ```
 
 Initially fold only the final element-size multiplication into the 68020 effective address.
-Do not change the existing row multiplication semantics in the same patch.
+Keep row-major linearization unchanged, but use full-width arithmetic for the row
+times-column multiplication so `.l` indexes are not truncated by `mulu.w`.
 
-Gate: constant, mixed constant/dynamic, and fully dynamic indexes produce identical runtime
-results on both targets.
+Validation: focused tests confirm row-major linearization is unchanged and the final element
+stride uses a legal scaled operand on 68020 output.
 
-### Phase 7: Harden Optimizer and Build Integration
+### Completed: Optimizer and Assembly Validation
 
 1. Ensure peephole operand analysis handles scaled operands such as `(a0,d1.l*4)`.
 2. Add tests for displacement-plus-scale forms and commas inside operands.
 3. Ensure target-specific forms cannot be introduced in 68000 mode.
-4. Propagate CPU selection to build scripts and example Makefiles where appropriate.
+4. Keep CPU selection at the compiler and explicit assembler invocation boundary.
 5. Use explicit vasm flags rather than assembler defaults:
    - `-m68000` for baseline output.
    - `-m68020` for 68020 output.
@@ -314,7 +294,7 @@ results on both targets.
 Gate: dual-target assembly succeeds across representative examples and default output contains no
 scaled-index forms.
 
-### Phase 8: Musashi Runtime Matrix
+### Deferred: Musashi Runtime Matrix
 
 Extend `scripts/test_runtime_musashi.sh` with explicit target variables, for example:
 
@@ -369,11 +349,11 @@ Gate: documentation states exactly what is implemented and does not imply AGA, F
 | Byte array/pointer | Unscaled index | Unscaled or explicit `*1` |
 | Word array/pointer | Explicit `lsl.l #1` | Scaled `*2` |
 | Long array/pointer | Explicit `lsl.l #2` | Scaled `*4` |
-| Struct stride 8 | Explicit `lsl.l #3` | Scaled `*8` |
+| Struct stride 8 | Explicit `lsl.l #3` | Scaled `*8` when field displacement is legal |
 | Struct stride 6 | Existing multiply/fallback | Same legal fallback |
 | Constant index | Constant displacement | Same constant displacement |
 | 2D long array | Linearize, then shift | Linearize, then scaled `*4` |
-| Struct field offset | Legal target displacement or fallback | Legal displacement plus scale |
+| Struct field offset | Legal target displacement or fallback | Legal displacement plus scale when signed 8-bit |
 | Address-of | Explicit scale and add | Scaled indexed `lea` or equivalent |
 
 For each applicable row, test reads, stores, and address formation. Include complex index
@@ -447,7 +427,7 @@ python -m pytest tests/test_peepholeopt.py -v
 python -m pytest tests/test_codegen_68020_indexing.py -v
 ```
 
-The last file is proposed and should be created for target-specific codegen tests.
+`tests/test_codegen_68020_indexing.py` is the target-specific code-generation test suite.
 
 ### Explicit Assembly Checks
 
@@ -483,13 +463,12 @@ Record pre-existing failures separately. Do not widen the 68020 task to unrelate
 - No option and explicit `68000` produce identical assembly.
 - Existing `CodeGen(module)` callers remain 68000-compatible.
 - Primitive dynamic arrays and typed pointers use legal scaled indexing under 68020.
-- Struct strides 1, 2, 4, and 8 are optimized where legal.
+- Struct strides 2, 4, and 8 are optimized where legal; stride 1 remains unscaled.
 - Unsupported strides and displacements use correct fallback code.
 - Loads, stores, address-of, and two-dimensional arrays are covered.
 - Target-specific output is assembled with explicit matching vasm CPU flags.
-- Musashi semantic tests pass under both selected CPUs.
-- At least one 68020 output is rejected by `-m68000` or fails to reach PASS on a 68000 runner,
-  proving the target-specific path was exercised.
+- Focused code-generation tests and explicit matching vasm checks cover both targets. A
+  complete dual-target Musashi runtime matrix remains deferred.
 - Default 68000 examples retain their previous compilation behavior.
 - Documentation and changelog accurately describe the implemented scope.
 

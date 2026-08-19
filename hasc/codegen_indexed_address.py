@@ -311,6 +311,31 @@ def emit_array_store(codegen, name, index_expr, params, locals_info,
     return code
 
 
+def emit_typed_pointer_store(codegen, pointer_name, index_expr, params,
+                            locals_info, reg_value, frame_reg, elem_bytes):
+    """Emit a store through a typed pointer value rather than an array label."""
+    code = []
+    index_code = codegen._emit_expr(
+        index_expr, params, locals_info, "d1", "d2",
+        target_type="int", frame_reg=frame_reg,
+    )
+    from .indexed_address import index_may_clobber_address_register
+    load_pointer = f"    move.l {pointer_name},a0"
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(load_pointer)
+    else:
+        code.append(load_pointer)
+        code.extend(index_code)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", "d1", elem_bytes, use_scaled=True
+    )
+    code.extend(prelude)
+    from . import ast
+    code.append(f"    move{ast.size_suffix(elem_bytes)} {reg_value},{operand}")
+    return code
+
+
 def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
                             reg_value, reg_right, frame_reg, stride,
                             field_offset, field_suffix):
@@ -368,7 +393,9 @@ def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
         target_type="int", frame_reg=frame_reg,
     )
     code.extend(col_code)
-    code.append(f"    mulu.w #{col_count},d2  ; row * col_count")
+    from .indexed_address import emit_full_width_multiply
+    code.extend(emit_full_width_multiply("d2", col_count, "d3"))
+    code.append("    ; row * col_count")
     code.append("    add.l d1,d2   ; + col")
     code.append(f"    lea {name},a0")
 
@@ -405,7 +432,8 @@ def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
     code.extend(col_code)
     if defer_base:
         code.append(f"    lea {name},a0")
-    code.append(f"    mulu.w #{col_count},d2")
+    from .indexed_address import emit_full_width_multiply
+    code.extend(emit_full_width_multiply("d2", col_count, "d3"))
     code.append("    add.l d1,d2")
 
     prelude, operand = codegen._lower_indexed_address(
@@ -442,7 +470,8 @@ def emit_2d_array_address_of(codegen, name, row_expr, col_expr, params,
     code.extend(col_code)
     if defer_base:
         code.append(f"    lea {name},a0")
-    code.append(f"    mulu.w #{col_count},d2")
+    from .indexed_address import emit_full_width_multiply
+    code.extend(emit_full_width_multiply("d2", col_count, "d3"))
     code.append("    add.l d1,d2")
 
     prelude, operand = codegen._lower_indexed_address(

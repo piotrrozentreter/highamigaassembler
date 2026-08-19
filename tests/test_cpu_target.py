@@ -249,7 +249,8 @@ code main:
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
 
     assert baseline != target_68020
-    assert "mulu.w #4,d2" in baseline
+    assert "mulu.w #4,d2" not in baseline
+    assert "move.l d2,d3" in baseline
     assert "lsl.l #2,d2" in baseline
     assert "(a0,d2.l*4)" in target_68020
     assert "lsl.l #2,d2" not in target_68020
