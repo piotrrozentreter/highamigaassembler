@@ -1,0 +1,14 @@
+// Returns the detected CPU_TYPE_* value in d0.
+
+#include "includes/cpu_defs.has";
+
+code main:
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        // expect: one of CPU_TYPE_68000 through CPU_TYPE_68060
+        return GetCPUType();
+    }

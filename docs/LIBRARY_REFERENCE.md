@@ -18,6 +18,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
 | `bob.s`           | Blitter Objects (software sprites)        | this file                                            |
 | `helpers.s`       | VBlank sync, AMOS-compatible RNG          | this file                                            |
+| `cpu.s`           | Exec `AttnFlags` CPU detection            | this file                                            |
 | `str.s`           | String utilities                          | this file                                            |
 | `input.s`         | Joystick and mouse input                  | this file                                            |
 | `keyboard.s`      | Keyboard interrupt driver                 | this file                                            |
@@ -42,6 +43,54 @@ extern func HeapInit(size_words: int) -> int;
 ```
 
 The linker resolves these to the compiled `.o` objects from `lib/`. See [EXTERNAL_MODULES.md](EXTERNAL_MODULES.md) for full include mechanics.
+
+---
+
+## cpu.s — CPU Detection
+
+[`GetCPUType() -> int`](../lib/cpu.s) reads ExecBase `AttnFlags` and returns the
+highest recognized processor feature. If several recognized flags are set, the
+68060 flag takes precedence, followed by 68040, 68030, 68020, and 68010; if none
+is set, the result is 68000.
+
+| Constant         | Value |
+|------------------|------:|
+| `CPU_TYPE_68000` | `0`   |
+| `CPU_TYPE_68010` | `1`   |
+| `CPU_TYPE_68020` | `2`   |
+| `CPU_TYPE_68030` | `3`   |
+| `CPU_TYPE_68040` | `4`   |
+| `CPU_TYPE_68060` | `5`   |
+
+This routine requires a normal AmigaOS/Exec environment with a valid ExecBase
+pointer at address `$4`; it is not a bare-metal CPU probe. On 68060 systems,
+the installed 68060 support software must correctly advertise the 68060 flag
+in `AttnFlags`. Otherwise, the routine returns the highest lower recognized
+flag that Exec reports.
+
+Use the shipped [declarations and constants include](../examples/includes/cpu_defs.has):
+
+```has
+#include "includes/cpu_defs.has";
+
+var cpu_type: int = GetCPUType();
+if (cpu_type == CPU_TYPE_68060) {
+    ; 68060-specific path
+}
+```
+
+See the complete [CPU detection example](../examples/cpu_detection.has).
+
+Build the example from the repository root by compiling the HAS source,
+assembling both generated and library assembly for a base 68000, then linking
+the two objects:
+
+```powershell
+python -m hasc.cli examples/cpu_detection.has -o tmp/cpu_detection.s
+vasmm68k_mot -m68000 -Fhunk -o tmp/cpu_detection.o tmp/cpu_detection.s
+vasmm68k_mot -m68000 -Fhunk -o tmp/cpu.o lib/cpu.s
+vlink -bamigahunk -o tmp/cpu_detection.exe tmp/cpu_detection.o tmp/cpu.o
+```
 
 ---
 

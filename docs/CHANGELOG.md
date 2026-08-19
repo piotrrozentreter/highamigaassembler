@@ -39,6 +39,13 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Exec `AttnFlags` CPU detection support**:
+  - Added `lib/cpu.s` with `GetCPUType()`, returning the highest recognized
+    68000-through-68060 CPU type reported by Exec.
+  - Added HAS constants and the external declaration in
+    `examples/includes/cpu_defs.has`, plus the focused
+    `examples/cpu_detection.has` usage example.
+
 - **Dependent constant expressions**:
   - `const` initializers may reference constants declared earlier, such as `const B = A + 1;`.
   - Numeric arithmetic, unary signs, parentheses, and existing Q16 conversion remain supported.
