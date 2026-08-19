@@ -248,9 +248,11 @@ code main:
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
 
-    assert baseline == target_68020
+    assert baseline != target_68020
     assert "mulu.w #4,d2" in baseline
     assert "lsl.l #2,d2" in baseline
+    assert "(a0,d2.l*4)" in target_68020
+    assert "lsl.l #2,d2" not in target_68020
 
 
 def test_phase4_68020_emits_scaled_operands_for_long_arrays():

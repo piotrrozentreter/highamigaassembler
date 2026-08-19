@@ -372,7 +372,9 @@ def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
     code.append("    add.l d1,d2   ; + col")
     code.append(f"    lea {name},a0")
 
-    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", "d2", elem_bytes, use_scaled=True
+    )
     code.extend(prelude)
     code.append(f"    move{'.' + elem_size} {operand},{reg_left}")
     return code
@@ -406,7 +408,9 @@ def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
     code.append(f"    mulu.w #{col_count},d2")
     code.append("    add.l d1,d2")
 
-    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", "d2", elem_bytes, use_scaled=True
+    )
     code.extend(prelude)
     code.append(f"    move{'.' + elem_size} {reg_value},{operand}")
     return code
@@ -441,7 +445,9 @@ def emit_2d_array_address_of(codegen, name, row_expr, col_expr, params,
     code.append(f"    mulu.w #{col_count},d2")
     code.append("    add.l d1,d2")
 
-    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", "d2", elem_bytes, use_scaled=True
+    )
     code.extend(prelude)
     if "*" in operand:
         code.append(f"    lea {operand},a0")

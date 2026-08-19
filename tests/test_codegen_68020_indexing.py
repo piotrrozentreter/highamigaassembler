@@ -133,12 +133,14 @@ code main:
     asm_68000 = codegen.CodeGen(module, BASELINE).gen()
     asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
 
-    assert asm_68000 == asm_68020
+    assert asm_68000 != asm_68020
     body = asm_68000[asm_68000.index("address:"):]
     assert body.index("jsr row") < body.index("lea matrix,a0")
     assert body.index("jsr col") < body.index("lea matrix,a0")
     assert "mulu.w #3,d2" in body
     assert "add.l d2,a0" in body
+    body_20 = asm_68020[asm_68020.index("address:"):]
+    assert "lea (a0,d2.l*4),a0" in body_20
 
 
 def test_primitive_store_paths_use_scaled_operands_only_on_68020():
