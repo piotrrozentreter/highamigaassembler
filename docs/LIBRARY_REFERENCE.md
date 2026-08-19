@@ -18,6 +18,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
 | `bob.s`           | Blitter Objects (software sprites)        | this file                                            |
 | `helpers.s`       | VBlank sync, AMOS-compatible RNG          | this file                                            |
+| `timer.s`         | Millisecond delay (CIA-A hardware timer)  | this file                                            |
 | `cpu.s`           | Exec `AttnFlags` CPU detection            | this file                                            |
 | `str.s`           | String utilities                          | this file                                            |
 | `input.s`         | Joystick and mouse input                  | this file                                            |
@@ -231,6 +232,45 @@ reproduce a bounded sequence.
 extern func RndMaxAMOS(max: int) -> int;
 var die: int = RndMaxAMOS(6);   // 0..5
 ```
+
+---
+
+## timer.s — Millisecond Delay
+
+### `WaitMs(ms: int) -> void`
+
+Busy-waits for the requested number of milliseconds using CIA-A Timer A in
+one-shot mode, driven by the E-clock rather than VBlank counting, so the
+delay is accurate regardless of the current display/DMA state. Because the
+CIA timer is only 16-bit, waits longer than 90 ms are chained internally as
+successive <=90ms one-shot loads. Values of `ms <= 0` return immediately.
+
+This routine assumes a PAL (50 Hz) target and hardcodes the PAL E-clock rate
+(709379 Hz), matching the same PAL assumption made by `WaitVBlank` in
+`helpers.s`. It only touches CIA-A, never CIA-B, which `ptplayer.s` owns for
+music playback, so `WaitMs` can be safely used alongside music. Interrupts
+are left enabled throughout.
+
+```has
+extern func WaitMs(ms: int) -> void;
+extern func WaitVBlank() -> void;
+
+code main:
+    asm {
+        jmp main
+    }
+
+    proc main() -> int {
+        var i: int;
+        for i = 0 to 4 {
+            call WaitMs(200);
+            call WaitVBlank();
+        }
+        return 0;
+    }
+```
+
+See the complete [WaitMs example](../examples/wait_ms_demo.has).
 
 ---
 

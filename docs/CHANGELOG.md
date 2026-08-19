@@ -39,6 +39,15 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Bare-metal millisecond delay via CIA-A hardware timer**:
+  - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by
+    CIA-A Timer A one-shot loads on the PAL E-clock (709379 Hz), chained in
+    `<=90ms` chunks to work around the CIA's 16-bit timer width.
+  - Uses CIA-A only (never CIA-B, which `lib/ptplayer.s` owns for music), so
+    `WaitMs` can be used safely alongside music playback.
+  - Added `examples/wait_ms_demo.has`, and `scripts/build_example.sh` now
+    auto-detects and links `lib/timer.s` when `WaitMs` is used.
+
 - **Exec `AttnFlags` CPU detection support**:
   - Added `lib/cpu.s` with `GetCPUType()`, returning the highest recognized
     68000-through-68060 CPU type reported by Exec.
