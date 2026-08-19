@@ -179,9 +179,20 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
         code.append(f"    lea {name},a0")
         code.extend(index_code)
 
-    prelude, operand = codegen._lower_indexed_address("a0", "d1", stride)
+    use_scaled = (
+        codegen.target.supports_scaled_index
+        and stride in (2, 4, 8)
+        and -128 <= field_offset <= 127
+    )
+    prelude, operand = codegen._lower_indexed_address(
+        "a0",
+        "d1",
+        stride,
+        displacement=field_offset if use_scaled else 0,
+        use_scaled=use_scaled,
+    )
     code.extend(prelude)
-    if field_offset:
+    if field_offset and not use_scaled:
         code.append(codegen._emit_add_immediate("    ", "d1", field_offset))
 
     if field_suffix in (".b", ".w") and reg_left == "d1":
@@ -250,7 +261,9 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
             code.extend(index_code)
 
         # Get prelude and operand from centralized helper
-        prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
+        prelude, operand = codegen._lower_indexed_address(
+            "a0", reg_right, elem_bytes, use_scaled=True
+        )
         code.extend(prelude)
 
         # LEA preserves the address-of condition-code behavior of the original
@@ -320,9 +333,20 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
         code = [f"    lea {name},a0"]
         code.extend(index_code)
 
-    prelude, operand = codegen._lower_indexed_address("a0", reg_right, stride)
+    use_scaled = (
+        codegen.target.supports_scaled_index
+        and stride in (2, 4, 8)
+        and -128 <= field_offset <= 127
+    )
+    prelude, operand = codegen._lower_indexed_address(
+        "a0",
+        reg_right,
+        stride,
+        displacement=field_offset if use_scaled else 0,
+        use_scaled=use_scaled,
+    )
     code.extend(prelude)
-    if field_offset:
+    if field_offset and not use_scaled:
         code.append(codegen._emit_add_immediate("    ", reg_right, field_offset))
     code.append(f"    move{field_suffix} {reg_value},{operand}")
     return code

@@ -178,3 +178,25 @@ code main:
 
     assert "move.l 8(a6),a0" in asm
     assert "move.l 8(a4),a0" not in asm
+
+
+def test_struct_field_displacement_scales_only_on_68020():
+    source = """
+bss test_bss:
+    struct items[4] { value.l, tag.w, pad.w }
+
+code main:
+    proc update(index: int, value: int) -> int {
+        items[index].tag = value;
+        return items[index].tag;
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    assert "(a0,d1.l)" in asm_68000
+    assert "addq.l #4,d1" in asm_68000 or "add.l #4,d1" in asm_68000
+    assert "4(a0,d1.l*8)" in asm_68020
+    assert "addq.l #4,d1" not in asm_68020
+    assert "add.l #4,d1" not in asm_68020

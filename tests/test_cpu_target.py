@@ -227,8 +227,9 @@ code main:
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    assert baseline == target_68020
+    assert baseline != target_68020
     assert "lea (a0,d1.l),a0" in baseline
+    assert "lea (a0,d1.l*4),a0" in target_68020
 
 
 def test_phase2_dynamic_2d_array_compatibility():
