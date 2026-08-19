@@ -94,15 +94,16 @@ unchanged after a nested RHS read and procedure call.
   keeps full extension and memory-indirect forms disabled.
 - Added `--cpu {68000,68020}` to the CLI. Invalid values are rejected by argparse.
 - Passed the selected target explicitly through `CodeGen` into the peephole optimizer.
-  No emitter or optimizer rewrite is target-dependent yet, so both supported targets
-  intentionally produce the current 68000 assembly.
+- Primitive dynamic 1D reads/stores and typed-pointer reads/stores now use scaled
+  indexed operands for 68020 when the stride is 2, 4, or 8.
 
-The next implementation step is Phase 2: centralize indexed-address lowering and keep
-the 68000 fallback byte-for-byte stable before enabling any 68020 output. That work and
-the later assembler/Musashi validation should continue on Linux, where the 68000/68020
-toolchain and runtime checks are available.
+Phase 2 centralization is complete for the current indexed access paths. Phase 4 is
+partially implemented: primitive 1D and typed-pointer accesses are target-dependent,
+while struct-member displacement, 2D row-major scaling, and address-of remain on the
+conservative 68000 lowering. The remaining target work and runtime matrix should continue
+on Linux, where the 68000/68020 toolchain and Musashi checks are available.
 
-### Phase 2 Path 1 complete; Paths 2-6 ready for continuation on Linux
+### Phase 2 complete; Phase 4 primitive scaling in progress
 
 **Path 1 (Global 1D array reads) - COMPLETE**:
 - Implemented `emit_1d_array_read()` in new `codegen_indexed_address.py` module.
@@ -112,13 +113,12 @@ toolchain and runtime checks are available.
 - Test passing: byte/word/long arrays produce identical baseline output, vasm validates both targets.
 - Pattern established for remaining paths.
 
-**Paths 2-6 Prepared**:
-- `codegen_indexed_address.py` contains helper stubs:
-  - `emit_typed_pointer_read()` — local/global typed-pointer indexing
-  - `emit_array_address_of()` — address-of array elements with struct support
-  - Paths 4-6 require new wrappers for store operations
-- Phase 2 conditionals (scaled operands) remain disabled in `_lower_indexed_address()` with TODO markers.
-- vasm validation framework complete and working on Windows.
+**Centralized paths**:
+- Primitive 1D reads, typed-pointer reads, 1D stores, struct-array reads/stores,
+  2D reads/stores, and address-of adapters use the shared lowering module.
+- 68020 scaling is opt-in for primitive 1D and typed-pointer accesses only.
+- Struct field displacements, 2D row-major multiplication, and address-of scaling
+  remain conservative until separately validated.
 
 **Next steps (on Linux with full toolchain)**:
 1. **Path 2**: Convert local typed-pointer reads (~line 750-790). Complexity: local variable offset handling.
@@ -127,7 +127,9 @@ toolchain and runtime checks are available.
 4. **Path 5**: 1D array stores (~line 2640-2750). New helper: `emit_array_store()`. Complexity: destination calculation.
 5. **Path 6**: 2D array operations (~line 900-1000). Extend `emit_array_store()` for row-major linearization.
 
-Each path follows the same pattern: filter constants before calling helper, pass through centralized address lowering, emit Phase 2 baseline output identical to inline implementation.
+Each path passes through centralized address lowering. The 68000 target retains the
+baseline shift/fallback sequences; the 68020 target may use legal scaled operands for
+the explicitly enabled primitive paths.
 
 **Phase 2 completion criteria**: All 6 paths route through `_lower_indexed_address()`, all tests pass, vasm validates both targets, example suite compiles without regressions.
 

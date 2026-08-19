@@ -42,8 +42,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 - **Conservative CPU target plumbing (Phases 0–1)**:
   - Added `--cpu {68000,68020}`, with `68000` remaining the default.
-  - Both targets currently preserve the existing 68000-style generated assembly;
-    68020 scaled indexed addressing is reserved for Phase 4.
+  - 68020 scaled indexed addressing is now enabled for primitive dynamic 1D
+    word/long array accesses and typed-pointer reads/stores. 68000 output keeps
+    the existing shift-based lowering.
+  - Struct-member displacement folding, 2D scaling, full-extension addressing,
+    and memory-indirect forms remain deferred.
 
 - **Phase 2 Path 1 (global 1D array reads) complete**:
   - New `codegen_indexed_address.py` module with helper wrappers.

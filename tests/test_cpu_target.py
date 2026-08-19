@@ -66,7 +66,7 @@ def test_cli_default_and_explicit_68000_outputs_are_identical(tmp_path):
         assert result.returncode == 0, result.stderr
 
     assert default_output.read_bytes() == explicit_output.read_bytes()
-    assert default_output.read_bytes() == target_68020_output.read_bytes()
+    assert target_68020_output.read_bytes() == default_output.read_bytes()
 
 
 def test_codegen_module_api_defaults_to_68000():
@@ -146,9 +146,10 @@ code main:
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    assert baseline == target_68020
+    assert baseline != target_68020
     # Verify the baseline contains lsl.l #1 for word scaling
     assert "lsl.l #1" in baseline
+    assert "(a0,d1.l*2)" in target_68020
 
 
 def test_phase2_long_array_compatibility(tmp_path):
@@ -165,8 +166,9 @@ code main:
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    assert baseline == target_68020
+    assert baseline != target_68020
     assert "lsl.l #2" in baseline
+    assert "(a0,d1.l*4)" in target_68020
 
 
 def test_phase2_typed_pointer_compatibility(tmp_path):
@@ -180,7 +182,8 @@ code main:
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    assert baseline == target_68020
+    assert baseline != target_68020
+    assert "(a0,d1.l*4)" in target_68020
 
 
 def test_phase2_local_typed_pointer_read_uses_centralized_lowering():
@@ -204,9 +207,10 @@ code main:
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
 
-    assert baseline == target_68020
+    assert baseline != target_68020
     assert "lsl.l #2,d1" in baseline
     assert "move.l 8(a0),d0" in baseline
+    assert "(a0,d1.l*4)" in target_68020
 
 
 def test_phase2_address_of_array_element_compatibility(tmp_path):
@@ -262,10 +266,8 @@ code main:
     module = parser.parse(src)
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
 
-    # Phase 4 expectation: scaled operands should be present
-    # (this will fail until Phase 2 paths are converted, then succeed in Phase 4)
-    # For now, verify 68020 target capability flag is set
-    assert TargetSpec.for_cpu(CpuTarget.M68020).supports_scaled_index
+    assert "(a0,d1.l*4)" in target_68020
+    assert "lsl.l #2,d1" not in target_68020
 
 
 def test_phase4_68000_baseline_still_uses_shifts():
@@ -284,6 +286,7 @@ code main:
 
     # 68000 baseline: must still contain lsl.l #1 for word scaling
     assert "lsl.l #1" in baseline
+    assert "(a0,d1.l*2)" not in baseline
 
 
 def test_phase4_vasm_68000_assembles():
@@ -328,6 +331,29 @@ code main:
     rc, stdout, stderr = vasm_assemble(asm, "68020")
     if rc is not None:
         assert rc == 0, f"vasm -m68020 failed: {stderr}"
+
+
+def test_phase4_scaled_output_requires_68020_assembler():
+    if not VASM_PATH.exists():
+        return
+
+    src = """
+data test:
+    values.l[4] = {1, 2, 3, 4}
+
+code main:
+    proc read(index: int) -> int {
+        return values[index];
+    }
+    """
+    module = parser.parse(src)
+    asm = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
+    assert "(a0,d1.l*4)" in asm
+
+    rc_20, _, stderr_20 = vasm_assemble(asm, "68020")
+    assert rc_20 == 0, stderr_20
+    rc_00, _, _ = vasm_assemble(asm, "68000")
+    assert rc_00 != 0
 
 
 def test_phase4_68020_scaled_operands_not_in_68000_output():
@@ -381,10 +407,13 @@ code main:
     """
     module = parser.parse(src)
 
-    # Verify baseline (68000) and explicit 68020 produce identical output
+    # The explicit 68000 output remains the compatibility baseline.
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
+    explicit_68000 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    assert baseline == target_68020, "Path 1 conversion broke Phase 2 baseline contract"
+    assert baseline == explicit_68000
+    assert baseline != target_68020
+    assert "(a0,d1.l*4)" in target_68020
 
     # Verify vasm assembly succeeds for baseline
     if VASM_PATH.exists():
@@ -417,10 +446,6 @@ code main:
     asm_68000 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     asm_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
 
-    # Phase 2: outputs are identical (as verified by test_cli_default_and_explicit_68000_outputs_are_identical)
-    assert asm_68000 == asm_68020
-
-    # Phase 4: once paths are converted, 68020 output will differ (scaled operands)
-    # This test will then verify:
-    # assert "*4" in asm_68020 and "*4" not in asm_68000
-    # and both assemble successfully but potentially with different encodings.
+    assert asm_68000 != asm_68020
+    assert "(a0,d1.l*4)" not in asm_68000
+    assert "(a0,d1.l*4)" in asm_68020

@@ -58,7 +58,9 @@ def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
 
     # Get prelude and operand from centralized address-lowering helper
     # elem_bytes is the stride (element size in bytes)
-    prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", reg_right, elem_bytes, use_scaled=True
+    )
     code.extend(prelude)
 
     # Load element with correct size suffix
@@ -116,7 +118,9 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
             code.extend(index_code)
 
         # Get prelude and operand from centralized helper
-        prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
+        prelude, operand = codegen._lower_indexed_address(
+            "a0", reg_right, elem_bytes, use_scaled=True
+        )
         code.extend(prelude)
 
         # Load element with correct size
@@ -285,7 +289,9 @@ def emit_array_store(codegen, name, index_expr, params, locals_info,
         code = [f"    lea {name},a0"]
         code.extend(index_code)
 
-    prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
+    prelude, operand = codegen._lower_indexed_address(
+        "a0", reg_right, elem_bytes, use_scaled=True
+    )
     code.extend(prelude)
     from . import ast
     code.append(f"    move{ast.size_suffix(elem_bytes)} {reg_value},{operand}")

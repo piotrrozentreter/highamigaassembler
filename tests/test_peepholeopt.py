@@ -16,6 +16,8 @@ from hasc.peepholeopt import (
     _fold_clr_to_memory,
     _fold_neg_one,
     _eliminate_tst_after_andi_neg,
+    _extract_modified_regs,
+    _extract_used_regs,
 )
 
 
@@ -26,6 +28,12 @@ from hasc.peepholeopt import (
 def _asm(*lines):
     """Build an assembly snippet as a list of indented lines."""
     return ["    " + l for l in lines]
+
+
+def test_scaled_index_operands_preserve_register_analysis():
+    assert _extract_used_regs("(a0,d1.l*4)") == {"a0", "d1"}
+    assert _extract_used_regs("6(a0,d1.l*4)") == {"a0", "d1"}
+    assert _extract_modified_regs("move.l (a0,d1.l*4),d0") == {"d0"}
 
 
 def _join(lines):

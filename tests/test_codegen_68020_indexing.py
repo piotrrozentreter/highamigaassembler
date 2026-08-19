@@ -37,6 +37,9 @@ def test_scaled_index_can_include_a_displacement():
     assert lower_indexed_address(
         BASELINE, "a0", "d1", 4, displacement=6
     ) == (["    lsl.l #2,d1"], "6(a0,d1.l)")
+    assert lower_indexed_address(
+        TARGET_68020, "a0", "d1", 8, enable_scaled=True
+    ) == ([], "(a0,d1.l*8)")
 
 
 def test_arbitrary_stride_uses_existing_68000_fallbacks():
@@ -79,11 +82,15 @@ code main:
     asm_68000 = codegen.CodeGen(module, BASELINE).gen()
     asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
 
-    assert asm_68000 == asm_68020
+    assert asm_68000 != asm_68020
     read_body = asm_68000[asm_68000.index("read:"):asm_68000.index("write:")]
+    read_body_20 = asm_68020[asm_68020.index("read:"):asm_68020.index("write:")]
     write_body = asm_68000[asm_68000.index("write:"):]
+    write_body_20 = asm_68020[asm_68020.index("write:"):]
     assert read_body.index("jsr bump") < read_body.index("lea values,a0")
     assert write_body.index("jsr bump") < write_body.index("lea values,a0")
+    assert "(a0,d1.l*4)" in read_body_20
+    assert "(a0,d1.l*4)" in write_body_20
 
 
 def test_global_untyped_pointer_read_uses_shared_adapter():
@@ -132,3 +139,42 @@ code main:
     assert body.index("jsr col") < body.index("lea matrix,a0")
     assert "mulu.w #3,d2" in body
     assert "add.l d2,a0" in body
+
+
+def test_primitive_store_paths_use_scaled_operands_only_on_68020():
+    source = """
+data test:
+    words.w[4] = {1, 2, 3, 4}
+    longs.l[4] = {10, 20, 30, 40}
+
+code main:
+    proc update(word_index: int, long_index: int) -> int {
+        words[word_index] = 7;
+        longs[long_index] = 42;
+        return longs[long_index];
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    assert "lsl.l #1,d1" in asm_68000
+    assert "lsl.l #2,d1" in asm_68000
+    assert "(a0,d1.l*2)" not in asm_68000
+    assert "(a0,d1.l*4)" not in asm_68000
+    assert "(a0,d1.l*2)" in asm_68020
+    assert "(a0,d1.l*4)" in asm_68020
+
+
+def test_typed_pointer_stack_parameter_uses_a6_stack_base():
+    source = """
+code main:
+    proc read(pointer: int*, index: int) -> int {
+        return pointer[index];
+    }
+    """
+    module = parser.parse(source)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+
+    assert "move.l 8(a6),a0" in asm
+    assert "move.l 8(a4),a0" not in asm

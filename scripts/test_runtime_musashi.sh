@@ -7,6 +7,8 @@ MANIFEST="${MUSASHI_RUNTIME_MANIFEST:-$ROOT/tests/runtime_musashi_manifest.txt}"
 RUNNER_BIN="${MUSASHI_RUNNER_BIN:-$ROOT/build/has-musashi-runner}"
 BUILD_DIR="${MUSASHI_RUNTIME_BUILD_DIR:-$ROOT/build/runtime_musashi}"
 CYCLE_BUDGET="${MUSASHI_CYCLE_BUDGET:-4000000}"
+HASC_CPU="${HASC_CPU:-68000}"
+MUSASHI_CPU="${MUSASHI_CPU:-$HASC_CPU}"
 
 if [[ "${OSTYPE:-}" != linux* ]]; then
     echo "SKIP: runtime Musashi tests are Linux-only" >&2
@@ -80,13 +82,13 @@ while IFS= read -r raw || [[ -n "$raw" ]]; do
     total=$((total + 1))
 
     echo "[runtime] compile $test_rel"
-    (cd "$ROOT" && "$PYTHON_BIN" -m hasc.cli "$test_rel" -o "$asm") >/dev/null
+    (cd "$ROOT" && "$PYTHON_BIN" -m hasc.cli "$test_rel" --cpu "$HASC_CPU" -o "$asm") >/dev/null
 
     echo "[runtime] assemble $base -> flat bin"
-    "$VASM_BIN" -Fbin -o "$bin" "$asm" >/dev/null
+    "$VASM_BIN" "-m$HASC_CPU" -Fbin -o "$bin" "$asm" >/dev/null
 
     echo "[runtime] execute $base"
-    if "$RUNNER_BIN" "$bin" --cycles "$CYCLE_BUDGET" >/dev/null; then
+    if "$RUNNER_BIN" "$bin" --cpu "$MUSASHI_CPU" --cycles "$CYCLE_BUDGET" >/dev/null; then
         rc=0
     else
         rc=$?

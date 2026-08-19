@@ -446,7 +446,8 @@ class CodeGen:
             self._fail,
         )
 
-    def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0):
+    def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0,
+                               use_scaled=False):
         """Compatibility wrapper for the pure indexed-address lowering module."""
         return indexed_address.lower_indexed_address(
             self.target,
@@ -454,6 +455,7 @@ class CodeGen:
             index_reg,
             stride,
             displacement,
+            enable_scaled=use_scaled,
         )
 
     def _emit_expr(self, expr, params, locals_info, reg_left="d0", reg_right="d1", target_type=None, frame_reg="a6"):
@@ -666,6 +668,35 @@ class CodeGen:
                     code.append(f"    ; local arrays not yet supported: {name}")
                     code.append(f"    move.l #0,{reg_left}")
                     return code
+
+            param_obj = next((p for p in params if p.name == name), None)
+            if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
+                base_type = param_obj.ptype[:-1]
+                elem_bytes = 1
+                if base_type == 'word':
+                    elem_bytes = 2
+                elif base_type in ('long', 'int'):
+                    elem_bytes = 4
+                stack_params = [p for p in params if not (p.register and p.register != 'None')]
+                if param_obj.register and param_obj.register != 'None':
+                    pointer_name = param_obj.register
+                elif param_obj in stack_params:
+                    pointer_name = f"{8 + 4 * stack_params.index(param_obj)}(a6)"
+                else:
+                    pointer_name = name
+                if len(expr.indices) == 1:
+                    return codegen_indexed_address.emit_typed_pointer_read(
+                        self,
+                        pointer_name,
+                        expr.indices[0],
+                        params,
+                        locals_info,
+                        reg_left,
+                        "d1",
+                        frame_reg,
+                        elem_bytes,
+                        base_type,
+                    )
 
             # Global array or pointer access
             if len(expr.indices) == 1:
