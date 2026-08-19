@@ -23,26 +23,26 @@ def vasm_assemble(asm_text, cpu_target="68000"):
     import tempfile
     if not VASM_PATH.exists():
         return None, None, "vasm not available"
-    
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.s', delete=False) as asm_file:
         asm_file.write(asm_text)
         asm_path = asm_file.name
-    
+
     obj_path = asm_path.replace('.s', '.o')
-    
+
     result = subprocess.run(
         [str(VASM_PATH), f"-m{cpu_target}", "-Fhunkexe", "-o", obj_path, asm_path],
         capture_output=True,
         text=True,
     )
-    
+
     # Clean up temp files
     try:
         Path(asm_path).unlink()
         Path(obj_path).unlink(missing_ok=True)
     except:
         pass
-    
+
     return result.returncode, result.stdout, result.stderr
 
 
@@ -224,6 +224,7 @@ code main:
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
     assert baseline == target_68020
+    assert "lea (a0,d1.l),a0" in baseline
 
 
 def test_phase2_dynamic_2d_array_compatibility():
@@ -260,7 +261,7 @@ code main:
     """
     module = parser.parse(src)
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    
+
     # Phase 4 expectation: scaled operands should be present
     # (this will fail until Phase 2 paths are converted, then succeed in Phase 4)
     # For now, verify 68020 target capability flag is set
@@ -280,7 +281,7 @@ code main:
     """
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
-    
+
     # 68000 baseline: must still contain lsl.l #1 for word scaling
     assert "lsl.l #1" in baseline
 
@@ -289,7 +290,7 @@ def test_phase4_vasm_68000_assembles():
     """Phase 4: baseline output assembles with vasm -m68000."""
     if not VASM_PATH.exists():
         return  # Skip on systems without vasm
-    
+
     src = """
 data test:
     buf.l[4] = {1, 2, 3, 4}
@@ -301,7 +302,7 @@ code main:
     """
     module = parser.parse(src)
     asm = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
-    
+
     rc, stdout, stderr = vasm_assemble(asm, "68000")
     if rc is not None:
         assert rc == 0, f"vasm -m68000 failed: {stderr}"
@@ -311,7 +312,7 @@ def test_phase4_vasm_68020_assembles():
     """Phase 4: baseline output also assembles with vasm -m68020."""
     if not VASM_PATH.exists():
         return  # Skip on systems without vasm
-    
+
     src = """
 data test:
     buf.l[4] = {1, 2, 3, 4}
@@ -323,7 +324,7 @@ code main:
     """
     module = parser.parse(src)
     asm = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    
+
     rc, stdout, stderr = vasm_assemble(asm, "68020")
     if rc is not None:
         assert rc == 0, f"vasm -m68020 failed: {stderr}"
@@ -341,21 +342,21 @@ code main:
     proc read_word(idx: int) -> word {
         return wbuf[idx];
     }
-    
+
     proc read_long(idx: int) -> int {
         return lbuf[idx];
     }
     """
     module = parser.parse(src)
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
-    
+
     # 68000 baseline must NOT contain scaled operands
     assert re.search(r"\*[248]\s*\)", baseline) is None, "68000 output should not contain scaled operands"
 
 
 def test_phase2_conversion_path1_global_1d_array_read():
     """Phase 2: Path 1 conversion - global 1D array reads use centralized helper.
-    
+
     Tests that all three element sizes (byte, word, long) work correctly through
     the new centralized _lower_indexed_address helper.
     """
@@ -369,22 +370,22 @@ code main:
     proc read_long(idx: int) -> int {
         return buf[idx];
     }
-    
+
     proc read_word(idx: int) -> word {
         return wbuf[idx];
     }
-    
+
     proc read_byte(idx: int) -> byte {
         return bbuf[idx];
     }
     """
     module = parser.parse(src)
-    
+
     # Verify baseline (68000) and explicit 68020 produce identical output
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
     assert baseline == target_68020, "Path 1 conversion broke Phase 2 baseline contract"
-    
+
     # Verify vasm assembly succeeds for baseline
     if VASM_PATH.exists():
         rc, _, stderr = vasm_assemble(baseline, "68000")
@@ -394,15 +395,15 @@ code main:
 
 def test_phase4_vasm_difference_for_68020():
     """Phase 4 validation: ensure that 68020 output actually differs from 68000 when using scaled index.
-    
+
     This test will verify that once Phase 2 paths are converted and Phase 4 is enabled,
     the 68020 output contains scaled operands that 68000 doesn't have.
-    
+
     For now, this is a placeholder that verifies the infrastructure is in place.
     """
     if not VASM_PATH.exists():
         return  # Skip on systems without vasm
-    
+
     src = """
 data test:
     buf.l[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
@@ -415,10 +416,10 @@ code main:
     module = parser.parse(src)
     asm_68000 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     asm_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
-    
+
     # Phase 2: outputs are identical (as verified by test_cli_default_and_explicit_68000_outputs_are_identical)
     assert asm_68000 == asm_68020
-    
+
     # Phase 4: once paths are converted, 68020 output will differ (scaled operands)
     # This test will then verify:
     # assert "*4" in asm_68020 and "*4" not in asm_68000

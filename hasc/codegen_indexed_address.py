@@ -10,10 +10,10 @@ Phases 2+:
 """
 
 
-def emit_1d_array_read(codegen, name, index_expr, params, locals_info, 
+def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
                        reg_left, reg_right, frame_reg, elem_bytes):
     """Emit code for global 1D array read with centralized address lowering.
-    
+
     Args:
         codegen: CodeGen instance (provides _lower_indexed_address, _emit_expr, etc.)
         name: Array variable name
@@ -24,51 +24,54 @@ def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index (e.g., 'd1')
         frame_reg: Frame pointer register ('a6' or 'a4')
         elem_bytes: Element size in bytes (stride: 1, 2, 4, or higher)
-    
+
     Returns:
         List of assembly instruction strings.
-    
+
     Contract:
         - Caller must ensure index_expr is NOT a compile-time constant.
         - Generated code assumes a0 is free for address calculations.
         - Emits 68000-style output for Phase 2/3 (shifts in prelude).
         - Phase 4+: helper will emit 68020 scaled operands when enabled.
-    
+
     Replaces inline scaling logic with centralized _lower_indexed_address() call.
     Phase 2 contract: output is byte-for-byte identical to original inline implementation.
     """
     code = []
     from . import ast
-    
+
     # Caller must filter constants; this function handles variable indices only
     assert not isinstance(index_expr, ast.Number), (
         "emit_1d_array_read expects variable index; codegen.py must filter constants"
     )
-    
-    # Load array base address into a0
-    code.append(f"    lea {name},a0")
-    
+
     # Evaluate index expression into reg_right (typically d1)
-    index_code = codegen._emit_expr(index_expr, params, locals_info, 
+    index_code = codegen._emit_expr(index_expr, params, locals_info,
                                     reg_right, "d2", target_type="int", frame_reg=frame_reg)
-    code.extend(index_code)
-    
+    from .indexed_address import index_may_clobber_address_register
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(f"    lea {name},a0")
+    else:
+        code.append(f"    lea {name},a0")
+        code.extend(index_code)
+
     # Get prelude and operand from centralized address-lowering helper
     # elem_bytes is the stride (element size in bytes)
     prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
     code.extend(prelude)
-    
+
     # Load element with correct size suffix
     size_suffix = ast.size_suffix(elem_bytes)
     code.append(f"    move{size_suffix} {operand},{reg_left}")
-    
+
     return code
 
 
 def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
                             reg_left, reg_right, frame_reg, elem_bytes, elem_type):
     """Emit code for typed pointer dereference with centralized address lowering.
-    
+
     Args:
         codegen: CodeGen instance
         name: Pointer variable name or offset (e.g., 'ptr' or '-4(a6)')
@@ -80,28 +83,21 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         frame_reg: Frame pointer register
         elem_bytes: Element size (1, 2, 4)
         elem_type: Element type string (e.g., 'byte', 'word', 'int')
-    
+
     Returns:
         List of assembly instruction strings.
     """
     code = []
-    
+
     from . import ast
-    
-    # Load pointer into a0
-    if name.startswith('-') or '(' in name:
-        # Local variable offset notation
-        code.append(f"    move.l {name},a0")
-    else:
-        # Global variable name
-        code.append(f"    move.l {name},a0")
-    
+
     if isinstance(index_expr, ast.Number):
+        code.append(f"    move.l {name},a0")
         # Constant index
         index_val = index_expr.value
         offset = index_val * elem_bytes
         size_suffix = ast.size_suffix(elem_bytes)
-        
+
         if offset == 0:
             code.append(f"    move{size_suffix} (a0),{reg_left}")
         else:
@@ -111,23 +107,29 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         # Evaluate index into reg_right (d1)
         index_code = codegen._emit_expr(index_expr, params, locals_info,
                                         reg_right, "d2", target_type="int", frame_reg=frame_reg)
-        code.extend(index_code)
-        
+        from .indexed_address import index_may_clobber_address_register
+        if index_may_clobber_address_register(index_expr):
+            code.extend(index_code)
+            code.append(f"    move.l {name},a0")
+        else:
+            code.append(f"    move.l {name},a0")
+            code.extend(index_code)
+
         # Get prelude and operand from centralized helper
         prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
         code.extend(prelude)
-        
+
         # Load element with correct size
         size_suffix = ast.size_suffix(elem_bytes)
         code.append(f"    move{size_suffix} {operand},{reg_left}")
-    
+
     return code
 
 
 def emit_array_address_of(codegen, name, index_expr, params, locals_info,
                           reg_left, reg_right, frame_reg, elem_bytes):
     """Emit code for &array[index] with centralized address lowering.
-    
+
     Args:
         codegen: CodeGen instance
         name: Array variable name
@@ -138,23 +140,22 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index
         frame_reg: Frame pointer register
         elem_bytes: Element size in bytes
-    
+
     Returns:
         List of assembly instruction strings.
-        
+
     Note: Result is placed in 'a0' address register (not 'd0' data register).
     """
     code = []
-    
+
     from . import ast
-    
-    code.append(f"    lea {name},a0")
-    
+
     if isinstance(index_expr, ast.Number):
+        code.append(f"    lea {name},a0")
         # Constant index: compute offset at compile time
         index_val = index_expr.value
         offset = index_val * elem_bytes
-        
+
         if offset == 0:
             # Address is just the base (already in a0)
             # Move a0 to the result register if needed
@@ -168,23 +169,26 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         # Evaluate index into reg_right
         index_code = codegen._emit_expr(index_expr, params, locals_info,
                                         reg_right, "d2", target_type="int", frame_reg=frame_reg)
-        code.extend(index_code)
-        
+        from .indexed_address import index_may_clobber_address_register
+        if index_may_clobber_address_register(index_expr):
+            code.extend(index_code)
+            code.append(f"    lea {name},a0")
+        else:
+            code.append(f"    lea {name},a0")
+            code.extend(index_code)
+
         # Get prelude and operand from centralized helper
         prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
         code.extend(prelude)
-        
-        # Preserve the existing 68000 sequence until scaled operands are enabled.
-        # A scaled operand will be consumed directly by LEA in the later phase.
-        if "*" in operand:
-            code.append(f"    lea {operand},a0")
-        else:
-            code.append(f"    add.l {reg_right},a0")
-        
+
+        # LEA preserves the address-of condition-code behavior of the original
+        # 68000 lowering and also consumes future scaled operands directly.
+        code.append(f"    lea {operand},a0")
+
         # Move result to target register if needed
         if reg_left != "a0":
             code.append(f"    move.l a0,{reg_left}")
-    
+
     return code
 
 
@@ -195,7 +199,7 @@ def emit_array_store(codegen, name, index_expr, params, locals_info,
     The caller evaluates the RHS before invoking this helper so address scratch
     registers remain available for nested expressions and calls.
     """
-    code = [f"    lea {name},a0"]
+    code = []
     index_code = codegen._emit_expr(
         index_expr,
         params,
@@ -205,7 +209,13 @@ def emit_array_store(codegen, name, index_expr, params, locals_info,
         target_type="int",
         frame_reg=frame_reg,
     )
-    code.extend(index_code)
+    from .indexed_address import index_may_clobber_address_register
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(f"    lea {name},a0")
+    else:
+        code = [f"    lea {name},a0"]
+        code.extend(index_code)
 
     prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
     code.extend(prelude)
@@ -218,7 +228,7 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
                             reg_value, reg_right, frame_reg, stride,
                             field_offset, field_suffix):
     """Emit a struct-array member store after the RHS has been evaluated."""
-    code = [f"    lea {name},a0"]
+    code = []
     index_code = codegen._emit_expr(
         index_expr,
         params,
@@ -228,7 +238,13 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
         target_type="int",
         frame_reg=frame_reg,
     )
-    code.extend(index_code)
+    from .indexed_address import index_may_clobber_address_register
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(f"    lea {name},a0")
+    else:
+        code = [f"    lea {name},a0"]
+        code.extend(index_code)
 
     prelude, operand = codegen._lower_indexed_address("a0", reg_right, stride)
     code.extend(prelude)
@@ -267,11 +283,18 @@ def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
 def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
                         reg_value, frame_reg, elem_size, elem_bytes, col_count):
     """Emit a dynamic 2D store after the caller has evaluated the RHS."""
-    code = [f"    lea {name},a0"]
+    code = []
+    from .indexed_address import index_may_clobber_address_register
+    defer_base = (
+        index_may_clobber_address_register(row_expr)
+        or index_may_clobber_address_register(col_expr)
+    )
     row_code = codegen._emit_expr(
         row_expr, params, locals_info, "d1", "d2",
         target_type="int", frame_reg=frame_reg,
     )
+    if not defer_base:
+        code.append(f"    lea {name},a0")
     code.extend(row_code)
     code.append("    move.l d1,d2  ; save row")
 
@@ -280,6 +303,8 @@ def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
         target_type="int", frame_reg=frame_reg,
     )
     code.extend(col_code)
+    if defer_base:
+        code.append(f"    lea {name},a0")
     code.append(f"    mulu.w #{col_count},d2")
     code.append("    add.l d1,d2")
 

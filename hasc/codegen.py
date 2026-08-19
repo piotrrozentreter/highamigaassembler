@@ -5,6 +5,7 @@ from . import peepholeopt
 from . import ast
 from . import codegen_utils
 from . import codegen_indexed_address
+from . import indexed_address
 from .macro_expander import MacroExpander
 from .asm_substitution import substitute_asm_vars
 from .target import DEFAULT_TARGET, TargetSpec
@@ -338,14 +339,14 @@ class CodeGen:
     def _substitute_in_stmt(self, stmt, substitutions):
         """Recursively substitute macro parameters in statements."""
         return self.macro_expander.substitute_in_stmt(stmt, substitutions, print_debug=self.print_debug)
-    
+
     def _substitute_in_expr(self, expr, substitutions):
         """Recursively substitute macro parameters in expressions."""
         return self.macro_expander.substitute_in_expr(expr, substitutions)
 
     def emit(self, s=""):
         self.lines.append(s)
-    
+
     def _normalize_expr(self, expr):
         """Normalize parser-specific or placeholder nodes into our AST types.
         - Converts Lark `Tree(op, [left, right])` into `ast.BinOp`.
@@ -361,7 +362,7 @@ class CodeGen:
         # locals is now a list of tuples: (name, type, offset)
         locals_info = []
         offset = 0
-        
+
         # CRITICAL FIX: Allocate stack space for data register parameters (d0-d7)
         # These must be saved immediately in prologue before they can be clobbered
         # EXCEPT for native functions - they use registers directly without stack
@@ -381,7 +382,7 @@ class CodeGen:
                     saved_reg_params[param.name] = (reg, offset)
                     # Add to locals_info so VarRef lookups find it
                     locals_info.append((param.name, param.ptype, offset))
-        
+
         # Collect all local variables and for loop counters
         def collect_locals(stmts):
             nonlocal offset
@@ -419,21 +420,21 @@ class CodeGen:
                     collect_locals(stmt.then_body)
                     if stmt.else_body:
                         collect_locals(stmt.else_body)
-        
+
         collect_locals(proc.body)
-        
+
         # Round up offset to maintain alignment
         total_local_size = (offset + 3) & ~3  # Align to 4 bytes
         return params, locals_info, total_local_size, saved_reg_params
 
     def _substitute_asm_vars(self, asm_content, params, locals_info, frame_reg="a6"):
         """Substitute @varname references in asm blocks with actual addresses/registers.
-        
+
         Substitution rules:
         - @param_name: Register parameter -> register name; Stack parameter -> offset(frame_reg)
         - @local_var: -> -offset(frame_reg)
         - @global_var: -> label name
-        
+
         Returns tuple of (substituted_content, comments) where comments document substitutions.
         """
         return substitute_asm_vars(
@@ -447,79 +448,14 @@ class CodeGen:
         )
 
     def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0):
-        """Centralized indexed effective-address lowering for Phase 2+.
-
-        Returns (prelude_lines, operand_string) where:
-        - prelude_lines: list of assembly instructions to execute before the access
-          (e.g., scaling instructions for 68000, empty for 68020 with scaled index)
-        - operand_string: the rendered operand for use in a move instruction
-          (e.g., "(a0,d1.l)" for 68000, "(a0,d1.l*4)" for 68020 with stride 4)
-
-        Phase 2 contract: both 68000 and 68020 emit 68000-style output (no scaled index).
-        Phases 3+ will differentiate based on self.target capabilities.
-        """
-        prelude = []
-
-        if stride == 1:
-            # Byte stride: no scaling needed
-            operand = f"({base_reg},{index_reg}.l)"
-        elif stride == 2:
-            # Word stride: need scale-by-2, which is lsl.l #1 for 68000
-            # Phase 2 contract: both targets emit 68000-style output
-            # TODO Phase 4: uncomment conditionals when enabling scaled operands
-            # if self.target.supports_scaled_index:
-            #     operand = f"({base_reg},{index_reg}.l*2)"
-            # else:
-            prelude.append(f"    lsl.l #1,{index_reg}")
-            operand = f"({base_reg},{index_reg}.l)"
-        elif stride == 4:
-            # Long stride: need scale-by-4, which is lsl.l #2 for 68000
-            # Phase 2 contract: both targets emit 68000-style output
-            # TODO Phase 4: uncomment conditionals when enabling scaled operands
-            # if self.target.supports_scaled_index:
-            #     operand = f"({base_reg},{index_reg}.l*4)"
-            # else:
-            prelude.append(f"    lsl.l #2,{index_reg}")
-            operand = f"({base_reg},{index_reg}.l)"
-        elif stride == 8:
-            # Quad-word stride (rare, but used by some structs)
-            # Phase 2 contract: both targets emit 68000-style output
-            # TODO Phase 4: uncomment conditionals when enabling scaled operands
-            # if self.target.supports_scaled_index:
-            #     operand = f"({base_reg},{index_reg}.l*8)"
-            # else:
-            prelude.append(f"    lsl.l #3,{index_reg}")
-            operand = f"({base_reg},{index_reg}.l)"
-        elif stride == 16:
-            prelude.append(f"    lsl.l #4,{index_reg}")
-            operand = f"({base_reg},{index_reg}.l)"
-        elif stride == 32:
-            prelude.append(f"    lsl.l #5,{index_reg}")
-            operand = f"({base_reg},{index_reg}.l)"
-        else:
-            # Arbitrary stride: emit multiply or multiple shifts
-            # Use mulu.w for strides up to 65535 (unsigned 16-bit limit)
-            if stride <= 65535:
-                prelude.append(f"    mulu.w #{stride},{index_reg}")
-                operand = f"({base_reg},{index_reg}.l)"
-            else:
-                # Unsupported stride; caller must handle
-                raise CodeGenError(f"Stride {stride} exceeds 16-bit limit for indexed addressing")
-
-        # Add displacement if nonzero (68000/68020 syntax: disp(base,index))
-        if displacement != 0:
-            # Construct operand with displacement as prefix: disp(base,index) or disp(base,index*scale)
-            # Extract the scale factor if present
-            if "*" in operand:
-                # 68020 scaled form: (base,index.l*scale) -> disp(base,index.l*scale)
-                inner = operand[1:-1]  # Remove outer parens
-                operand = f"{displacement}({inner})"
-            else:
-                # 68000 unscaled form: (base,index.l) -> disp(base,index.l)
-                inner = operand[1:-1]  # Remove outer parens
-                operand = f"{displacement}({inner})"
-
-        return prelude, operand
+        """Compatibility wrapper for the pure indexed-address lowering module."""
+        return indexed_address.lower_indexed_address(
+            self.target,
+            base_reg,
+            index_reg,
+            stride,
+            displacement,
+        )
 
     def _emit_expr(self, expr, params, locals_info, reg_left="d0", reg_right="d1", target_type=None, frame_reg="a6"):
         # Evaluate expr into reg_left (d0). If needing second register, use reg_right (d1).
@@ -527,17 +463,17 @@ class CodeGen:
         # locals_info is list of (name, type, offset) tuples
         # target_type is the expected type for this expression (for sizing)
         # frame_reg is the register used for frame pointer (default a6, but may be a4 etc if using optimization)
-        
+
         # Defensive: ensure register names are never None
         if reg_left is None:
             reg_left = "d0"
         if reg_right is None:
             reg_right = "d1"
-        
+
         # Additional safety: assert registers are valid
         assert reg_left is not None and isinstance(reg_left, str), f"Invalid reg_left: {reg_left}"
         assert reg_right is not None and isinstance(reg_right, str), f"Invalid reg_right: {reg_right}"
-        
+
         # Normalize non-AST or None expressions first
         expr = self._normalize_expr(expr)
 
@@ -548,12 +484,12 @@ class CodeGen:
             code = []
             base = expr.base
             field = expr.field
-            
+
             # Handle dereferenced pointer: (*ptr).field
             if isinstance(base, ast.UnaryOp) and base.op == '*':
                 # Dereference pointer and access member
                 ptr_operand = base.operand
-                
+
                 # CRITICAL FIX: If pointer is a simple variable reference, load it directly
                 # from memory to avoid issues with stale register values after function calls
                 if isinstance(ptr_operand, ast.VarRef):
@@ -576,10 +512,10 @@ class CodeGen:
                     # Move result to a0 if not already there
                     if ptr_code and "a0" not in ptr_code[-1]:
                         code.append(f"    move.l d0,a0")
-                
+
                 # Try to infer struct type from various sources
                 struct_type = None
-                
+
                 # Try to get type info from locals (variables have vtype info in locals_info)
                 if isinstance(ptr_operand, ast.VarRef):
                     var_name = ptr_operand.name
@@ -590,20 +526,20 @@ class CodeGen:
                         # vtype might be like "bullet*" or "Enemy*"
                         if vtype and vtype.endswith('*'):
                             struct_type = vtype.rstrip('*').strip()
-                    
+
                     # Check function parameters if not found in locals
                     if not struct_type:
                         param_obj = next((p for p in params if p.name == var_name), None)
                         if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
                             struct_type = param_obj.ptype.rstrip('*').strip()
-                    
+
                     # Fallback: try name-based inference
                     if not struct_type:
                         for sname in self.struct_info:
                             if var_name.startswith(sname.lower()) or var_name.endswith('_' + sname.lower()):
                                 struct_type = sname
                                 break
-                
+
                 if struct_type and struct_type in self.struct_info:
                     sinfo = self.struct_info[struct_type]
                     if field in sinfo['fields']:
@@ -638,7 +574,7 @@ class CodeGen:
                         suffix = '.b'
                     else:
                         return [f"    ; unknown field {field} in dereferenced struct", f"    move.l #0,{reg_left}"]
-                    
+
                     # Generate code with guessed offset (clear register for byte/word)
                     if suffix in ('.b', '.w'):
                         code.append(f"    clr.l {reg_left}")
@@ -647,7 +583,7 @@ class CodeGen:
                     else:
                         code.append(f"    move{suffix} {offset}(a0),{reg_left}")
                     return code
-            
+
             # Handle simple variable member access
             elif isinstance(base, ast.VarRef):
                 name = base.name
@@ -662,7 +598,7 @@ class CodeGen:
                     code.append(f"    clr.l {reg_left}")
                 code.append(f"    move{suffix} {name}_{field},{reg_left}")
                 return code
-            
+
             # Handle array element member access
             elif isinstance(base, ast.ArrayAccess):
                 name = base.name
@@ -745,13 +681,13 @@ class CodeGen:
             # Array element access: arr[i] or matrix[row][col]
             code = []
             name = expr.name
-            
+
             # Find array in locals or globals
             local_info = next((l for l in locals_info if l[0] == name), None)
-            
+
             if local_info:
                 var_name, var_type, var_offset = local_info
-                
+
                 # Check if this is a pointer variable (not an array)
                 if var_type and var_type.endswith('*'):
                     # Determine element size from pointer type (e.g., "byte*" -> 1 byte)
@@ -779,21 +715,21 @@ class CodeGen:
                         # Multi-dimensional indexing through pointer (not common, but handle it)
                         code.append(f"    ; multidimensional pointer indexing not yet supported")
                         code.append(f"    move.l #0,{reg_left}")
-                    
+
                     return code
                 else:
                     # Local array (not yet supported - would need to allocate on stack)
                     code.append(f"    ; local arrays not yet supported: {name}")
                     code.append(f"    move.l #0,{reg_left}")
                     return code
-            
+
             # Global array or pointer access
             if len(expr.indices) == 1:
                 # 1D array: arr[index] OR pointer dereference: ptr[index]
                 # Distinguish between true arrays and pointer variables
-                
+
                 is_array = name in self.array_dims
-                
+
                 if is_array:
                     # TRUE ARRAY: Calculate base_address + index * element_size
                     elem_size_suffix = self.array_dims[name]['size']
@@ -806,14 +742,14 @@ class CodeGen:
                     else:  # 'l'
                         elem_bytes = 4
                         shift_amount = 2
-                    
+
                     # Check if index is a constant
                     if isinstance(expr.indices[0], ast.Number):
                         # Constant index: generate direct offset
                         index_val = expr.indices[0].value
                         offset = index_val * elem_bytes
                         size_suffix = ast.size_suffix(elem_bytes)
-                        
+
                         if offset == 0:
                             code.append(f"    move{size_suffix} {name},{reg_left}")
                         else:
@@ -830,56 +766,56 @@ class CodeGen:
                     # (since there's no type information about what it points to)
                     elem_bytes = 1  # Default to byte pointer
                     shift_amount = 0  # No shift for bytes
-                    
+
                     # Load the pointer value into a0
                     code.append(f"    move.l {name},a0")
-                    
+
                     # Evaluate index into d1
                     index_code = self._emit_expr(expr.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
                     code.extend(index_code)
-                    
+
                     # For byte pointers, no scaling needed (shift_amount = 0)
                     # Load byte element through pointer
                     code.append(f"    move.b (a0,d1.l),{reg_left}")
                     # Zero-extend byte to long
                     code.append(f"    andi.l #$FF,{reg_left}")
-                
+
             elif len(expr.indices) == 2:
                 # 2D array: matrix[row][col]
                 # Calculate: base + (row * col_count + col) * element_size
-                
+
                 # Get array dimensions and element size
                 elem_size = 'l'
                 elem_bytes = 4
                 col_count = None
-                
+
                 if name in self.array_dims:
                     array_info = self.array_dims[name]
                     dims = array_info['dims']
                     elem_size = array_info.get('size', 'l')
-                    
+
                     if elem_size == 'b':
                         elem_bytes = 1
                     elif elem_size == 'w':
                         elem_bytes = 2
                     else:
                         elem_bytes = 4
-                    
+
                     if len(dims) >= 2:
                         col_count = dims[1]
-                
+
                 # Check if both indices are constants
                 if isinstance(expr.indices[0], ast.Number) and isinstance(expr.indices[1], ast.Number):
                     # Both constant: compute offset at compile time
                     row_val = expr.indices[0].value
                     col_val = expr.indices[1].value
-                    
+
                     if col_count is None:
                         self._fail(f"Cannot determine column count for 2D array '{name}' - declare with explicit dimensions like 'int[3][5]'")
-                    
+
                     offset = (row_val * col_count + col_val) * elem_bytes
                     size_suffix = ast.size_suffix(elem_bytes)
-                    
+
                     if offset == 0:
                         code.append(f"    move{size_suffix} {name},{reg_left}")
                     else:
@@ -904,16 +840,16 @@ class CodeGen:
             else:
                 code.append(f"    ; arrays with >2 dimensions not supported")
                 code.append(f"    move.l #0,{reg_left}")
-            
+
             return code
         if isinstance(expr, ast.VarRef):
             name = expr.name
-            
+
             # Check if it's a constant first
             if name in self.constants:
                 const_value = self.constants[name]
                 return [f"    move.l #{const_value},{reg_left}"]
-            
+
             # Check if it's a local variable first (this includes saved register parameters)
             local_info = next((l for l in locals_info if l[0] == name), None)
             if local_info:
@@ -941,7 +877,7 @@ class CodeGen:
                 else:
                     code.append(f"    move.l {-offset}({frame_reg}),{reg_left}")
                     return code
-            
+
             # Check if it's a parameter (for address register parameters that aren't saved)
             param_obj = next((p for p in params if p.name == name), None)
             if param_obj:
@@ -964,7 +900,7 @@ class CodeGen:
                         # Get parameter type and size
                         param_type = param_obj.ptype if param_obj.ptype else 'long'
                         param_size = ast.type_size(param_type) if param_type else 4
-                        
+
                         if param_size == 1:
                             # Byte parameter packed in low byte of pushed long.
                             # Use signed/unsigned extension based on declared type.
@@ -993,7 +929,7 @@ class CodeGen:
                             return [f"    move.l {off}(a6),{reg_left}"]
                     else:
                         return [f"    ; parameter {name} not found in stack_params", f"    move.l #0,{reg_left}"]
-            
+
             # Check globals (moved outside param_obj block so globals are checked even if not a parameter)
             if name in self.globals:
                 size = self.globals.get(name, 'l')
@@ -1010,7 +946,7 @@ class CodeGen:
                     ]
                 else:
                     return [f"    move.l {name},{reg_left}"]
-            
+
             # Check extern vars
             if name in self.extern_vars:
                 size = self.extern_vars.get(name, 'l')
@@ -1027,7 +963,7 @@ class CodeGen:
                     ]
                 else:
                     return [f"    move.l {name},{reg_left}"]
-            
+
             self._fail(f"Undefined variable '{name}' in expression")
         if isinstance(expr, ast.BinOp):
             # Ensure registers are valid
@@ -1035,24 +971,24 @@ class CodeGen:
                 reg_left = "d0"
             if reg_right is None or reg_right == 'None':
                 reg_right = "d1"
-            
+
             # Try constant folding first
             is_const, const_val = self._fold_constant(expr)
             if is_const:
                 return [f"    move.l #{const_val},{reg_left}"]
-            
+
             code = []
             # For binary operations, we need to be careful with register allocation
-            # Strategy: 
+            # Strategy:
             # 1. Evaluate left side into reg_left
             # 2. If right side is complex (not a simple number/var), save reg_left to stack
             # 3. Evaluate right side into reg_right
             # 4. If we saved to stack, restore reg_left
             # 5. Perform operation
-            
+
             # Check if right side is complex (contains operations)
             right_is_complex = isinstance(expr.right, (ast.BinOp, ast.UnaryOp, ast.Call, ast.ArrayAccess))
-            
+
             # Fast path: constant-left comparisons (e.g., 5 < x becomes x > 5: cmp #5,x then sgt)
             # This saves a register load for the constant
             if isinstance(expr.left, ast.Number) and expr.op in ('==','!=','<','<=','>','>='):
@@ -1099,7 +1035,7 @@ class CodeGen:
                     code.append(f"    andi.l #$FF,{reg_left}")
                     code.append(f"    neg.b {reg_left}")
                 return code
-            
+
             # SHORT-CIRCUIT EVALUATION for && and ||
             # Must evaluate left first and conditionally skip right if possible
             if expr.op == '&&':
@@ -1142,10 +1078,10 @@ class CodeGen:
                 code.append(f".or_done_{self.label_counter}:")
                 self.label_counter += 1
                 return code
-            
+
             # Evaluate left side into reg_left
             code += self._emit_expr(expr.left, params, locals_info, reg_left, reg_right, target_type=target_type, frame_reg=frame_reg)
-            
+
             # Fast path: immediate operations when right is a constant
             if isinstance(expr.right, ast.Number):
                 imm = expr.right.value
@@ -1204,7 +1140,7 @@ class CodeGen:
             if right_is_complex:
                 # Save left result to stack before evaluating complex right side
                 code.append(f"    move.l {reg_left},-(a7)  ; preserve left operand")
-            
+
             # Evaluate right side into reg_right
             # Choose a temp register distinct from reg_right to avoid clobbering when
             # the right side itself is a BinOp (e.g., ex + 16). Previously, using
@@ -1212,11 +1148,11 @@ class CodeGen:
             # the same register, leading to incorrect sequences like `add.l d2,d2`.
             temp_right = "d2" if reg_right != "d2" else "d1"
             code += self._emit_expr(expr.right, params, locals_info, reg_right, temp_right, target_type=target_type, frame_reg=frame_reg)
-            
+
             if right_is_complex:
                 # Restore left result from stack
                 code.append(f"    move.l (a7)+,{reg_left}  ; restore left operand")
-            
+
             # Perform the operation
             if expr.op == '+':
                 code.append(f"    add.l {reg_right},{reg_left}")
@@ -1319,7 +1255,7 @@ class CodeGen:
                 if isinstance(expr.operand, ast.ArrayAccess):
                     # Address-of array element: &arr[i] or &matrix[row][col]
                     name = expr.operand.name
-                    
+
                     # 1D array case
                     if len(expr.operand.indices) == 1:
                         elem_bytes = 4
@@ -1345,25 +1281,25 @@ class CodeGen:
                             elem_bytes,
                         ))
                         return code
-                    
+
                     elif len(expr.operand.indices) == 2:
                         # 2D array: &matrix[row][col]
                         # Calculate: base + (row * col_count + col) * element_size
-                        
+
                         # Load base address
                         code.append(f"    lea {name},a0")
-                        
+
                         # Evaluate row index into d1
                         row_code = self._emit_expr(expr.operand.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
                         code.extend(row_code)
-                        
+
                         # Save row in d2
                         code.append(f"    move.l d1,d2")
-                        
+
                         # Evaluate col index into d1
                         col_code = self._emit_expr(expr.operand.indices[1], params, locals_info, "d1", "a1", target_type="int", frame_reg=frame_reg)
                         code.extend(col_code)
-                        
+
                         # Get column count and element size
                         elem_size = 'l'
                         elem_bytes = 4
@@ -1379,7 +1315,7 @@ class CodeGen:
                                 elem_bytes = 2
                             else:
                                 elem_bytes = 4
-                            
+
                             if len(dims) >= 2:
                                 col_count = dims[1]
                                 code.append(f"    mulu.w #{col_count},d2")
@@ -1387,31 +1323,31 @@ class CodeGen:
                                 code.append(f"    mulu.w #10,d2")
                         else:
                             code.append(f"    mulu.w #10,d2")
-                        
+
                         # Add col
                         code.append(f"    add.l d1,d2")
-                        
+
                         # Scale by element size
                         shift_map = {'b': 0, 'w': 1, 'l': 2}
                         shift = shift_map.get(elem_size, 2)
                         if shift > 0:
                             code.append(f"    lsl.l #{shift},d2")
-                        
+
                         # Calculate final address: a0 + d2
                         code.append(f"    add.l d2,a0")
-                        
+
                         # Move address to result register
                         if reg_left.startswith('d'):
                             code.append(f"    move.l a0,{reg_left}")
                         else:
                             code.append(f"    move.l a0,{reg_left}")
-                        
+
                         return code
                     else:
                         code.append(f"    ; arrays with >2 dimensions not supported")
                         code.append(f"    move.l #0,{reg_left}")
                         return code
-                
+
                 elif isinstance(expr.operand, ast.VarRef):
                     name = expr.operand.name
                     # Check if it's a constant first
@@ -1696,50 +1632,50 @@ class CodeGen:
             code = []
             callee_params = self.proc_sigs.get(expr.name)
             is_external = callee_params is None
-            
+
             # If we need result in a register other than d0, preserve that register
             needs_move = reg_left != "d0"
-            
+
             # Determine what to save: a6 if using a6 frame
             # When using a4, it's saved once at procedure entry, not per-call
             has_frame = len(locals_info) > 0
             save_frame_reg = False
             if has_frame and frame_reg == "a6":
                 save_frame_reg = True
-                
+
             if save_frame_reg:
                 code.append(f"    move.l {frame_reg},-(a7)  ; save frame pointer")
-            
+
             if callee_params:
                 # Separate register and stack parameters
                 reg_params = [(i, p.register) for i, p in enumerate(callee_params) if p.register]
                 stack_params = [(i, p) for i, p in enumerate(callee_params) if not p.register]
-                
+
                 # Save registers that will be used for parameters
                 regs_to_save = [r for _, r in reg_params]
                 for r in regs_to_save:
                     code.append(f"    move.l {r},-(a7)")
-                
+
                 # Push stack parameters in reverse order
                 for idx, p in reversed(stack_params):
                     if idx < len(expr.args):
                         arg = expr.args[idx]
                         code += self._emit_push_arg(arg, params, locals_info, "    ", frame_reg=frame_reg)
-                
+
                 # Load register parameters
                 for idx, reg in reg_params:
                     if idx < len(expr.args):
                         arg = expr.args[idx]
                         arg_code = self._emit_expr(arg, params, locals_info, reg, "d1", target_type=callee_params[idx].ptype, frame_reg=frame_reg)
                         code.extend(arg_code)
-                
+
                 code.append(f"    jsr {expr.name}")
-                
+
                 # Clean up stack parameters
                 stack_arg_count = len(stack_params)
                 if stack_arg_count > 0:
                     code.append(self._emit_add_immediate("    ", "a7", 4*stack_arg_count))
-                
+
                 # Restore saved registers
                 for r in reversed(regs_to_save):
                     code.append(f"    move.l (a7)+,{r}")
@@ -1750,15 +1686,15 @@ class CodeGen:
                 code.append(f"    jsr {expr.name}")
                 if len(expr.args) > 0:
                     code.append(self._emit_add_immediate("    ", "a7", 4*len(expr.args)))
-            
+
             # Restore frame register if we saved it
             if save_frame_reg:
                 code.append(f"    move.l (a7)+,{frame_reg}  ; restore frame pointer")
-            
+
             # Move result from d0 to target register if needed
             if needs_move:
                 code.append(f"    move.l d0,{reg_left}")
-            
+
             return code
         if isinstance(expr, ast.GetReg):
             # GetReg("d0") - read value from specified register and move to target register
@@ -1791,7 +1727,7 @@ class CodeGen:
         """Emit instructions to push an argument on the stack, trying to avoid a temp register."""
 
         lines = []
-        
+
         # Normalize arg first to avoid unsupported Tree/None
         arg = self._normalize_expr(arg)
 
@@ -1802,7 +1738,7 @@ class CodeGen:
 
         if isinstance(arg, ast.VarRef):
             name = arg.name
-            
+
             # Check locals first (this includes saved register parameters)
             local_info = next((l for l in locals_info if l[0] == name), None)
             if local_info:
@@ -1821,7 +1757,7 @@ class CodeGen:
                     # This should not happen - validator should catch undefined variables
                     self._fail(f"Internal error: unresolved offset for variable '{name}' in function call argument")
                 return lines
-            
+
             # Check if it's a parameter (for address register parameters that aren't saved)
             param_obj = next((p for p in params if p.name == name), None)
             if param_obj and param_obj != 'None':
@@ -1841,7 +1777,7 @@ class CodeGen:
                         off = 8 + 4 * idx
                         lines.append(f"{indent}move.l {off}(a6),-(a7)")
                         return lines
-            
+
             # Constants can be pushed directly as immediates
             if name in self.constants:
                 const_val = self.constants[name]
@@ -1886,13 +1822,13 @@ class CodeGen:
         Used when we only care about the true/false outcome (if/while conditions).
         Returns code lines that branch to true_label if condition is true."""
         code = []
-        
+
         # Normalize expression to AST first
         expr = self._normalize_expr(expr)
         if not isinstance(expr, ast.BinOp):
             # Not a comparison - fall back to standard evaluation + test
             return None
-        
+
         # Optimize constant-left comparisons (e.g., 5 < x becomes x > 5)
         # This enables immediate compare instructions and correct condition sense
         if isinstance(expr.left, ast.Number) and expr.op in ('==','!=','<','<=','>','>='):
@@ -1901,13 +1837,13 @@ class CodeGen:
             swap_map = {'<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==', '!=': '!='}
             swapped_op = swap_map[expr.op]
             unsigned_right = self._is_unsigned_expr(expr.right, locals_info, params)
-            
+
             # Evaluate right side (now the left operand) into d0
             code += self._emit_expr(expr.right, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
-            
+
             # Compare with immediate constant
             code.append(f"    cmp.l #{const_val},d0")
-            
+
             # Branch based on swapped condition
             if swapped_op == '==':
                 code.append(f"    beq {true_label}")
@@ -1921,9 +1857,9 @@ class CodeGen:
                 code.append(f"    bhi {true_label}" if unsigned_right else f"    bgt {true_label}")
             elif swapped_op == '>=':
                 code.append(f"    bcc {true_label}" if unsigned_right else f"    bge {true_label}")
-            
+
             return code
-        
+
         # SHORT-CIRCUIT EVALUATION for && and ||
         # Handle these before general evaluation to avoid evaluating both sides
         if expr.op == '&&':
@@ -1950,10 +1886,10 @@ class CodeGen:
             code.append(f"    tst.l d0")
             code.append(f"    bne {true_label}")  # Right is true -> branch to true
             return code
-        
+
         # Evaluate left side into d0
         code += self._emit_expr(expr.left, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
-        
+
         # If right side is a constant, use immediate compare; otherwise evaluate into d1
         right_is_imm = isinstance(expr.right, ast.Number)
         # Only use immediate compare for relational/equality ops; for logical ops, we still need d1
@@ -1961,7 +1897,7 @@ class CodeGen:
             code.append(f"    cmp.l #{expr.right.value},d0")
         else:
             code += self._emit_expr(expr.right, params, locals_info, "d1", "d2", target_type=None, frame_reg=frame_reg)
-        
+
         # Emit comparison with branch
         op = expr.op
         unsigned_cmp = self._is_unsigned_expr(expr.left, locals_info, params) or self._is_unsigned_expr(expr.right, locals_info, params)
@@ -2004,19 +1940,19 @@ class CodeGen:
         else:
             # Not a comparison operator we can optimize
             return None
-        
+
         return code
 
     def _emit_comparison_branch_inverted(self, expr, params, locals_info, false_label, indent, frame_reg="a6"):
         """Emit optimized comparison with direct branch to FALSE label (inverted logic).
         Returns code lines that branch to false_label if condition is FALSE."""
         code = []
-        
+
         # Normalize expression to AST first
         expr = self._normalize_expr(expr)
         if not isinstance(expr, ast.BinOp):
             return None
-        
+
         # Optimize constant-left comparisons (e.g., 5 < x becomes x > 5)
         # This enables immediate compare instructions and correct condition sense
         if isinstance(expr.left, ast.Number) and expr.op in ('==','!=','<','<=','>','>='):
@@ -2025,13 +1961,13 @@ class CodeGen:
             swap_map = {'<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==', '!=': '!='}
             swapped_op = swap_map[expr.op]
             unsigned_right = self._is_unsigned_expr(expr.right, locals_info, params)
-            
+
             # Evaluate right side (now the left operand) into d0
             code += self._emit_expr(expr.right, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
-            
+
             # Compare with immediate constant
             code.append(f"    cmp.l #{const_val},d0")
-            
+
             # Branch to FALSE label using inverted swapped condition
             if swapped_op == '==':
                 code.append(f"    bne {false_label}")  # NOT equal -> false
@@ -2045,9 +1981,9 @@ class CodeGen:
                 code.append(f"    bls {false_label}" if unsigned_right else f"    ble {false_label}")  # <= -> false
             elif swapped_op == '>=':
                 code.append(f"    blo {false_label}" if unsigned_right else f"    blt {false_label}")  # < -> false
-            
+
             return code
-        
+
         # SHORT-CIRCUIT EVALUATION for && and ||
         # Handle these before general evaluation to avoid evaluating both sides
         if expr.op == '&&':
@@ -2073,7 +2009,7 @@ class CodeGen:
             code.append(f".or_skip_{self.label_counter}:")
             self.label_counter += 1
             return code
-        
+
         # Evaluate left side
         code += self._emit_expr(expr.left, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
         # If right side is a constant, use immediate compare; otherwise evaluate into d1
@@ -2083,7 +2019,7 @@ class CodeGen:
             code.append(f"    cmp.l #{expr.right.value},d0")
         else:
             code += self._emit_expr(expr.right, params, locals_info, "d1", "d2", target_type=None, frame_reg=frame_reg)
-        
+
         # Emit inverted branches (jump if FALSE)
         op = expr.op
         unsigned_cmp = self._is_unsigned_expr(expr.left, locals_info, params) or self._is_unsigned_expr(expr.right, locals_info, params)
@@ -2125,7 +2061,7 @@ class CodeGen:
                 code.append(f"    blo {false_label}" if unsigned_cmp else f"    blt {false_label}")
         else:
             return None
-        
+
         return code
 
     def _try_emit_scc_bool_assign(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
@@ -2302,34 +2238,34 @@ class CodeGen:
         elif isinstance(stmt, ast.Assign):
             target = stmt.target
             expr_comment = self._expr_to_comment(stmt.expr)
-            
+
             if stmt.is_deref:
                 # Pointer dereference assignment: *ptr = value
                 # Load pointer value, then store through it
                 self.emit(indent + f"; *{target} = {expr_comment}")
-                
+
                 # Check if target is a parameter
                 param_obj = next((p for p in params if p.name == target), None)
                 local_info = next((l for l in locals_info if l[0] == target), None)
-                
+
                 if param_obj or local_info:
                     # Determine base type (for size calculation)
                     if param_obj:
                         ptr_type = param_obj.ptype
                     else:
                         name, ptr_type, offset = local_info
-                    
+
                     # Extract base type from pointer type (e.g., "int*" -> "int")
                     base_type = ptr_type.rstrip('*') if ptr_type else 'long'
                     size = ast.type_size(base_type) if base_type else 4
                     suffix = ast.size_suffix(size)
-                    
+
                     # Evaluate the expression to assign
                     code = self._emit_expr(stmt.expr, params, locals_info, "d0", target_type=base_type, frame_reg=frame_reg)
                     for l in code:
                         for sub in str(l).splitlines():
                             self.emit(sub if sub.startswith(indent) else indent + sub)
-                    
+
                     # Load pointer from parameter or local
                     if param_obj:
                         # Load pointer from parameter (on stack)
@@ -2347,7 +2283,7 @@ class CodeGen:
                         # Load pointer from local variable
                         name, ptr_type, offset = local_info
                         self.emit(indent + f"move.l {self._frame_offset(offset, frame_reg)},a0")
-                    
+
                     # Store value through pointer
                     self.emit(indent + f"move{suffix} d0,(a0)")
                 else:
@@ -2358,7 +2294,7 @@ class CodeGen:
                     # Struct member store: var.field, arr[idx].field, or (*ptr).field
                     base = target.base
                     field = target.field
-                    
+
                     # Handle dereferenced pointer: (*ptr).field = value
                     if isinstance(base, ast.UnaryOp) and base.op == '*':
                         ptr_operand = base.operand
@@ -2367,7 +2303,7 @@ class CodeGen:
                         for l in rhs:
                             for sub in str(l).splitlines():
                                 self.emit(sub if sub.startswith(indent) else indent + sub)
-                        
+
                         # CRITICAL FIX: For pointer variables (local or parameter), ALWAYS reload
                         # from memory. We cannot trust that a0 contains a valid value because:
                         # 1. Previous code in this function may have called jsr (destroying a0)
@@ -2408,7 +2344,7 @@ class CodeGen:
                             # Move result to a0 if not already there
                             if ptr_code and "a0" not in ptr_code[-1]:
                                 self.emit(indent + f"move.l d0,a0")
-                        
+
                         # Try to infer struct type from variable type info
                         struct_type = None
                         if isinstance(ptr_operand, ast.VarRef):
@@ -2423,24 +2359,24 @@ class CodeGen:
                                 # DEBUG
                                 if self.print_debug:
                                     self.emit(f"; DEBUG: var={var_name} vtype={vtype} struct_type={struct_type}")
-                            
+
                             # Check function parameters if not found in locals
                             if not struct_type:
                                 param_obj = next((p for p in params if p.name == var_name), None)
                                 if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
                                     struct_type = param_obj.ptype.rstrip('*').strip()
-                            
+
                             # Fallback: try name-based inference
                             if not struct_type:
                                 for sname in self.struct_info:
                                     if var_name.startswith(sname.lower()) or var_name.endswith('_' + sname.lower()):
                                         struct_type = sname
                                         break
-                        
+
                         # DEBUG
                         if self.print_debug:
                             self.emit(f"; DEBUG: struct_type={struct_type} field={field} in_struct_info={struct_type in self.struct_info if struct_type else False}")
-                        
+
                         if struct_type and struct_type in self.struct_info:
                             sinfo = self.struct_info[struct_type]
                             if field in sinfo['fields']:
@@ -2472,13 +2408,13 @@ class CodeGen:
                             else:
                                 self.emit(indent + f"; unknown field {field} in dereferenced struct")
                                 return
-                            
+
                             # Generate code with guessed offset
                             if offset == 0:
                                 self.emit(indent + f"move{suffix} d0,(a0)")
                             else:
                                 self.emit(indent + f"move{suffix} d0,{offset}(a0)")
-                    
+
                     # Handle simple variable member access
                     elif isinstance(base, ast.VarRef):
                         name = base.name
@@ -2495,7 +2431,7 @@ class CodeGen:
                                     self.emit(sub if sub.startswith(indent) else indent + sub)
                             # Store directly at absolute field label
                             self.emit(indent + f"move{suffix} d0,{name}_{field}")
-                    
+
                     # Handle array element member access
                     elif isinstance(base, ast.ArrayAccess):
                         name = base.name
@@ -2656,16 +2592,16 @@ class CodeGen:
                             self.emit(sub if sub.startswith(indent) else indent + sub)
                     self.emit(indent + f"move{suffix} d0,{-offset}({frame_reg})")
                     return
-                
+
                 # Evaluate right side into d1
                 code = self._emit_expr(stmt.expr, params, locals_info, reg_left="d1", target_type=vtype, frame_reg=frame_reg)
                 for l in code:
                     for sub in str(l).splitlines():
                         self.emit(sub if sub.startswith(indent) else indent + sub)
-                
+
                 # Load current value into d0
                 self.emit(indent + f"move{suffix} {-offset}({frame_reg}),d0")
-                
+
                 # Perform the compound operation
                 op_map = {
                     '+=': 'add',
@@ -2679,13 +2615,13 @@ class CodeGen:
                     '|=': 'or',
                     '^=': 'eor'
                 }
-                
+
                 instr = op_map.get(stmt.op, 'add')
                 if '/=' in stmt.op or '%=' in stmt.op:
                     self.emit(indent + instr)
                 else:
                     self.emit(indent + f"{instr}{suffix} d1,d0")
-                
+
                 # Store result back
                 self.emit(indent + f"move{suffix} d0,{-offset}({frame_reg})")
             else:
@@ -2714,7 +2650,7 @@ class CodeGen:
             substituted_content, substitutions = self._substitute_asm_vars(
                 stmt.content, params, locals_info, frame_reg=frame_reg
             )
-            
+
             # Emit substitution comments (deduplicate by variable name)
             if substitutions:
                 seen = set()
@@ -2722,7 +2658,7 @@ class CodeGen:
                     if var_name not in seen:
                         self.emit(f"    ; @{var_name} -> {replacement} ({var_type})")
                         seen.add(var_name)
-            
+
             # Emit the substituted asm lines
             for line in substituted_content.splitlines():
                 # Strip leading/trailing whitespace and emit with proper indentation
@@ -2759,10 +2695,10 @@ class CodeGen:
             # Emit if statement with conditional branch
             end_label = self._next_label("endif")
             else_label = self._next_label("else") if stmt.else_body else end_label
-            
+
             # Try optimized comparison branch with inverted logic (jump if FALSE to else)
             opt_code = self._emit_comparison_branch_inverted(stmt.cond, params, locals_info, else_label, indent, frame_reg=frame_reg)
-            
+
             if opt_code:
                 # Optimized path: direct branch comparison
                 for l in opt_code:
@@ -2776,11 +2712,11 @@ class CodeGen:
                         self.emit(sub if sub.startswith(indent) else indent + sub)
                 self.emit(indent + "tst.l d0")
                 self.emit(indent + f"beq {else_label}")
-            
+
             # Emit then block
             for s in stmt.then_body:
                 self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
-            
+
             # If there's an else block
             if stmt.else_body:
                 self.emit(indent + f"bra {end_label}")
@@ -2793,15 +2729,15 @@ class CodeGen:
         elif isinstance(stmt, ast.While):
             start_label = self._next_label("while")
             end_label = self._next_label("endwhile")
-            
+
             # Push loop context for break/continue
             self.loop_stack.append((start_label, end_label))
-            
+
             self.emit(f"{start_label}:")
-            
+
             # Try optimized comparison branch
             opt_code = self._emit_comparison_branch_inverted(stmt.cond, params, locals_info, end_label, indent, frame_reg=frame_reg)
-            
+
             if opt_code:
                 # Optimized: direct branch comparison
                 for l in opt_code:
@@ -2813,16 +2749,16 @@ class CodeGen:
                 for l in code:
                     for sub in str(l).splitlines():
                         self.emit(sub if sub.startswith(indent) else indent + sub)
-                
+
                 self.emit(indent + "tst.l d0")
                 self.emit(indent + f"beq {end_label}")
-            
+
             for s in stmt.body:
                 self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
-            
+
             self.emit(indent + f"bra {start_label}")
             self.emit(f"{end_label}:")
-            
+
             # Pop loop context
             self.loop_stack.pop()
         elif isinstance(stmt, ast.DoWhile):
@@ -2830,23 +2766,23 @@ class CodeGen:
             start_label = self._next_label("dowhile")
             cont_label = self._next_label("dowhilecont")
             end_label = self._next_label("enddo")
-            
+
             # Push loop context for break/continue
             # Continue should jump to the condition check
             self.loop_stack.append((cont_label, end_label))
-            
+
             self.emit(f"{start_label}:")
-            
+
             # Emit loop body
             for s in stmt.body:
                 self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
-            
+
             # Continue target: check condition
             self.emit(f"{cont_label}:")
-            
+
             # Try optimized comparison branch
             opt_code = self._emit_comparison_branch(stmt.cond, params, locals_info, start_label, indent, frame_reg=frame_reg)
-            
+
             if opt_code:
                 # Optimized: direct branch comparison (jump back to start if condition is true)
                 for l in opt_code:
@@ -2858,12 +2794,12 @@ class CodeGen:
                 for l in code:
                     for sub in str(l).splitlines():
                         self.emit(sub if sub.startswith(indent) else indent + sub)
-                
+
                 self.emit(indent + "tst.l d0")
                 self.emit(indent + f"bne {start_label}")
-            
+
             self.emit(f"{end_label}:")
-            
+
             # Pop loop context
             self.loop_stack.pop()
         elif isinstance(stmt, ast.ForLoop):
@@ -2895,20 +2831,20 @@ class CodeGen:
 
                 self.loop_stack.pop()
                 return
-            
+
             # Push loop context for break/continue
             # Continue should jump to the increment step, not the start
             self.loop_stack.append((cont_label, end_label))
-            
+
             # Find loop variable in locals
             local_info = next((l for l in locals_info if l[0] == stmt.var), None)
             if not local_info:
                 self._fail(f"Loop variable '{stmt.var}' not found in local variables (should have been caught by validator)")
-            
+
             name, vtype, offset = local_info
             size = ast.type_size(vtype) if vtype else 4
             suffix = ast.size_suffix(size)
-            
+
             # Initialize: var = start
             code = self._emit_expr(stmt.start, params, locals_info, "d0", target_type=vtype, frame_reg=frame_reg)
             for l in code:
@@ -2924,17 +2860,17 @@ class CodeGen:
                 for l in code:
                     for sub in str(l).splitlines():
                         self.emit(sub if sub.startswith(indent) else indent + sub)
-            
+
             # Loop label
             self.emit(f"{start_label}:")
-            
+
             # Load var and end into registers for comparison
             self.emit(indent + f"move{suffix} {-offset}({frame_reg}),d0")
             code = self._emit_expr(stmt.end, params, locals_info, "d1", target_type=vtype, frame_reg=frame_reg)
             for l in code:
                 for sub in str(l).splitlines():
                     self.emit(sub if sub.startswith(indent) else indent + sub)
-            
+
             # Compare and branch based on loop direction.
             # For dynamic steps, use d2 (cached step value) to pick direction at runtime.
             branch_instr = "bgt"  # Default: ascending (var > end)
@@ -2958,11 +2894,11 @@ class CodeGen:
                     branch_instr = "blt"
                 self.emit(indent + f"cmp{suffix} d1,d0")
                 self.emit(indent + f"{branch_instr} {end_label}")
-            
+
             # Emit loop body
             for s in stmt.body:
                 self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
-            
+
             # Continue target: increment step
             self.emit(f"{cont_label}:")
 
@@ -2980,11 +2916,11 @@ class CodeGen:
             self.emit(indent + f"move{suffix} {-offset}({frame_reg}),d0")
             self.emit(indent + f"add{suffix} {'d2' if dynamic_step else 'd1'},d0")
             self.emit(indent + f"move{suffix} d0,{-offset}({frame_reg})")
-            
+
             # Jump back to loop start
             self.emit(indent + f"bra {start_label}")
             self.emit(f"{end_label}:")
-            
+
             # Pop loop context
             self.loop_stack.pop()
         elif isinstance(stmt, ast.RepeatLoop):
@@ -2994,30 +2930,30 @@ class CodeGen:
             start_label = self._next_label("repeat")
             end_label = self._next_label("endrepeat")
             cont_label = self._next_label("repeatcont")
-            
+
             # Push loop context for break/continue
             # Continue should jump to the dbra decrement/branch
             self.loop_stack.append((cont_label, end_label))
-            
+
             # Use d7 as loop counter
             # Evaluate count into d0, then move to d7
             code = self._emit_expr(stmt.count, params, locals_info, "d0", frame_reg=frame_reg)
             for l in code:
                 for sub in str(l).splitlines():
                     self.emit(sub if sub.startswith(indent) else indent + sub)
-            
+
             # Decrement by 1 for dbra (it counts from N-1 down to 0)
             self.emit(indent + "subq.l #1,d0")
             nested = self._dbra_loop_enter(indent)
             self.emit(indent + "move.l d0,d7")
-            
+
             # Loop label
             self.emit(f"{start_label}:")
-            
+
             # Emit loop body
             for s in stmt.body:
                 self._emit_stmt(s, params, locals_info, proc, indent, is_void, frame_reg=frame_reg)
-            
+
             # Continue target: just before dbra
             self.emit(f"{cont_label}:")
 
@@ -3025,7 +2961,7 @@ class CodeGen:
             self.emit(indent + f"dbra d7,{start_label}")
             self.emit(f"{end_label}:")
             self._dbra_loop_exit(indent, nested)
-            
+
             # Pop loop context
             self.loop_stack.pop()
         elif isinstance(stmt, ast.Break):
@@ -3106,7 +3042,7 @@ class CodeGen:
             # Python directive: execute Python code at compile time
             try:
                 import math
-                
+
                 # Create execution context with safe builtins
                 sandbox_globals = {
                     '__builtins__': {
@@ -3130,10 +3066,10 @@ class CodeGen:
                     # Provide commonly-used safe modules directly
                     'math': math,
                 }
-                
+
                 # Execute the Python code
                 exec(stmt.code, sandbox_globals)
-                
+
                 # Check if code generated HAS statements
                 if 'generated_code' in sandbox_globals:
                     generated = sandbox_globals['generated_code']
@@ -3240,7 +3176,7 @@ class CodeGen:
 
     def _emit_call_stmt(self, stmt, params, locals_info, indent, frame_reg="a6"):
         """Emit a call statement given the caller's params/locals context.
-        
+
         NOTE: When using a4 as frame register, we save it once at procedure entry
         and restore at exit, eliminating the need for per-call save/restore.
         When using a6, external functions may clobber it via link a6, so we still
@@ -3248,15 +3184,15 @@ class CodeGen:
         """
         callee_params = self.proc_sigs.get(stmt.name)
         is_external = callee_params is None
-        
+
         # Frame setup info
         has_frame = len(locals_info) > 0
-        
+
         # Only save frame register around calls if using a6 (a4 is saved once at entry)
         save_frame_reg = False
         if has_frame and frame_reg == "a6":
             save_frame_reg = True
-            
+
         if save_frame_reg:
             self.emit(indent + f"move.l {frame_reg},-(a7)  ; save frame pointer")
 
@@ -3329,7 +3265,7 @@ class CodeGen:
             self.emit(indent + f"jsr {stmt.name}")
             if len(stmt.args) > 0:
                 self.emit(self._emit_add_immediate(indent, "a7", 4*len(stmt.args)))
-        
+
         # Restore frame register if we saved it
         if save_frame_reg:
             self.emit(indent + f"move.l (a7)+,{frame_reg}  ; restore frame pointer")
@@ -3338,7 +3274,7 @@ class CodeGen:
         # Emit header
         self.emit("; Generated by hasc prototype")
         indent = "    "
-        
+
         # Collect all external and public declarations
         externs = []
         publics = []
@@ -3353,19 +3289,19 @@ class CodeGen:
                 externs.append(item.name)
             elif isinstance(item, ast.PublicDecl):
                 publics.append(item.name)
-        
+
         # Emit XREF directives for external symbols
         if externs:
             self.emit("")
             for ext in externs:
                 self.emit(indent + f"XREF {ext}")
-        
+
         # Emit XDEF directives for public symbols
         if publics:
             self.emit("")
             for pub in publics:
                 self.emit(indent + f"XDEF {pub}")
-        
+
         # Emit sections in order of appearance
         # Track running byte offsets per (name, section_type) so alignment decisions
         # remain correct if a section is reopened/continued later in self.module.items
@@ -3556,7 +3492,7 @@ class CodeGen:
                         # Handle size specified as: name: bytes OR name.suffix: count
                         size_suffix = var.size_suffix or 'l'  # default to long
                         elem_size = 1 if size_suffix == 'b' else (2 if size_suffix == 'w' else 4)
-                        
+
                         # If size_suffix was explicitly specified, treat size as element count
                         # Otherwise treat it as byte count (for backwards compatibility)
                         if var.size_suffix:
@@ -3565,7 +3501,7 @@ class CodeGen:
                             # No explicit suffix: treat as byte count, divide by element size
                             total_bytes = int(var.size)
                             count = total_bytes // elem_size if total_bytes else 1
-                        
+
                         self.emit(f"{var.name}: ds.{size_suffix} {count}  ; {var.size} {('elements' if var.size_suffix else 'bytes')}")
                         bss_offset += count * elem_size
                     else:
@@ -3605,18 +3541,18 @@ class CodeGen:
                         # Reset push stack for each procedure
                         self.push_stack = []
                         self.dbra_depth = 0
-                        
+
                         # Choose frame register (for frame pointer preservation across calls)
                         frame_reg = self._choose_frame_register()
                         self.emit("")
                         self.emit(f"{it.name}:")
                         params, locals_info, localsize, saved_reg_params = self._analyze_proc(it)
-                        
+
                         # If using a4 as frame register, we need extra space in the frame for saved a4
                         frame_reg = self._choose_frame_register()
                         if len(locals_info) > 0 and frame_reg == "a4":
                             localsize += 4  # Extra space for saved a4
-                        
+
                         # Add comments showing parameter locations
                         for p in params:
                             # Fix: treat string 'None' as None
@@ -3635,23 +3571,23 @@ class CodeGen:
                         # Add comments for local variables
                         for name, vtype, offset in locals_info:
                             self.emit(indent + f"; local {name}: {vtype} at {-offset}({frame_reg})")
-                        
+
                         # Check if return type is void
                         is_void = it.rettype == 'void'
                         is_empty_body = len(it.body) == 0
-                        
+
                         # Empty procedures/functions do not need a frame; emit a bare RTS below.
                         if not it.native and not is_empty_body:
                             # prologue: establish frame with LINK
                             # Use #0 for no locals, #-N for N bytes of locals
                             link_param = f"#0" if localsize == 0 else f"#-{localsize}"
                             self.emit(indent + f"link a6,{link_param}")
-                            
+
                             # CRITICAL FIX: Save data register parameters immediately after link
                             # to prevent them from being clobbered before use
                             for param_name, (reg, offset) in saved_reg_params.items():
                                 self.emit(indent + f"move.l {reg},{-offset}(a6)  ; save {param_name} from {reg}")
-                            
+
                             # If we have locals and using a4 as frame register, save a4 in allocated space
                             if len(locals_info) > 0:
                                 if frame_reg == "a4":
@@ -3666,7 +3602,7 @@ class CodeGen:
                         # compile statements with frame register info
                         for stmt in it.body:
                             self._emit_stmt(stmt, params, locals_info, it, indent, is_void, frame_reg=frame_reg)
-                        
+
                         # if no explicit return, still emit epilogue+RTS (for void functions or missing returns)
                         has_return = any(isinstance(s, ast.Return) for s in it.body)
                         if not has_return:
