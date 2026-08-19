@@ -4,6 +4,7 @@ import dataclasses
 from . import peepholeopt
 from . import ast
 from . import codegen_utils
+from . import codegen_indexed_address
 from .macro_expander import MacroExpander
 from .asm_substitution import substitute_asm_vars
 from .target import DEFAULT_TARGET, TargetSpec
@@ -464,29 +465,31 @@ class CodeGen:
             operand = f"({base_reg},{index_reg}.l)"
         elif stride == 2:
             # Word stride: need scale-by-2, which is lsl.l #1 for 68000
-            if self.target.supports_scaled_index:
-                # Phase 4+: emit scaled operand
-                operand = f"({base_reg},{index_reg}.l*2)"
-            else:
-                # Phase 2-3: emit shift in prelude
-                prelude.append(f"    lsl.l #1,{index_reg}")
-                operand = f"({base_reg},{index_reg}.l)"
+            # Phase 2 contract: both targets emit 68000-style output
+            # TODO Phase 4: uncomment conditionals when enabling scaled operands
+            # if self.target.supports_scaled_index:
+            #     operand = f"({base_reg},{index_reg}.l*2)"
+            # else:
+            prelude.append(f"    lsl.l #1,{index_reg}")
+            operand = f"({base_reg},{index_reg}.l)"
         elif stride == 4:
             # Long stride: need scale-by-4, which is lsl.l #2 for 68000
-            if self.target.supports_scaled_index:
-                # Phase 4+: emit scaled operand
-                operand = f"({base_reg},{index_reg}.l*4)"
-            else:
-                # Phase 2-3: emit shift in prelude
-                prelude.append(f"    lsl.l #2,{index_reg}")
-                operand = f"({base_reg},{index_reg}.l)"
+            # Phase 2 contract: both targets emit 68000-style output
+            # TODO Phase 4: uncomment conditionals when enabling scaled operands
+            # if self.target.supports_scaled_index:
+            #     operand = f"({base_reg},{index_reg}.l*4)"
+            # else:
+            prelude.append(f"    lsl.l #2,{index_reg}")
+            operand = f"({base_reg},{index_reg}.l)"
         elif stride == 8:
             # Quad-word stride (rare, but used by some structs)
-            if self.target.supports_scaled_index:
-                operand = f"({base_reg},{index_reg}.l*8)"
-            else:
-                prelude.append(f"    lsl.l #3,{index_reg}")
-                operand = f"({base_reg},{index_reg}.l)"
+            # Phase 2 contract: both targets emit 68000-style output
+            # TODO Phase 4: uncomment conditionals when enabling scaled operands
+            # if self.target.supports_scaled_index:
+            #     operand = f"({base_reg},{index_reg}.l*8)"
+            # else:
+            prelude.append(f"    lsl.l #3,{index_reg}")
+            operand = f"({base_reg},{index_reg}.l)"
         else:
             # Arbitrary stride: emit multiply or multiple shifts
             # Use mulu.w for strides up to 65535 (unsigned 16-bit limit)
@@ -834,20 +837,11 @@ class CodeGen:
                         else:
                             code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
                     else:
-                        # Variable index: generate runtime calculation
-                        code.append(f"    lea {name},a0")
-                        
-                        # Evaluate index into d1
-                        index_code = self._emit_expr(expr.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                        code.extend(index_code)
-                        
-                        # Scale index by element size if needed
-                        if shift_amount > 0:
-                            code.append(f"    lsl.l #{shift_amount},d1  ; multiply index by {elem_bytes}")
-                        
-                        # Load element with correct size
-                        size_suffix = ast.size_suffix(elem_bytes)
-                        code.append(f"    move{size_suffix} (a0,d1.l),{reg_left}")
+                        # Variable index: use centralized address lowering helper
+                        code.extend(codegen_indexed_address.emit_1d_array_read(
+                            self, name, expr.indices[0], params, locals_info,
+                            reg_left, "d1", frame_reg, elem_bytes
+                        ))
                 else:
                     # POINTER VARIABLE: Load pointer value, then dereference
                     # When a non-array global is indexed, treat it as a byte pointer by default

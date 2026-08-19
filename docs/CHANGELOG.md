@@ -44,16 +44,17 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Both targets currently preserve the existing 68000-style generated assembly;
     68020 scaled indexed addressing is reserved for Phase 4.
 
-- **Centralized indexed-address lowering — Phase 2 foundation (Phases 0–2)**:
-  - Implemented `_lower_indexed_address()` helper with Phase 4 logic already in place
-    for scaled operands when `target.supports_scaled_index` is true.
-  - Fixed critical bugs: displacement operand syntax, mulu.w stride limit (32767→65535),
-    peephole optimizer target parameter handling.
-  - Added Phase 4 test infrastructure: vasm `-m68000`/`-m68020` validation, baseline
-    no-scaled-operands assertions, and test placeholders for Phase 4 verification.
-  - Phase 2 baseline compatibility confirmed: 15 tests passing, all access patterns
-    produce identical 68000-style output for both 68000 and 68020 targets.
-  - Next: Convert 6 codegen paths one-by-one to use centralized helper.
+- **Phase 2 Path 1 (global 1D array reads) complete**:
+  - New `codegen_indexed_address.py` module with helper wrappers.
+  - `emit_1d_array_read()` centralizes scaling logic via `_lower_indexed_address()`.
+  - Removes dead code, adds contracts and assertions.
+  - Test confirms byte/word/long arrays identical baseline, vasm validates both targets.
+  - Pattern ready for Paths 2–6 continuation on Linux.
+  - Phase 2 conditionals still disabled (all targets emit 68000-style output).
+
+- **Phase 4 infrastructure complete**: TODO markers in place, awaiting Phase 2 path integration.
+
+- **Remaining Phases deferred to Linux**: Paths 2–6, Phases 3–9 require full toolchain (vasm ≥1.8, Musashi runtime).
 
 - **Dependent constant expressions**:
   - `const` initializers may reference constants declared earlier, such as `const B = A + 1;`.

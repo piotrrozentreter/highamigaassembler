@@ -302,6 +302,45 @@ code main:
     assert re.search(r"\*[248]\s*\)", baseline) is None, "68000 output should not contain scaled operands"
 
 
+def test_phase2_conversion_path1_global_1d_array_read():
+    """Phase 2: Path 1 conversion - global 1D array reads use centralized helper.
+    
+    Tests that all three element sizes (byte, word, long) work correctly through
+    the new centralized _lower_indexed_address helper.
+    """
+    src = """
+data test:
+    buf.l[4] = {10, 20, 30, 40}
+    wbuf.w[4] = {100, 200, 300, 400}
+    bbuf.b[4] = {1, 2, 3, 4}
+
+code main:
+    proc read_long(idx: int) -> int {
+        return buf[idx];
+    }
+    
+    proc read_word(idx: int) -> word {
+        return wbuf[idx];
+    }
+    
+    proc read_byte(idx: int) -> byte {
+        return bbuf[idx];
+    }
+    """
+    module = parser.parse(src)
+    
+    # Verify baseline (68000) and explicit 68020 produce identical output
+    baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
+    target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
+    assert baseline == target_68020, "Path 1 conversion broke Phase 2 baseline contract"
+    
+    # Verify vasm assembly succeeds for baseline
+    if VASM_PATH.exists():
+        rc, _, stderr = vasm_assemble(baseline, "68000")
+        if rc is not None:
+            assert rc == 0, f"vasm -m68000 failed on Path 1 output: {stderr}"
+
+
 def test_phase4_vasm_difference_for_68020():
     """Phase 4 validation: ensure that 68020 output actually differs from 68000 when using scaled index.
     

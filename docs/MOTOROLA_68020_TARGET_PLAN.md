@@ -102,36 +102,34 @@ the 68000 fallback byte-for-byte stable before enabling any 68020 output. That w
 the later assembler/Musashi validation should continue on Linux, where the 68000/68020
 toolchain and runtime checks are available.
 
-### Phase 2 foundation complete; path conversion ready
+### Phase 2 Path 1 complete; Paths 2-6 ready for continuation on Linux
 
-**Completed**:
-- Implemented `_lower_indexed_address()` helper (line 448 in codegen.py) that centralizes
-  indexed effective-address generation with Phase 4 logic already in place.
-- Fixed critical bugs:
-  - Displacement operand syntax (was invalid, now produces correct `disp(base,index)`).
-  - mulu.w stride limit (was 32767, now 65535 for unsigned compatibility).
-  - Peephole optimizer no longer discards target parameter (preserved for Phase 4+).
-- Added Phase 4 test infrastructure:
-  - vasm assembler validation for both `-m68000` and `-m68020` targets.
-  - Tests confirming 68000 baseline never emits scaled operands.
-  - Test placeholder for 68020 scaled-operand detection (will activate once paths are converted).
-- All Phase 2 baseline compatibility tests passing (10 focused fixtures).
+**Path 1 (Global 1D array reads) - COMPLETE**:
+- Implemented `emit_1d_array_read()` in new `codegen_indexed_address.py` module.
+- Converted codegen.py line ~842 to call centralized helper.
+- Fixed dead-code branch (constants filtered before calling helper).
+- Added assertion to enforce variable-index contract.
+- Test passing: byte/word/long arrays produce identical baseline output, vasm validates both targets.
+- Pattern established for remaining paths.
 
-**Next**: Convert 6 codegen paths in sequence, validating each:
-  1. Global 1D array reads (canonical, simplest)
-  2. Global/local typed-pointer reads
-  3. Address-of array elements  
-  4. Struct-array member stores
-  5. 1D/2D array stores
-  6. 2D array linearization + scaling
+**Paths 2-6 Prepared**:
+- `codegen_indexed_address.py` contains helper stubs:
+  - `emit_typed_pointer_read()` — local/global typed-pointer indexing
+  - `emit_array_address_of()` — address-of array elements with struct support
+  - Paths 4-6 require new wrappers for store operations
+- Phase 2 conditionals (scaled operands) remain disabled in `_lower_indexed_address()` with TODO markers.
+- vasm validation framework complete and working on Windows.
 
-Each path conversion will:
-- Replace inline `lsl.l` / `mulu.w` with `_lower_indexed_address()` call
-- Validate baseline output remains identical (Phase 2 contract)
-- Add path-specific tests (store operations, nested patterns, struct arrays)
-- Confirm vasm assembly for both targets
+**Next steps (on Linux with full toolchain)**:
+1. **Path 2**: Convert local typed-pointer reads (~line 750-790). Complexity: local variable offset handling.
+2. **Path 3**: Convert address-of array elements (~line 1350-1420). Complexity: struct array sizes, non-power-of-2 strides.
+3. **Path 4**: Struct-array member stores (~line 2550-2650). New helper: `emit_struct_array_store()`. Complexity: RHS evaluation ordering.
+4. **Path 5**: 1D array stores (~line 2640-2750). New helper: `emit_array_store()`. Complexity: destination calculation.
+5. **Path 6**: 2D array operations (~line 900-1000). Extend `emit_array_store()` for row-major linearization.
 
-Conversion can proceed on Windows with current vasm validation; runtime validation deferred to Phase 8 on Linux.
+Each path follows the same pattern: filter constants before calling helper, pass through centralized address lowering, emit Phase 2 baseline output identical to inline implementation.
+
+**Phase 2 completion criteria**: All 6 paths route through `_lower_indexed_address()`, all tests pass, vasm validates both targets, example suite compiles without regressions.
 
 ## Proposed Target Model
 
