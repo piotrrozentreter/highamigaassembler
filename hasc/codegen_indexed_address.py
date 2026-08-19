@@ -174,12 +174,116 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
         code.extend(prelude)
         
-        # Use LEA to calculate the final address
-        # operand is something like "(a0,d1.l)" or "(a0,d1.l*4)"
-        code.append(f"    lea {operand},a0")
+        # Preserve the existing 68000 sequence until scaled operands are enabled.
+        # A scaled operand will be consumed directly by LEA in the later phase.
+        if "*" in operand:
+            code.append(f"    lea {operand},a0")
+        else:
+            code.append(f"    add.l {reg_right},a0")
         
         # Move result to target register if needed
         if reg_left != "a0":
             code.append(f"    move.l a0,{reg_left}")
     
+    return code
+
+
+def emit_array_store(codegen, name, index_expr, params, locals_info,
+                     reg_value, reg_right, frame_reg, elem_bytes):
+    """Emit a 1D global-array store through centralized indexed lowering.
+
+    The caller evaluates the RHS before invoking this helper so address scratch
+    registers remain available for nested expressions and calls.
+    """
+    code = [f"    lea {name},a0"]
+    index_code = codegen._emit_expr(
+        index_expr,
+        params,
+        locals_info,
+        reg_right,
+        "d2",
+        target_type="int",
+        frame_reg=frame_reg,
+    )
+    code.extend(index_code)
+
+    prelude, operand = codegen._lower_indexed_address("a0", reg_right, elem_bytes)
+    code.extend(prelude)
+    from . import ast
+    code.append(f"    move{ast.size_suffix(elem_bytes)} {reg_value},{operand}")
+    return code
+
+
+def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
+                            reg_value, reg_right, frame_reg, stride,
+                            field_offset, field_suffix):
+    """Emit a struct-array member store after the RHS has been evaluated."""
+    code = [f"    lea {name},a0"]
+    index_code = codegen._emit_expr(
+        index_expr,
+        params,
+        locals_info,
+        reg_right,
+        "d2",
+        target_type="int",
+        frame_reg=frame_reg,
+    )
+    code.extend(index_code)
+
+    prelude, operand = codegen._lower_indexed_address("a0", reg_right, stride)
+    code.extend(prelude)
+    if field_offset:
+        code.append(codegen._emit_add_immediate("    ", reg_right, field_offset))
+    code.append(f"    move{field_suffix} {reg_value},{operand}")
+    return code
+
+
+def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
+                       reg_left, frame_reg, elem_size, elem_bytes, col_count):
+    """Emit a dynamic 2D read while centralizing final element scaling."""
+    code = [f"    ; 2D array access: {name}"]
+    row_code = codegen._emit_expr(
+        row_expr, params, locals_info, "d1", "d2",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(row_code)
+    code.append("    move.l d1,d2  ; save row")
+
+    col_code = codegen._emit_expr(
+        col_expr, params, locals_info, "d1", "a0",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(col_code)
+    code.append(f"    mulu.w #{col_count},d2  ; row * col_count")
+    code.append("    add.l d1,d2   ; + col")
+    code.append(f"    lea {name},a0")
+
+    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    code.extend(prelude)
+    code.append(f"    move{'.' + elem_size} {operand},{reg_left}")
+    return code
+
+
+def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
+                        reg_value, frame_reg, elem_size, elem_bytes, col_count):
+    """Emit a dynamic 2D store after the caller has evaluated the RHS."""
+    code = [f"    lea {name},a0"]
+    row_code = codegen._emit_expr(
+        row_expr, params, locals_info, "d1", "d2",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(row_code)
+    code.append("    move.l d1,d2  ; save row")
+
+    col_code = codegen._emit_expr(
+        col_expr, params, locals_info, "d1", "d3",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(col_code)
+    code.append(f"    mulu.w #{col_count},d2")
+    code.append("    add.l d1,d2")
+
+    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    code.extend(prelude)
+    code.append(f"    move{'.' + elem_size} {reg_value},{operand}")
     return code

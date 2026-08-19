@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 import re
+import shutil
 
 from hasc import codegen
 from hasc import parser
@@ -9,7 +10,10 @@ from hasc.target import CpuTarget, DEFAULT_TARGET, TargetSpec
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VASM_PATH = Path("C:\\Users\\prozentreter\\Documents\\vbcc_win_x64\\vbcc\\bin\\vasmm68k_mot.exe")
+VASM_PATH = Path(
+    shutil.which("vasmm68k_mot")
+    or "C:\\Users\\prozentreter\\Documents\\vbcc_win_x64\\vbcc\\bin\\vasmm68k_mot.exe"
+)
 
 
 def vasm_assemble(asm_text, cpu_target="68000"):
@@ -179,6 +183,32 @@ code main:
     assert baseline == target_68020
 
 
+def test_phase2_local_typed_pointer_read_uses_centralized_lowering():
+    """Local typed-pointer reads preserve dynamic scaling and constant offsets."""
+    src = """
+data test:
+    values.l[4] = {10, 20, 30, 40}
+
+code main:
+    proc read_local(idx: int) -> int {
+        var ptr: int* = &values[0];
+        return ptr[idx];
+    }
+
+    proc read_constant() -> int {
+        var ptr: int* = &values[0];
+        return ptr[2];
+    }
+    """
+    module = parser.parse(src)
+    baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
+    target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
+
+    assert baseline == target_68020
+    assert "lsl.l #2,d1" in baseline
+    assert "move.l 8(a0),d0" in baseline
+
+
 def test_phase2_address_of_array_element_compatibility(tmp_path):
     """Phase 0/1 gate: &array[index] is identical across targets."""
     src = """
@@ -194,6 +224,27 @@ code main:
     baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
     target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
     assert baseline == target_68020
+
+
+def test_phase2_dynamic_2d_array_compatibility():
+    """Dynamic 2D reads and stores preserve the Phase 2 baseline contract."""
+    src = """
+data test:
+    matrix.l[3][4] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+
+code main:
+    proc update(row: int, col: int, value: int) -> int {
+        matrix[row][col] = value;
+        return matrix[row][col];
+    }
+    """
+    module = parser.parse(src)
+    baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
+    target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
+
+    assert baseline == target_68020
+    assert "mulu.w #4,d2" in baseline
+    assert "lsl.l #2,d2" in baseline
 
 
 def test_phase4_68020_emits_scaled_operands_for_long_arrays():

@@ -490,6 +490,12 @@ class CodeGen:
             # else:
             prelude.append(f"    lsl.l #3,{index_reg}")
             operand = f"({base_reg},{index_reg}.l)"
+        elif stride == 16:
+            prelude.append(f"    lsl.l #4,{index_reg}")
+            operand = f"({base_reg},{index_reg}.l)"
+        elif stride == 32:
+            prelude.append(f"    lsl.l #5,{index_reg}")
+            operand = f"({base_reg},{index_reg}.l)"
         else:
             # Arbitrary stride: emit multiply or multiple shifts
             # Use mulu.w for strides up to 65535 (unsigned 16-bit limit)
@@ -748,11 +754,6 @@ class CodeGen:
                 
                 # Check if this is a pointer variable (not an array)
                 if var_type and var_type.endswith('*'):
-                    # Pointer indexing: ptr[index]
-                    # 1. Load the pointer value
-                    # 2. Calculate offset based on element size
-                    # 3. Load element from pointer + offset
-                    
                     # Determine element size from pointer type (e.g., "byte*" -> 1 byte)
                     base_type = var_type[:-1]  # Remove the '*'
                     elem_bytes = 1  # default to byte
@@ -760,39 +761,20 @@ class CodeGen:
                         elem_bytes = 2
                     elif base_type in ('long', 'int'):
                         elem_bytes = 4
-                    
-                    shift_amount = 0
-                    if elem_bytes == 2:
-                        shift_amount = 1
-                    elif elem_bytes == 4:
-                        shift_amount = 2
-                    
-                    # Load pointer into a0
-                    code.append(f"    move.l {self._frame_offset(var_offset, frame_reg)},a0")
-                    
+
                     if len(expr.indices) == 1:
-                        # Single index: ptr[index]
-                        if isinstance(expr.indices[0], ast.Number):
-                            # Constant index
-                            index_val = expr.indices[0].value
-                            offset = index_val * elem_bytes
-                            size_suffix = ast.size_suffix(elem_bytes)
-                            if offset == 0:
-                                code.append(f"    move{size_suffix} (a0),{reg_left}")
-                            else:
-                                code.append(f"    move{size_suffix} {offset}(a0),{reg_left}")
-                        else:
-                            # Variable index
-                            index_code = self._emit_expr(expr.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                            code.extend(index_code)
-                            
-                            # Scale index by element size if needed
-                            if shift_amount > 0:
-                                code.append(f"    lsl.l #{shift_amount},d1  ; multiply index by {elem_bytes}")
-                            
-                            # Load element
-                            size_suffix = ast.size_suffix(elem_bytes)
-                            code.append(f"    move{size_suffix} (a0,d1.l),{reg_left}")
+                        code.extend(codegen_indexed_address.emit_typed_pointer_read(
+                            self,
+                            self._frame_offset(var_offset, frame_reg),
+                            expr.indices[0],
+                            params,
+                            locals_info,
+                            reg_left,
+                            "d1",
+                            frame_reg,
+                            elem_bytes,
+                            base_type,
+                        ))
                     else:
                         # Multi-dimensional indexing through pointer (not common, but handle it)
                         code.append(f"    ; multidimensional pointer indexing not yet supported")
@@ -903,39 +885,22 @@ class CodeGen:
                     else:
                         code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
                 else:
-                    # At least one variable index: generate runtime calculation
-                    code.append(f"    ; 2D array access: {name}")
-                    
-                    # Evaluate row index into d1
-                    row_code = self._emit_expr(expr.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                    code.extend(row_code)
-                    
-                    # Save row in d2
-                    code.append(f"    move.l d1,d2  ; save row")
-                    
-                    # Evaluate col index into d1
-                    col_code = self._emit_expr(expr.indices[1], params, locals_info, "d1", "a0", target_type="int", frame_reg=frame_reg)
-                    code.extend(col_code)
-                    
-                    # Get column count
                     if col_count is not None:
-                        # Calculate offset: row * col_count + col
-                        code.append(f"    mulu.w #{col_count},d2  ; row * col_count")
+                        code.extend(codegen_indexed_address.emit_2d_array_read(
+                            self,
+                            name,
+                            expr.indices[0],
+                            expr.indices[1],
+                            params,
+                            locals_info,
+                            reg_left,
+                            frame_reg,
+                            elem_size,
+                            elem_bytes,
+                            col_count,
+                        ))
                     else:
                         self._fail(f"Cannot determine column count for 2D array '{name}'; declare with explicit dimensions like 'int[3][5]' or use 1D arrays")
-                    
-                    code.append(f"    add.l d1,d2   ; + col")
-                    
-                    # Element size scaling based on type
-                    shift_map = {'b': 0, 'w': 1, 'l': 2}
-                    shift = shift_map.get(elem_size, 2)
-                    if shift > 0:
-                        code.append(f"    lsl.l #{shift},d2   ; * {1 << shift} (element size)")
-                    
-                    # Now load base address and access element
-                    move_suffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(elem_size, '.l')
-                    code.append(f"    lea {name},a0")
-                    code.append(f"    move{move_suffix} (a0,d2.l),{reg_left}")
             else:
                 code.append(f"    ; arrays with >2 dimensions not supported")
                 code.append(f"    move.l #0,{reg_left}")
@@ -1357,73 +1322,28 @@ class CodeGen:
                     
                     # 1D array case
                     if len(expr.operand.indices) == 1:
-                        # Load base address into a0
-                        code.append(f"    lea {name},a0")
-                        
-                        # Determine element size
                         elem_bytes = 4
-                        shift_amount = 2
-                        
-                        # Check if this is a struct array
                         if name in self.struct_info:
                             elem_bytes = self.struct_info[name]['size']
-                            # Calculate shift amount: log2(elem_bytes)
-                            if elem_bytes == 1:
-                                shift_amount = 0
-                            elif elem_bytes == 2:
-                                shift_amount = 1
-                            elif elem_bytes == 4:
-                                shift_amount = 2
-                            elif elem_bytes == 8:
-                                shift_amount = 3
-                            elif elem_bytes == 16:
-                                shift_amount = 4
-                            elif elem_bytes == 32:
-                                shift_amount = 5
-                            else:
-                                # Non-power-of-2 size - use mulu
-                                shift_amount = -1
                         elif name in self.array_dims:
                             elem_size = self.array_dims[name]['size']
                             if elem_size == 'b':
                                 elem_bytes = 1
-                                shift_amount = 0
                             elif elem_size == 'w':
                                 elem_bytes = 2
-                                shift_amount = 1
-                            else:  # 'l'
+                            else:
                                 elem_bytes = 4
-                                shift_amount = 2
-                        
-                        # Evaluate index into d1
-                        index_expr = expr.operand.indices[0]
-                        
-                        # Check if index is constant 0 - optimize it away
-                        is_zero_index = isinstance(index_expr, ast.Number) and index_expr.value == 0
-                        
-                        if is_zero_index:
-                            # Index is 0, no offset calculation needed
-                            pass
-                        else:
-                            index_code = self._emit_expr(index_expr, params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                            code.extend(index_code)
-                            
-                            # Scale index by element size
-                            if shift_amount >= 0 and shift_amount > 0:
-                                code.append(f"    lsl.l #{shift_amount},d1  ; multiply index by {elem_bytes}")
-                            elif shift_amount < 0:
-                                # Non-power-of-2: use mulu
-                                code.append(f"    mulu.w #{elem_bytes},d1")
-                            
-                            # Calculate address: base + scaled_index
-                            code.append(f"    add.l d1,a0")
-                        
-                        # Move address to result register
-                        if reg_left.startswith('d'):
-                            code.append(f"    move.l a0,{reg_left}")
-                        else:
-                            code.append(f"    move.l a0,{reg_left}")
-                        
+                        code.extend(codegen_indexed_address.emit_array_address_of(
+                            self,
+                            name,
+                            expr.operand.indices[0],
+                            params,
+                            locals_info,
+                            reg_left,
+                            "d1",
+                            frame_reg,
+                            elem_bytes,
+                        ))
                         return code
                     
                     elif len(expr.operand.indices) == 2:
@@ -2591,52 +2511,21 @@ class CodeGen:
                             for l in rhs:
                                 for sub in str(l).splitlines():
                                     self.emit(sub if sub.startswith(indent) else indent + sub)
-                            # Base and index
-                            self.emit(indent + f"lea {name},a0")
-                            idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                            for l in idx_code:
-                                for sub in str(l).splitlines():
-                                    self.emit(sub if sub.startswith(indent) else indent + sub)
-                            # Scale by stride
-                            if stride and (stride & (stride - 1)) == 0:
-                                shift = 0
-                                tmp = stride
-                                while tmp > 1:
-                                    shift += 1
-                                    tmp >>= 1
-                                while shift >= 8:
-                                    self.emit(indent + f"lsl.l #8,d1")
-                                    shift -= 8
-                                if shift > 0:
-                                    self.emit(indent + f"lsl.l #{shift},d1")
-                            elif stride <= 32767:
-                                self.emit(indent + f"mulu.w #{stride},d1")
-                            else:
-                                # Fallback multiply by constant using shifts/adds
-                                self.emit(indent + f"move.l d1,d2")
-                                self.emit(indent + f"clr.l d1")
-                                k = stride
-                                bit = 0
-                                while k:
-                                    if k & 1:
-                                        if bit == 0:
-                                            self.emit(indent + f"add.l d2,d1")
-                                        else:
-                                            self.emit(indent + f"move.l d2,d3")
-                                            sb = bit
-                                            while sb >= 8:
-                                                self.emit(indent + f"lsl.l #8,d3")
-                                                sb -= 8
-                                            if sb > 0:
-                                                self.emit(indent + f"lsl.l #{sb},d3")
-                                            self.emit(indent + f"add.l d3,d1")
-                                    bit += 1
-                                    k >>= 1
-                            # Add field offset
-                            off = sinfo['fields'][field]['offset']
-                            if off:
-                                self.emit(self._emit_add_immediate(indent, "d1", off))
-                            self.emit(indent + f"move{suffix} d0,(a0,d1.l)")
+                            store_code = codegen_indexed_address.emit_struct_array_store(
+                                self,
+                                name,
+                                base.indices[0],
+                                params,
+                                locals_info,
+                                "d0",
+                                "d1",
+                                frame_reg,
+                                stride,
+                                fs['offset'],
+                                suffix,
+                            )
+                            for line in store_code:
+                                self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
                     else:
                         self.emit(indent + f"; unsupported member assign base: {base}")
                 elif isinstance(target, ast.ArrayAccess):
@@ -2667,38 +2556,41 @@ class CodeGen:
                     size_suffix = {1: '.b', 2: '.w', 4: '.l'}.get(elem_bytes, '.l')
 
                     if len(target.indices) == 1:
-                        # 1D store: base + index * elem_size
-                        self.emit(indent + f"lea {name},a0")
-                        idx_code = self._emit_expr(target.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                        for l in idx_code:
-                            for sub in str(l).splitlines():
-                                self.emit(sub if sub.startswith(indent) else indent + sub)
-                        if shift_amount > 0:
-                            self.emit(indent + f"lsl.l #{shift_amount},d1")
-                        self.emit(indent + f"move{size_suffix} d0,(a0,d1.l)")
+                        store_code = codegen_indexed_address.emit_array_store(
+                            self,
+                            name,
+                            target.indices[0],
+                            params,
+                            locals_info,
+                            "d0",
+                            "d1",
+                            frame_reg,
+                            elem_bytes,
+                        )
+                        for line in store_code:
+                            self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
                     elif len(target.indices) == 2:
-                        # 2D store: base + (row*cols + col) * elem_size
-                        self.emit(indent + f"lea {name},a0")
-                        row_code = self._emit_expr(target.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                        for l in row_code:
-                            for sub in str(l).splitlines():
-                                self.emit(sub if sub.startswith(indent) else indent + sub)
-                        self.emit(indent + f"move.l d1,d2  ; save row")
-                        col_code = self._emit_expr(target.indices[1], params, locals_info, "d1", "d3", target_type="int", frame_reg=frame_reg)
-                        for l in col_code:
-                            for sub in str(l).splitlines():
-                                self.emit(sub if sub.startswith(indent) else indent + sub)
                         # Determine columns
                         cols = None
                         if name in self.array_dims and len(self.array_dims[name]['dims']) >= 2:
                             cols = self.array_dims[name]['dims'][1]
                         if cols is None:
                             self._fail(f"Cannot determine column count for 2D array '{name}' - must declare with explicit dimensions like 'int[3][5]'")
-                        self.emit(indent + f"mulu.w #{cols},d2")
-                        self.emit(indent + f"add.l d1,d2")
-                        if shift_amount > 0:
-                            self.emit(indent + f"lsl.l #{shift_amount},d2")
-                        self.emit(indent + f"move{size_suffix} d0,(a0,d2.l)")
+                        store_code = codegen_indexed_address.emit_2d_array_store(
+                            self,
+                            name,
+                            target.indices[0],
+                            target.indices[1],
+                            params,
+                            locals_info,
+                            "d0",
+                            frame_reg,
+                            elem_size_suffix,
+                            elem_bytes,
+                            cols,
+                        )
+                        for line in store_code:
+                            self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
                     else:
                         self.emit(indent + f"; arrays with >2 dimensions not supported for stores")
                 else:
