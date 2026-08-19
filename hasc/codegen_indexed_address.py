@@ -126,6 +126,71 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
     return code
 
 
+def emit_untyped_global_pointer_read(codegen, name, index_expr, params,
+                                    locals_info, reg_left, frame_reg):
+    """Emit a byte read through a global pointer-valued symbol."""
+    code = []
+    index_code = codegen._emit_expr(
+        index_expr,
+        params,
+        locals_info,
+        "d1",
+        "d2",
+        target_type="int",
+        frame_reg=frame_reg,
+    )
+    from .indexed_address import index_may_clobber_address_register
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(f"    move.l {name},a0")
+    else:
+        code.append(f"    move.l {name},a0")
+        code.extend(index_code)
+    code.append(f"    move.b (a0,d1.l),{reg_left}")
+    code.append(f"    andi.l #$FF,{reg_left}")
+    return code
+
+
+def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
+                           reg_left, frame_reg, stride, field_offset,
+                           field_suffix):
+    """Emit a 1D struct-array member read after centralized stride lowering."""
+    code = []
+    if len(getattr(index_expr, "indices", [])) != 0:
+        raise ValueError("struct-array read expects a single index expression")
+    index_code = codegen._emit_expr(
+        index_expr,
+        params,
+        locals_info,
+        "d1",
+        "d2",
+        target_type="int",
+        frame_reg=frame_reg,
+    )
+    from .indexed_address import index_may_clobber_address_register
+    if index_may_clobber_address_register(index_expr):
+        code.extend(index_code)
+        code.append(f"    lea {name},a0")
+    else:
+        code.append(f"    lea {name},a0")
+        code.extend(index_code)
+
+    prelude, operand = codegen._lower_indexed_address("a0", "d1", stride)
+    code.extend(prelude)
+    if field_offset:
+        code.append(codegen._emit_add_immediate("    ", "d1", field_offset))
+
+    if field_suffix in (".b", ".w") and reg_left == "d1":
+        code.append(f"    move{field_suffix} {operand},d1")
+        mask = "#$FF" if field_suffix == ".b" else "#$FFFF"
+        code.append(f"    and.l {mask},d1")
+    else:
+        if field_suffix in (".b", ".w"):
+            code.append(f"    clr.l {reg_left}")
+        code.append(f"    move{field_suffix} {operand},{reg_left}")
+    return code
+
+
 def emit_array_address_of(codegen, name, index_expr, params, locals_info,
                           reg_left, reg_right, frame_reg, elem_bytes):
     """Emit code for &array[index] with centralized address lowering.
@@ -162,8 +227,11 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
             if reg_left != "a0":
                 code.append(f"    move.l a0,{reg_left}")
         else:
-            # Add offset to base address
-            code.append(f"    lea {offset}(a0),{reg_left}")
+            # LEA writes address registers only; move the result when the
+            # expression target is a data register.
+            code.append(f"    lea {offset}(a0),a0")
+            if reg_left != "a0":
+                code.append(f"    move.l a0,{reg_left}")
     else:
         # Variable index: use centralized address lowering
         # Evaluate index into reg_right
@@ -311,4 +379,44 @@ def emit_2d_array_store(codegen, name, row_expr, col_expr, params, locals_info,
     prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
     code.extend(prelude)
     code.append(f"    move{'.' + elem_size} {reg_value},{operand}")
+    return code
+
+
+def emit_2d_array_address_of(codegen, name, row_expr, col_expr, params,
+                             locals_info, reg_left, frame_reg, elem_bytes,
+                             col_count):
+    """Emit ``&array[row][col]`` with shared final element scaling."""
+    from .indexed_address import index_may_clobber_address_register
+
+    defer_base = (
+        index_may_clobber_address_register(row_expr)
+        or index_may_clobber_address_register(col_expr)
+    )
+    code = []
+    if not defer_base:
+        code.append(f"    lea {name},a0")
+    row_code = codegen._emit_expr(
+        row_expr, params, locals_info, "d1", "d2",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(row_code)
+    code.append("    move.l d1,d2")
+    col_code = codegen._emit_expr(
+        col_expr, params, locals_info, "d1", "a1",
+        target_type="int", frame_reg=frame_reg,
+    )
+    code.extend(col_code)
+    if defer_base:
+        code.append(f"    lea {name},a0")
+    code.append(f"    mulu.w #{col_count},d2")
+    code.append("    add.l d1,d2")
+
+    prelude, operand = codegen._lower_indexed_address("a0", "d2", elem_bytes)
+    code.extend(prelude)
+    if "*" in operand:
+        code.append(f"    lea {operand},a0")
+    else:
+        code.append("    add.l d2,a0")
+    if reg_left != "a0":
+        code.append(f"    move.l a0,{reg_left}")
     return code

@@ -84,3 +84,51 @@ code main:
     write_body = asm_68000[asm_68000.index("write:"):]
     assert read_body.index("jsr bump") < read_body.index("lea values,a0")
     assert write_body.index("jsr bump") < write_body.index("lea values,a0")
+
+
+def test_global_untyped_pointer_read_uses_shared_adapter():
+    source = """
+data test:
+    ptr.l = 0
+
+code main:
+    proc bump() -> int { return 1; }
+
+    proc read() -> int {
+        return ptr[bump()];
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    assert asm_68000 == asm_68020
+    body = asm_68000[asm_68000.index("read:"):]
+    assert body.index("jsr bump") < body.index("move.l ptr,a0")
+    assert "move.b (a0,d1.l),d0" in body
+    assert "andi.l #$FF,d0" in body
+
+
+def test_dynamic_2d_address_of_defers_base_until_calling_indexes_finish():
+    source = """
+data test:
+    matrix.l[2][3] = {0, 1, 2, 3, 4, 5}
+
+code main:
+    proc row() -> int { return 1; }
+    proc col() -> int { return 2; }
+
+    proc address() -> int* {
+        return &matrix[row()][col()];
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    assert asm_68000 == asm_68020
+    body = asm_68000[asm_68000.index("address:"):]
+    assert body.index("jsr row") < body.index("lea matrix,a0")
+    assert body.index("jsr col") < body.index("lea matrix,a0")
+    assert "mulu.w #3,d2" in body
+    assert "add.l d2,a0" in body

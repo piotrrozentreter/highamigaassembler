@@ -134,7 +134,6 @@ class CodeGen:
 
     def _build_proc_signatures(self, module: ast.Module):
         """Collect call signatures so call sites know register vs stack params.
-
         Includes:
         - Internal proc definitions (`proc`)
         - Forward declarations (`func`)
@@ -463,14 +462,10 @@ class CodeGen:
         # locals_info is list of (name, type, offset) tuples
         # target_type is the expected type for this expression (for sizing)
         # frame_reg is the register used for frame pointer (default a6, but may be a4 etc if using optimization)
-
-        # Defensive: ensure register names are never None
         if reg_left is None:
             reg_left = "d0"
         if reg_right is None:
             reg_right = "d1"
-
-        # Additional safety: assert registers are valid
         assert reg_left is not None and isinstance(reg_left, str), f"Invalid reg_left: {reg_left}"
         assert reg_right is not None and isinstance(reg_right, str), f"Invalid reg_right: {reg_right}"
 
@@ -608,72 +603,21 @@ class CodeGen:
                 fs = sinfo['fields'][field]
                 stride = sinfo['size']
                 suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
-                # Base address
-                code.append(f"    lea {name},a0")
                 # Evaluate index into d1 (support only 1D for now)
                 if len(base.indices) != 1:
                     self._fail(f"Only 1D array indexing supported for structs; '{name}' has {len(base.indices)} dimensions")
-                idx_code = self._emit_expr(base.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                code.extend(idx_code)
-                # Scale index by stride
-                if stride and (stride & (stride - 1)) == 0:
-                    # power of two -> shift
-                    shift = 0
-                    tmp = stride
-                    while tmp > 1:
-                        shift += 1
-                        tmp >>= 1
-                    # split shifts into max 8 per instruction for 68000
-                    while shift >= 8:
-                        code.append(f"    lsl.l #8,d1")
-                        shift -= 8
-                    if shift > 0:
-                        code.append(f"    lsl.l #{shift},d1")
-                elif stride <= 32767:
-                    code.append(f"    mulu.w #{stride},d1")
-                else:
-                    # Fallback: multiply by constant using shifts/adds
-                    code.append(f"    move.l d1,d2")
-                    code.append(f"    clr.l d1")
-                    k = stride
-                    bit = 0
-                    while k:
-                        if k & 1:
-                            if bit == 0:
-                                code.append(f"    add.l d2,d1")
-                            else:
-                                # shift temp d3 = d2 << bit, then add
-                                code.append(f"    move.l d2,d3")
-                                sb = bit
-                                while sb >= 8:
-                                    code.append(f"    lsl.l #8,d3")
-                                    sb -= 8
-                                if sb > 0:
-                                    code.append(f"    lsl.l #{sb},d3")
-                                code.append(f"    add.l d3,d1")
-                        bit += 1
-                        k >>= 1
-                # Add field offset
-                off = sinfo['fields'][field]['offset']
-                if off:
-                    code.append(self._emit_add_immediate("    ", "d1", off))
-                # Load value (clear destination register first for byte/word to avoid garbage in upper bits)
-                # CRITICAL: Don't clear if reg_left == d1 (index reg), clear after the load instead
-                if suffix in ('.b', '.w'):
-                    if reg_left == 'd1':
-                        # Index is in d1, must load first then extend
-                        code.append(f"    move{suffix} (a0,d1.l),d1")
-                        if suffix == '.b':
-                            code.append(f"    and.l #$FF,d1")
-                        else:  # .w
-                            code.append(f"    and.l #$FFFF,d1")
-                    else:
-                        # Normal case: clear dest then load
-                        code.append(f"    clr.l {reg_left}")
-                        code.append(f"    move{suffix} (a0,d1.l),{reg_left}")
-                else:
-                    # Long: no clearing needed
-                    code.append(f"    move{suffix} (a0,d1.l),{reg_left}")
+                code.extend(codegen_indexed_address.emit_struct_array_read(
+                    self,
+                    name,
+                    base.indices[0],
+                    params,
+                    locals_info,
+                    reg_left,
+                    frame_reg,
+                    stride,
+                    fs['offset'],
+                    suffix,
+                ))
                 return code
             else:
                 return [f"    ; unsupported member access base: {base}", f"    move.l #0,{reg_left}"]
@@ -761,24 +705,16 @@ class CodeGen:
                             reg_left, "d1", frame_reg, elem_bytes
                         ))
                 else:
-                    # POINTER VARIABLE: Load pointer value, then dereference
-                    # When a non-array global is indexed, treat it as a byte pointer by default
-                    # (since there's no type information about what it points to)
-                    elem_bytes = 1  # Default to byte pointer
-                    shift_amount = 0  # No shift for bytes
-
-                    # Load the pointer value into a0
-                    code.append(f"    move.l {name},a0")
-
-                    # Evaluate index into d1
-                    index_code = self._emit_expr(expr.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                    code.extend(index_code)
-
-                    # For byte pointers, no scaling needed (shift_amount = 0)
-                    # Load byte element through pointer
-                    code.append(f"    move.b (a0,d1.l),{reg_left}")
-                    # Zero-extend byte to long
-                    code.append(f"    andi.l #$FF,{reg_left}")
+                    # Non-array globals are treated as byte pointers here.
+                    code.extend(codegen_indexed_address.emit_untyped_global_pointer_read(
+                        self,
+                        name,
+                        expr.indices[0],
+                        params,
+                        locals_info,
+                        reg_left,
+                        frame_reg,
+                    ))
 
             elif len(expr.indices) == 2:
                 # 2D array: matrix[row][col]
@@ -1283,26 +1219,8 @@ class CodeGen:
                         return code
 
                     elif len(expr.operand.indices) == 2:
-                        # 2D array: &matrix[row][col]
-                        # Calculate: base + (row * col_count + col) * element_size
-
-                        # Load base address
-                        code.append(f"    lea {name},a0")
-
-                        # Evaluate row index into d1
-                        row_code = self._emit_expr(expr.operand.indices[0], params, locals_info, "d1", "d2", target_type="int", frame_reg=frame_reg)
-                        code.extend(row_code)
-
-                        # Save row in d2
-                        code.append(f"    move.l d1,d2")
-
-                        # Evaluate col index into d1
-                        col_code = self._emit_expr(expr.operand.indices[1], params, locals_info, "d1", "a1", target_type="int", frame_reg=frame_reg)
-                        code.extend(col_code)
-
-                        # Get column count and element size
-                        elem_size = 'l'
                         elem_bytes = 4
+                        col_count = 10
                         if name in self.struct_info:
                             elem_bytes = self.struct_info[name]['size']
                         elif name in self.array_dims:
@@ -1313,34 +1231,20 @@ class CodeGen:
                                 elem_bytes = 1
                             elif elem_size == 'w':
                                 elem_bytes = 2
-                            else:
-                                elem_bytes = 4
-
                             if len(dims) >= 2:
                                 col_count = dims[1]
-                                code.append(f"    mulu.w #{col_count},d2")
-                            else:
-                                code.append(f"    mulu.w #10,d2")
-                        else:
-                            code.append(f"    mulu.w #10,d2")
-
-                        # Add col
-                        code.append(f"    add.l d1,d2")
-
-                        # Scale by element size
-                        shift_map = {'b': 0, 'w': 1, 'l': 2}
-                        shift = shift_map.get(elem_size, 2)
-                        if shift > 0:
-                            code.append(f"    lsl.l #{shift},d2")
-
-                        # Calculate final address: a0 + d2
-                        code.append(f"    add.l d2,a0")
-
-                        # Move address to result register
-                        if reg_left.startswith('d'):
-                            code.append(f"    move.l a0,{reg_left}")
-                        else:
-                            code.append(f"    move.l a0,{reg_left}")
+                        code.extend(codegen_indexed_address.emit_2d_array_address_of(
+                            self,
+                            name,
+                            expr.operand.indices[0],
+                            expr.operand.indices[1],
+                            params,
+                            locals_info,
+                            reg_left,
+                            frame_reg,
+                            elem_bytes,
+                            col_count,
+                        ))
 
                         return code
                     else:
