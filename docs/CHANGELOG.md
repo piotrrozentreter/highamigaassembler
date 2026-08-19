@@ -2,7 +2,7 @@
 
 All notable changes to the HAS (High Assembler) project will be documented in this file.
 
-## [Unreleased]
+## [0.9.5] - 2026-08-19
 
 ### Fixed
 
