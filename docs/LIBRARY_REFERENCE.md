@@ -18,6 +18,8 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
 | `bob.s`           | Blitter Objects (software sprites)        | this file                                            |
 | `helpers.s`       | VBlank sync, AMOS-compatible RNG          | this file                                            |
+| `timer.s`         | Millisecond delay (CIA-A hardware timer)  | this file                                            |
+| `cpu.s`           | Exec `AttnFlags` CPU detection            | this file                                            |
 | `str.s`           | String utilities                          | this file                                            |
 | `input.s`         | Joystick and mouse input                  | this file                                            |
 | `keyboard.s`      | Keyboard interrupt driver                 | this file                                            |
@@ -42,6 +44,54 @@ extern func HeapInit(size_words: int) -> int;
 ```
 
 The linker resolves these to the compiled `.o` objects from `lib/`. See [EXTERNAL_MODULES.md](EXTERNAL_MODULES.md) for full include mechanics.
+
+---
+
+## cpu.s — CPU Detection
+
+[`GetCPUType() -> int`](../lib/cpu.s) reads ExecBase `AttnFlags` and returns the
+highest recognized processor feature. If several recognized flags are set, the
+68060 flag takes precedence, followed by 68040, 68030, 68020, and 68010; if none
+is set, the result is 68000.
+
+| Constant         | Value |
+|------------------|------:|
+| `CPU_TYPE_68000` | `0`   |
+| `CPU_TYPE_68010` | `1`   |
+| `CPU_TYPE_68020` | `2`   |
+| `CPU_TYPE_68030` | `3`   |
+| `CPU_TYPE_68040` | `4`   |
+| `CPU_TYPE_68060` | `5`   |
+
+This routine requires a normal AmigaOS/Exec environment with a valid ExecBase
+pointer at address `$4`; it is not a bare-metal CPU probe. On 68060 systems,
+the installed 68060 support software must correctly advertise the 68060 flag
+in `AttnFlags`. Otherwise, the routine returns the highest lower recognized
+flag that Exec reports.
+
+Use the shipped [declarations and constants include](../examples/includes/cpu_defs.has):
+
+```has
+#include "includes/cpu_defs.has";
+
+var cpu_type: int = GetCPUType();
+if (cpu_type == CPU_TYPE_68060) {
+    ; 68060-specific path
+}
+```
+
+See the complete [CPU detection example](../examples/cpu_detection.has).
+
+Build the example from the repository root by compiling the HAS source,
+assembling both generated and library assembly for a base 68000, then linking
+the two objects:
+
+```powershell
+python -m hasc.cli examples/cpu_detection.has -o tmp/cpu_detection.s
+vasmm68k_mot -m68000 -Fhunk -o tmp/cpu_detection.o tmp/cpu_detection.s
+vasmm68k_mot -m68000 -Fhunk -o tmp/cpu.o lib/cpu.s
+vlink -bamigahunk -o tmp/cpu_detection.exe tmp/cpu_detection.o tmp/cpu.o
+```
 
 ---
 
@@ -182,6 +232,45 @@ reproduce a bounded sequence.
 extern func RndMaxAMOS(max: int) -> int;
 var die: int = RndMaxAMOS(6);   // 0..5
 ```
+
+---
+
+## timer.s — Millisecond Delay
+
+### `WaitMs(ms: int) -> void`
+
+Busy-waits for the requested number of milliseconds using CIA-A Timer A in
+one-shot mode, driven by the E-clock rather than VBlank counting, so the
+delay is accurate regardless of the current display/DMA state. Because the
+CIA timer is only 16-bit, waits longer than 90 ms are chained internally as
+successive <=90ms one-shot loads. Values of `ms <= 0` return immediately.
+
+This routine assumes a PAL (50 Hz) target and hardcodes the PAL E-clock rate
+(709379 Hz), matching the same PAL assumption made by `WaitVBlank` in
+`helpers.s`. It only touches CIA-A, never CIA-B, which `ptplayer.s` owns for
+music playback, so `WaitMs` can be safely used alongside music. Interrupts
+are left enabled throughout.
+
+```has
+extern func WaitMs(ms: int) -> void;
+extern func WaitVBlank() -> void;
+
+code main:
+    asm {
+        jmp main
+    }
+
+    proc main() -> int {
+        var i: int;
+        for i = 0 to 4 {
+            call WaitMs(200);
+            call WaitVBlank();
+        }
+        return 0;
+    }
+```
+
+See the complete [WaitMs example](../examples/wait_ms_demo.has).
 
 ---
 

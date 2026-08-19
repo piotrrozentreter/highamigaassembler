@@ -39,6 +39,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+
 - **Conservative CPU target plumbing (Phases 0–1)**:
   - Added `--cpu {68000,68020}`, with `68000` remaining the default.
   - Both targets currently preserve the existing 68000-style generated assembly;
@@ -55,6 +56,23 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - **Phase 4 infrastructure complete**: TODO markers in place, awaiting Phase 2 path integration.
 
 - **Remaining Phases deferred to Linux**: Paths 2–6, Phases 3–9 require full toolchain (vasm ≥1.8, Musashi runtime).
+
+- **Bare-metal millisecond delay via CIA-A hardware timer**:
+  - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by
+    CIA-A Timer A one-shot loads on the PAL E-clock (709379 Hz), chained in
+    `<=90ms` chunks to work around the CIA's 16-bit timer width.
+  - Uses CIA-A only (never CIA-B, which `lib/ptplayer.s` owns for music), so
+    `WaitMs` can be used safely alongside music playback.
+  - Added `examples/wait_ms_demo.has`, and `scripts/build_example.sh` now
+    auto-detects and links `lib/timer.s` when `WaitMs` is used.
+
+- **Exec `AttnFlags` CPU detection support**:
+  - Added `lib/cpu.s` with `GetCPUType()`, returning the highest recognized
+    68000-through-68060 CPU type reported by Exec.
+  - Added HAS constants and the external declaration in
+    `examples/includes/cpu_defs.has`, plus the focused
+    `examples/cpu_detection.has` usage example.
+
 
 - **Dependent constant expressions**:
   - `const` initializers may reference constants declared earlier, such as `const B = A + 1;`.

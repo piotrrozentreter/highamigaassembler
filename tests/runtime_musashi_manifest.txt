@@ -4,3 +4,4 @@
 
 examples/runtime_musashi/smoke_mmio_pass.has|pass
 examples/runtime_musashi/proc_math_branch_pass.has|pass
+examples/runtime_musashi/rnd_helpers_pass.has|pass

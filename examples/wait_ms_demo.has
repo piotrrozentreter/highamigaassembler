@@ -1,0 +1,17 @@
+// Demonstrates the bare-metal CIA-A hardware millisecond delay.
+extern func WaitMs(ms: int) -> void;
+extern func WaitVBlank() -> void;
+
+code main:
+    asm {
+        jmp main
+    }
+
+    proc main() -> int {
+        var i: int;
+        for i = 0 to 4 {
+            call WaitMs(200);
+            call WaitVBlank();
+        }
+        return 0;
+    }

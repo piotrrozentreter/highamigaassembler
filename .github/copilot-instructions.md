@@ -41,13 +41,13 @@
 ### Compilation
 ```bash
 # Basic: compile HAS source to assembly
-python -m hasc.cli input.has -o output.s
+python3 -m hasc.cli input.has -o output.s
 
 # With Python code generation (Phase 4)
-python -m hasc.cli input.has --generate generator.py -o output.s
+python3 -m hasc.cli input.has --generate generator.py -o output.s
 
 # Skip validation (for testing parser)
-python -m hasc.cli input.has --no-validate -o output.s
+python3 -m hasc.cli input.has --no-validate -o output.s
 ```
 
 ### Assembly & Linking
@@ -65,11 +65,11 @@ vlink -bamigahunk output.o -o output.exe
 
 ```bash
 # Test single example
-python -m hasc.cli examples/add.has -o /tmp/test.s
+python3 -m hasc.cli examples/add.has -o /tmp/test.s
 
 # Batch test all examples (shell script)
 for f in examples/*.has; do 
-  python -m hasc.cli "$f" -o /tmp/test.s || echo "FAILED: $f"
+  python3 -m hasc.cli "$f" -o /tmp/test.s || echo "FAILED: $f"
 done
 
 # Validate generated assembly with vasm
@@ -345,10 +345,10 @@ The `examples/` directory contains 75+ `.has` files demonstrating all language f
 
 ```bash
 # Check HAS version/help
-python -m hasc.cli --help
+python3 -m hasc.cli --help
 
 # Quick compile test
-python -m hasc.cli examples/add.has -o /tmp/test.s && cat /tmp/test.s
+python3 -m hasc.cli examples/add.has -o /tmp/test.s && cat /tmp/test.s
 
 # Validate assembly output
 vasmm68k_mot -Fhunkexe -o /tmp/test.o /tmp/test.s
