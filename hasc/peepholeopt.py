@@ -132,9 +132,13 @@ def _eliminate_dead_stores(lines):
             if m1 and m2:
                 suffix1, dest1 = m1.groups()
                 suffix2, dest2 = m2.groups()
+                source2 = base2.rsplit(',', 1)[0]
                 
                 # Same destination and size - first write is dead
-                if dest1 == dest2 and suffix1 == suffix2:
+                # The next MOVE may read the previous destination while forming
+                # an effective address, e.g. move.l (a0,d1.l*4),d1.
+                if (dest1 == dest2 and suffix1 == suffix2
+                        and dest1 not in _extract_used_regs(source2)):
                     # Skip first move
                     i += 1
                     continue

@@ -1,3 +1,5 @@
+import re
+
 from hasc.indexed_address import lower_indexed_address
 from hasc import codegen, parser
 from hasc.target import CpuTarget, TargetSpec
@@ -193,6 +195,39 @@ code main:
     assert "(a0,d1.l*4)" not in asm_68000
     assert "(a0,d1.l*2)" in asm_68020
     assert "(a0,d1.l*4)" in asm_68020
+
+
+def test_repeated_68020_array_reads_reload_index_after_intervening_expression():
+    source = """
+data values:
+    meteor_x.l[4] = {10, 20, 30, 40}
+    meteor_y.l[4] = {50, 60, 70, 80}
+
+code main:
+    proc collision() -> int {
+        var i: int = 1;
+        var bob_h: int = 26;
+        var m_bottom: int = meteor_y[i] + bob_h - 1;
+        if (m_bottom == meteor_x[i]) {
+            return m_bottom == meteor_y[i];
+        }
+        return 0;
+    }
+    """
+    module = parser.parse(source)
+    asm = codegen.CodeGen(module, TARGET_68020).gen()
+    body = asm[asm.index("collision:"):]
+    index_slot = re.search(r"move\.l #1,(-\d+\(a4\))", body)
+    assert index_slot
+
+    for array_name in ("meteor_x", "meteor_y"):
+        array_base = body.index(f"lea {array_name},a0", body.index("lea meteor_x,a0"))
+        array_read = body[array_base:]
+        assert re.search(
+            rf"lea {array_name},a0\n\s+move\.l\s+{re.escape(index_slot.group(1))},d1\n"
+            r"\s+move\.l \(a0,d1\.l\*4\),d1",
+            array_read,
+        )
 
 
 def test_typed_pointer_stack_parameter_uses_a6_stack_base():
