@@ -1,0 +1,10 @@
+// HAS <-> lib/cpu.s interop declarations.
+
+const CPU_TYPE_68000 = 0;
+const CPU_TYPE_68010 = 1;
+const CPU_TYPE_68020 = 2;
+const CPU_TYPE_68030 = 3;
+const CPU_TYPE_68040 = 4;
+const CPU_TYPE_68060 = 5;
+
+extern func GetCPUType() -> int;

@@ -112,6 +112,7 @@ LIB_SOURCES=(
     "$LIB_DIR/bob.s"
     "$LIB_DIR/bob_animation.s"
     "$LIB_DIR/ptplayer.s"
+    "$LIB_DIR/timer.s"
 )
 
 declare -A SYM_TO_LIB=()
@@ -220,6 +221,7 @@ ORDERED_LIBS=(
     "$LIB_DIR/bob.s"
     "$LIB_DIR/bob_animation.s"
     "$LIB_DIR/ptplayer.s"
+    "$LIB_DIR/timer.s"
 )
 
 SELECTED_LIBS=()
