@@ -44,10 +44,13 @@ def test_scaled_index_can_include_a_displacement():
     ) == ([], "(a0,d1.l*8)")
 
 
-def test_scaled_displacement_requires_brief_index_range():
+BRIEF_ONLY_68020 = TargetSpec(CpuTarget.M68020, True, False, False, True, True)
+
+
+def test_scaled_displacement_requires_brief_index_range_without_full_extension():
     for displacement in (-128, 127):
         lower_indexed_address(
-            TARGET_68020,
+            BRIEF_ONLY_68020,
             "a0",
             "d1",
             4,
@@ -57,7 +60,7 @@ def test_scaled_displacement_requires_brief_index_range():
     for displacement in (-129, 128):
         try:
             lower_indexed_address(
-                TARGET_68020,
+                BRIEF_ONLY_68020,
                 "a0",
                 "d1",
                 4,
@@ -68,6 +71,20 @@ def test_scaled_displacement_requires_brief_index_range():
             assert "signed 8-bit" in str(error)
         else:
             raise AssertionError("out-of-range scaled displacement was accepted")
+
+
+def test_full_extension_target_allows_out_of_brief_range_displacement():
+    for displacement in (-129, 128, 1000, -32000, 40000):
+        prelude, operand = lower_indexed_address(
+            TARGET_68020,
+            "a0",
+            "d1",
+            4,
+            displacement=displacement,
+            enable_scaled=True,
+        )
+        assert prelude == []
+        assert operand == f"{displacement}(a0,d1.l*4)"
 
 
 def test_arbitrary_stride_uses_existing_68000_fallbacks():
@@ -282,3 +299,277 @@ code main:
     assert "4(a0,d1.l*8)" in asm_68020
     assert "addq.l #4,d1" not in asm_68020
     assert "add.l #4,d1" not in asm_68020
+
+
+class _StubCodeGen:
+    """Minimal stand-in exposing the interface codegen_indexed_address needs."""
+
+    def __init__(self, target):
+        self.target = target
+
+    def _emit_expr(self, expr, params, locals_info, reg_left, reg_right,
+                   target_type=None, frame_reg="a6"):
+        return [f"    ; evaluate index into {reg_left}"]
+
+    def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0,
+                                use_scaled=False, index_word_safe=False):
+        return lower_indexed_address(
+            self.target, base_reg, index_reg, stride, displacement,
+            enable_scaled=use_scaled, index_word_safe=index_word_safe,
+        )
+
+    def _emit_add_immediate(self, indent, reg, value):
+        return f"{indent}add.l #{value},{reg}"
+
+
+def test_struct_array_read_uses_full_extension_for_offset_outside_brief_range():
+    """Direct wrapper test: emit_struct_array_read allows a field offset beyond
+    the -128..127 brief range to fold into the operand on a full-extension
+    68020 target. No current HAS struct layout can trigger this today because
+    scaled struct addressing is only enabled when the whole struct fits a
+    2/4/8-byte stride (which bounds every field offset within brief range),
+    but the wrapper itself must already be correct for future call sites.
+    """
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+
+    stub = _StubCodeGen(TARGET_68020)
+    code = codegen_indexed_address.emit_struct_array_read(
+        stub, "items", index_expr, [], [], "d0", "a6",
+        stride=4, field_offset=200, field_suffix=".l",
+    )
+    assert any("200(a0,d1.l*4)" in line for line in code)
+    assert not any("add.l #200,d1" in line for line in code)
+
+    stub_00 = _StubCodeGen(BASELINE)
+    code_00 = codegen_indexed_address.emit_struct_array_read(
+        stub_00, "items", index_expr, [], [], "d0", "a6",
+        stride=4, field_offset=200, field_suffix=".l",
+    )
+    assert any("add.l #200,d1" in line for line in code_00)
+    assert not any("(a0,d1.l*4)" in line for line in code_00)
+
+
+def test_phase2_constant_index_uses_word_index_on_68020():
+    """A compile-time-constant index provably fits `.w`, so 68020 struct-array
+    access selects the smaller index size; the constant is still evaluated
+    through the normal expression path (not folded away)."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.Number(value=5)
+
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=4, field_offset=0, field_suffix=".l",
+    )
+    assert any("(a0,d1.w*4)" in line for line in code)
+    assert not any("(a0,d1.l*4)" in line for line in code)
+
+
+def test_phase2_dynamic_index_still_uses_long_index_on_68020():
+    """An unprovable (variable) index must keep the conservative `.l` size."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=4, field_offset=0, field_suffix=".l",
+    )
+    assert any("(a0,d1.l*4)" in line for line in code)
+    assert not any("(a0,d1.w*4)" in line for line in code)
+
+
+def test_phase2_word_index_boundary_near_signed_16bit_limit():
+    """Boundary check: the largest/smallest values that still fit a signed
+    16-bit word select `.w`; one past either edge falls back to `.l`."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    for safe_value in (32767, -32768):
+        code = codegen_indexed_address.emit_struct_array_read(
+            _StubCodeGen(TARGET_68020), "items", hast.Number(value=safe_value),
+            [], [], "d0", "a6", stride=4, field_offset=0, field_suffix=".l",
+        )
+        assert any("(a0,d1.w*4)" in line for line in code)
+
+    for unsafe_value in (32768, -32769):
+        code = codegen_indexed_address.emit_struct_array_read(
+            _StubCodeGen(TARGET_68020), "items", hast.Number(value=unsafe_value),
+            [], [], "d0", "a6", stride=4, field_offset=0, field_suffix=".l",
+        )
+        assert any("(a0,d1.l*4)" in line for line in code)
+        assert not any("(a0,d1.w*4)" in line for line in code)
+
+
+def test_phase2_word_index_not_applied_on_68000():
+    """Even a provably-safe constant index must stay `.l` on 68000, since
+    Phase 2 only targets 68020 (`supports_scaled_index`)."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(BASELINE), "items", hast.Number(value=5),
+        [], [], "d0", "a6", stride=4, field_offset=0, field_suffix=".l",
+    )
+    assert any("(a0,d1.l)" in line for line in code)
+    assert not any(".w" in line for line in code)
+
+
+def test_index_fits_word_range_helper():
+    from hasc.indexed_address import index_fits_word_range
+    from hasc import ast as hast
+
+    assert index_fits_word_range(hast.Number(value=0))
+    assert index_fits_word_range(hast.Number(value=32767))
+    assert index_fits_word_range(hast.Number(value=-32768))
+    assert not index_fits_word_range(hast.Number(value=32768))
+    assert not index_fits_word_range(hast.Number(value=-32769))
+    assert not index_fits_word_range(hast.VarRef(name="index"))
+
+
+def test_lower_indexed_address_index_word_safe_flag():
+    assert lower_indexed_address(
+        TARGET_68020, "a0", "d1", 4, enable_scaled=True, index_word_safe=True
+    ) == ([], "(a0,d1.w*4)")
+    assert lower_indexed_address(
+        TARGET_68020, "a0", "d1", 4, enable_scaled=True, index_word_safe=False
+    ) == ([], "(a0,d1.l*4)")
+    # index_word_safe is ignored on targets without scaled-index support.
+    assert lower_indexed_address(
+        BASELINE, "a0", "d1", 4, index_word_safe=True
+    ) == (["    lsl.l #2,d1"], "(a0,d1.l)")
+
+
+def test_lower_indexed_address_word_safe_ignored_without_true_scale():
+    """Regression for the Phase 2 miscompilation: index_word_safe=True must not
+    select `.w` sizing unless a true scaled-register branch actually ran (i.e.
+    `scale` ends up set from a stride in {2,4,8} with scaled addressing
+    enabled). For an arbitrary stride like 12, index_reg is overwritten with
+    index * stride via `mulu.w`, so the operand must still use `.l` even when
+    the caller (incorrectly) asserts index_word_safe=True for the original
+    index value."""
+    prelude, operand = lower_indexed_address(
+        TARGET_68020, "a0", "d1", 12, enable_scaled=True, index_word_safe=True
+    )
+    assert prelude == ["    mulu.w #12,d1"]
+    assert operand == "(a0,d1.l)"
+
+    # Same for a stride large enough to hit the full-width shift/add fallback.
+    prelude_big, operand_big = lower_indexed_address(
+        TARGET_68020, "a0", "d1", 65536, enable_scaled=True, index_word_safe=True
+    )
+    assert operand_big == "(a0,d1.l)"
+    assert prelude_big[0] == "    move.l d1,d2"
+
+
+def test_emit_struct_array_read_stride_outside_scaled_set_stays_long():
+    """Regression: struct size 12 (outside {2,4,8}) with a constant index that
+    fits `.w` alone (3000) must NOT emit a `.w`-sized indexed operand, because
+    index * stride = 36000 overflows signed 16-bit and index_reg is overwritten
+    with the multiplied value via `mulu.w`."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.Number(value=3000)
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=0, field_suffix=".l",
+    )
+    assert any("mulu.w #12,d1" in line for line in code)
+    assert any("(a0,d1.l)" in line for line in code)
+    assert not any(".w*" in line for line in code)
+    assert not any("(a0,d1.w)" in line for line in code)
+
+
+def test_emit_struct_array_store_stride_outside_scaled_set_stays_long():
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.Number(value=3000)
+    code = codegen_indexed_address.emit_struct_array_store(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "d1",
+        "a6", stride=12, field_offset=0, field_suffix=".l",
+    )
+    assert any("mulu.w #12,d1" in line for line in code)
+    assert any("(a0,d1.l)" in line for line in code)
+    assert not any(".w*" in line for line in code)
+    assert not any("(a0,d1.w)" in line for line in code)
+
+
+def test_emit_struct_array_read_folds_small_offset_for_unscaled_stride_on_68020():
+    """A stride outside {2,4,8} (e.g. 12) should still fold a small field
+    offset into the addressing-mode displacement on 68020, even though no
+    scale factor is used."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("8(a0,d1.l)" in line for line in code)
+    assert not any("add.l #8,d1" in line for line in code)
+    assert not any("*" in line for line in code if "(a0,d1" in line)
+
+
+def test_emit_struct_array_store_folds_small_offset_for_unscaled_stride_on_68020():
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_store(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "d1",
+        "a6", stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("8(a0,d1.l)" in line for line in code)
+    assert not any("add.l #8,d1" in line for line in code)
+    assert not any("*" in line for line in code if "(a0,d1" in line)
+
+
+def test_emit_struct_array_read_unscaled_stride_offset_folding_disabled_on_68000():
+    """68000 has no indexed-displacement support here; the fallback add
+    instruction must remain unchanged."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(BASELINE), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("add.l #8,d1" in line for line in code)
+    assert not any("8(a0,d1.l)" in line for line in code)
+
+
+def test_emit_struct_array_store_unscaled_stride_offset_folding_disabled_on_68000():
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_store(
+        _StubCodeGen(BASELINE), "items", index_expr, [], [], "d0", "d1",
+        "a6", stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("add.l #8,d1" in line for line in code)
+    assert not any("8(a0,d1.l)" in line for line in code)
+
+
+def test_emit_struct_array_read_folds_large_offset_for_unscaled_stride_with_full_extension():
+    """A field offset outside the -128..127 brief range still folds when the
+    target supports full-extension indexed addressing."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=200, field_suffix=".l",
+    )
+    assert any("200(a0,d1.l)" in line for line in code)
+    assert not any("add.l #200,d1" in line for line in code)

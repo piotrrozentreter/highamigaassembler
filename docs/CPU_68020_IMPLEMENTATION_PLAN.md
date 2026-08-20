@@ -9,8 +9,18 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
 ## Current Baseline
 
 - `--cpu` supports `68000` and `68020`, default is `68000`.
-- 68020 support currently focuses on scaled indexed addressing.
-- Full-extension indexed addressing, memory-indirect modes, and `.w` index selection are deferred.
+- 68020 support currently covers scaled indexed addressing, full-extension
+  indexed addressing (Phase 1), and constant-index `.w` selection (Phase 2).
+- Phase 4 instruction substitution is implemented for arithmetic: `*`, `/`,
+  `%` on `int`/`long` lower to native `muls.l`/`divsl.l` under `--cpu 68020`
+  (`TargetSpec.supports_32bit_muldiv`), lifting the 68000-only signed 16-bit
+  operand restriction for those operators on that target.
+- Phase 4 instruction substitution also covers signed byte-to-long sign
+  extension: signed `byte` local variable and stack-parameter loads lower
+  to a single `extb.l` under `--cpu 68020` (`TargetSpec.supports_extb_l`)
+  instead of the 68000 `ext.w`+`ext.l` pair. This is a pure instruction-count
+  optimization with no compile-time-restriction difference between targets.
+- Memory-indirect modes are deferred.
 
 ## Non-Goals (for now)
 

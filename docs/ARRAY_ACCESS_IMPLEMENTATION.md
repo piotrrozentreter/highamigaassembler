@@ -48,15 +48,36 @@ contract.
 ### CPU-dependent lowering
 
 The CLI accepts `--cpu 68000` and `--cpu 68020`, defaulting to `68000`. Index
-registers remain long-sized (`dN.l`). Scale factors `2`, `4`, and `8` are emitted
-only for 68020-capable paths; scale `1` is represented by the ordinary unscaled
-indexed operand. Constant indexes continue to use direct constant offsets.
+registers are long-sized (`dN.l`) by default. Scale factors `2`, `4`, and `8` are
+emitted only for 68020-capable paths; scale `1` is represented by the ordinary
+unscaled indexed operand. Constant indexes continue to use direct constant
+offsets.
 
-For struct-array members, a field displacement is folded into a scaled operand
-only when the stride is `2`, `4`, or `8` and the displacement fits the signed
-8-bit indexed displacement supported by the generated form. Otherwise the
-compiler keeps the displacement as explicit arithmetic. Non-power-of-two
-strides are never forced into a scaled operand.
+Under `--cpu 68020`, `index_fits_word_range()` in `hasc/indexed_address.py`
+checks whether an index expression is a compile-time constant fitting the
+signed 16-bit range (-32768..32767). When true, `lower_indexed_address()` uses
+a `.w`-sized index register (e.g. `4(a0,d1.w*8)`) instead of `.l` (e.g.
+`4(a0,d1.l*8)`), a smaller/faster operand. This is applied at four call sites
+in `hasc/codegen_indexed_address.py`: struct-array member read and store,
+array store, and typed-pointer store. Typed-pointer reads and address-of are
+not covered by this analysis, as those paths already constant-fold
+differently. `--cpu 68000` output is unaffected, since the `.w` gate requires
+`supports_scaled_index`.
+
+For struct-array members, a field displacement is folded directly into the
+indexed operand's displacement (e.g. `8(a0,d1.l)`) whenever `--cpu 68020` is
+selected and the offset fits the signed 8-bit brief-displacement range
+(-128..127), or the target supports full-extension addressing for larger
+offsets. This folding applies regardless of struct size, so real-world
+structs outside the `{2, 4, 8}`-byte scaled-addressing set, such as the 10-,
+11-, and 29-byte `explosions`, `Enemy`, and `bullet` structs in
+`examples/games/launchers/launchers.has`, save one `add.l`-style instruction
+per field access. Scale-factor addressing itself (using `*2`, `*4`, or `*8`
+in the operand) remains a separate optimization that still only applies when
+the struct stride is exactly `2`, `4`, or `8` bytes; larger or non-power-of-two
+strides are never forced into a scaled operand, but still benefit from
+displacement folding. `--cpu 68000` output is unaffected either way and
+keeps the displacement as explicit `add.l` arithmetic.
 
 Fallback lowering is target-independent: strides `16` and `32` use long shifts,
 other strides through `32767` use `mulu.w`, and larger strides use full-width
@@ -147,8 +168,28 @@ Advanced tests:
 
 ### Current Limitations:
 - Local arrays not yet supported (stack allocation needed)
-- Full-extension indexed addressing and memory-indirect forms are not enabled
-- `.w` index selection is not enabled; indexes remain `.l`
+- Full-extension indexed addressing is enabled under `--cpu 68020` (Phase 1 of
+  `docs/CPU_68020_IMPLEMENTATION_PLAN.md`): scaled operands with displacements
+  outside the -128..127 brief range, such as `1000(a0,d1.l*4)`, are emitted
+  directly instead of falling back to explicit arithmetic. This is reachable
+  today for dynamic array/pointer indexing with large per-element strides (see
+  `examples/cpu68020_dynamic_large_index.has`). For struct-array field access,
+  *scaled* addressing (`*2`, `*4`, `*8` in the operand) is still only enabled
+  when the struct's total size is exactly 2, 4, or 8 bytes. However, field
+  displacement folding is no longer limited to those sizes: `emit_struct_array_read()`
+  and `emit_struct_array_store()` in `hasc/codegen_indexed_address.py` fold a
+  field's `field_offset` into the indexed operand's displacement for any
+  struct size, provided the offset fits the brief-displacement range or the
+  target supports full-extension addressing. This covers real-world structs
+  such as the 10-, 11-, and 29-byte `explosions`, `Enemy`, and `bullet` structs
+  in `examples/games/launchers/launchers.has`, eliminating one explicit
+  `add.l`-style instruction per field access on 68020. Memory-indirect forms
+  remain unimplemented.
+- `.w` index selection (Phase 2 of `docs/CPU_68020_IMPLEMENTATION_PLAN.md`) is
+  enabled only for compile-time-constant indexes within the signed 16-bit
+  range, and only at the four call sites listed above; non-constant indexes
+  and the excluded call sites (typed-pointer reads, address-of) keep the `.l`
+  index size.
 - Other 68020 instruction substitutions are not part of this target
 - 3D+ arrays not implemented
 - Array bounds checking not implemented

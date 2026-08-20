@@ -33,6 +33,7 @@ Code-quality and regression-risk specialist for compiler and generated-assembly 
 3. Validator integrity: preserve two-pass symbol collection and semantic validation order.
 4. AST immutability in validation: avoid embedding transient validation state in nodes.
 5. Stack conventions: parameters and locals use stable frame offsets.
+6. Dual-CPU-target correctness: HAS supports `--cpu 68000` (default) and `--cpu 68020`. For any change touching indexed addressing, operand sizing, or instruction selection, explicitly check both targets - confirm `--cpu 68000` output is unaffected (unless the change intentionally alters it) and that `--cpu 68020`-only paths (gated via `TargetSpec` capability flags in `hasc/target.py`) are correct in isolation. Treat a fix validated on only one CPU target as incomplete; call this out as a finding if the change/tests don't cover both.
 
 ## Assembly Formatting Rule
 

@@ -1,13 +1,13 @@
 ---
 name: assembly-validator
-description: 'Validate and optimize Motorola 68000 assembly for HAS output. Use for instruction correctness, size-suffix checks, stack-frame checks, calling-convention checks, and Amiga hardware register usage review.'
-argument-hint: 'Provide assembly file(s) or snippet and what to validate: correctness, optimization, or ABI.'
+description: 'Validate and optimize Motorola 68000/68020 assembly for HAS output. Use for instruction correctness, size-suffix checks, stack-frame checks, calling-convention checks, and Amiga hardware register usage review.'
+argument-hint: 'Provide assembly file(s) or snippet, which CPU target it was compiled for (68000 default or 68020 opt-in), and what to validate: correctness, optimization, or ABI.'
 user-invocable: true
 ---
 
-# Motorola 68000 Assembly Validator
+# Motorola 68000/68020 Assembly Validator
 
-Specialized workflow for reviewing generated 68000 assembly and identifying correctness or performance problems.
+Specialized workflow for reviewing generated 68000 or 68020 assembly and identifying correctness or performance problems.
 
 ## When to Use
 
@@ -15,6 +15,12 @@ Specialized workflow for reviewing generated 68000 assembly and identifying corr
 - You need ABI/calling-convention validation for procedures and returns.
 - You want to improve instruction selection without changing semantics.
 - You need quick checks for register, stack, and addressing-mode correctness.
+
+## CPU Target Awareness
+
+- HAS emits assembly for two CPU targets: `68000` (default) and `68020` (opt-in, via `--cpu 68020`). Always confirm which target the snippet was compiled for before validating.
+- 68020-only syntax (scaled-index operands like `(a0,d1.l*4)`, full-extension displacements) is INVALID on 68000 - flag it as a correctness bug if found in output meant for `--cpu 68000`.
+- When asked to validate/compare both targets, assemble each with the matching flag: `vasmm68k_mot -m68000` for 68000 output, `vasmm68k_mot -m68020` for 68020 output - do not use `-m68020` to validate 68000-targeted output or vice versa.
 
 ## Modern Validation Criteria
 

@@ -30,6 +30,15 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 - Keep low-level control first-class: inline assembly and direct register control are core, not fallback-only features.
 - If a proposed feature cannot preserve predictable generated assembly behavior, prefer tooling/docs guidance over core semantic expansion.
 
+## CPU Targets (68000 default + 68020 opt-in)
+
+- HAS compiles to two supported CPU targets via `--cpu`: `68000` (default) and `68020`.
+- `hasc/target.py` (`TargetSpec`/`CpuTarget`) is the single source of truth for target capability flags: `supports_scaled_index`, `supports_full_index_extension`, `supports_memory_indirect`. Never hardcode CPU-specific behavior outside this model - branch on the capability flags, not on `cpu == "68020"` string checks.
+- The `--cpu 68000` default output path must remain completely stable/unaffected by any 68020-only feature work, unless a change is explicitly intended to alter 68000 behavior (rare, and must be called out prominently).
+- Any bug fix, codegen modification, or feature extension touching indexed addressing, operand sizing, or instruction selection must be evaluated (and, where relevant, implemented/tested) against BOTH `--cpu 68000` and `--cpu 68020` - do not assume a fix for one target is automatically correct for the other.
+- See [docs/CPU_68020_IMPLEMENTATION_PLAN.md](../../docs/CPU_68020_IMPLEMENTATION_PLAN.md) for the phased 68020 roadmap (Phase 0 guardrails, Phase 1 full-extension indexed addressing, Phase 2 `.w` index selection implemented; Phase 3 memory-indirect and Phase 4 instruction substitutions deferred) and known scope decisions (e.g. struct-field displacement folding deliberately scoped to 68020-only to preserve 68000 output stability).
+- Validate 68020 output with `vasmm68k_mot -m68020 -Fhunkexe` and 68000 output with `vasmm68k_mot -m68000 -Fhunkexe` when the toolchain is available; report both results separately, not just one.
+
 ## Out of Scope
 
 - Broad documentation rewrites (delegate to docs agent).

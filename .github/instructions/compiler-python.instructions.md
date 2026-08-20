@@ -18,6 +18,7 @@ Maintain compiler correctness and stable generated assembly while keeping change
 - Do not store transient validation state inside AST nodes.
 - In code generation, pair every register allocation with release on every control-flow path.
 - Keep operand size behavior type-aware and consistent with expected byte, word, and long semantics.
+- HAS targets two CPUs via `--cpu`: `68000` (default) and `68020` (opt-in). `hasc/target.py` (`TargetSpec`/`CpuTarget`) is the single source of truth for target capability flags (`supports_scaled_index`, `supports_full_index_extension`, `supports_memory_indirect`) - branch on these flags, never on ad-hoc `cpu == "68020"` string checks. Any change to indexed addressing, operand sizing, or instruction selection must preserve `--cpu 68000` default output (unless the change intentionally targets it) and must be considered/tested against `--cpu 68020` as well - do not assume a fix verified on one target holds for the other.
 
 ## Change Discipline
 
@@ -31,6 +32,7 @@ Maintain compiler correctness and stable generated assembly while keeping change
 - Run a smoke compile after any change to parser, validator, codegen, or allocator logic. Skip only for changes limited to comments, error message text, or CLI help strings.
 - For parser and validator changes, include one valid and one invalid-path check where feasible.
 - For codegen changes, verify generated assembly compiles when assembler tooling is available.
+- For changes touching indexed addressing, operand sizing, or instruction selection, verify (or at minimum note as residual risk) behavior under BOTH `--cpu 68000` and `--cpu 68020`, assembling with the matching `vasmm68k_mot -m68000`/`-m68020` flag when the toolchain is available.
 
 ## Review Output Expectations
 

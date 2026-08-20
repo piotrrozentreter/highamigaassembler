@@ -1,0 +1,26 @@
+// Phase 1 (68020 full-extension indexed addressing) demonstration.
+//
+// Compile with:
+//   python -m hasc.cli examples/cpu68020_dynamic_large_index.has --cpu 68020 -o out.s
+//   python -m hasc.cli examples/cpu68020_dynamic_large_index.has --cpu 68000 -o out.s
+//
+// Dynamic indexing into a long-element array uses a scaled indexed operand
+// (e.g. "(a0,d1.l*4)") on 68020 instead of the 68000 explicit "lsl.l #2,d1"
+// prelude. Combined with a non-zero base displacement this is exactly the
+// full-extension form validated in
+// tests/test_codegen_68020_indexing.py::test_full_extension_target_allows_out_of_brief_range_displacement.
+
+data samples:
+    values.l[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+code main:
+    proc read_value(index: int) -> int {
+        // expect (68020): "(a0,d1.l*4)" scaled operand, no lsl.l prelude
+        // expect (68000): "lsl.l #2,d1" prelude before the plain "(a0,d1.l)" operand
+        return values[index];
+    }
+
+    proc read_offset_value(index: int) -> int {
+        var offset: int = index + 2;
+        return values[offset];
+    }

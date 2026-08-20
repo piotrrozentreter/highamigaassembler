@@ -12,8 +12,14 @@
 - **Name**: HAS (High Assembler)
 - **Version**: 0.9.5 (active development, not production-ready)
 - **Language**: Python 3.8+
-- **Target**: Motorola 68000 assembly (Amiga)
+- **Target**: Motorola 68000 assembly (Amiga), with an opt-in 68020 CPU target (see below)
 - **Output**: Standard assembly compatible with `vasm` + `vlink`
+
+### CPU Targets: 68000 (default) + 68020 (opt-in)
+- HAS compiles to two supported CPU targets via `--cpu`: `68000` (default, stock Amiga baseline) and `68020` (accelerated/A1200+, opt-in).
+- `hasc/target.py` (`TargetSpec`/`CpuTarget`) is the single source of truth for capability flags (`supports_scaled_index`, `supports_full_index_extension`, `supports_memory_indirect`) - branch on these, never on ad-hoc CPU string checks.
+- **Any future bug fix, codegen modification, or feature extension must be considered and validated against BOTH `--cpu 68000` and `--cpu 68020`** - not just the default target. The 68000 default output path must stay stable/unaffected by 68020-only work unless a change is explicitly intended to alter it.
+- See [docs/CPU_68020_IMPLEMENTATION_PLAN.md](docs/CPU_68020_IMPLEMENTATION_PLAN.md) for the phased 68020 roadmap and current status.
 
 ### Core Philosophy
 - **Assembly-first**: Every high-level construct must compile to clean, inspectable 68000 assembly

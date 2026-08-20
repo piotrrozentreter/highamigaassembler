@@ -9,12 +9,18 @@
 
 ### 68000 Arithmetic Safety Notes
 
-- `*`, `/`, `%` currently lower to 68000 word arithmetic (`muls.w` / `divs.w`).
+- On `--cpu 68000` (default), `*`, `/`, `%` lower to 68000 word arithmetic
+  (`muls.w` / `divs.w`).
 - Constant operands used in these paths must fit signed 16-bit range: `-32768..32767`.
 - Division/modulo by constant zero is a compile-time error.
 - `#pragma strict16arith(on)` enables stricter checks for dynamic (non-constant) operands:
 	- operands must be provably safe signed 16-bit values based on declared types.
 - `#pragma strict16arith(off)` (default) keeps permissive behavior for dynamic operands.
+- **This signed 16-bit restriction is 68000-specific and is lifted under
+  `--cpu 68020`**: `*`, `/`, `%` on `int`/`long` instead emit native
+  `muls.l`/`divsl.l`, supporting full 32-bit operands with no compile-time
+  range restriction (gated on `TargetSpec.supports_32bit_muldiv`). Division/
+  modulo by constant zero remains a compile-time error on both targets.
 
 ## Comparison Operators (all signed)
 - `==` - Equal (returns 1 or 0)
