@@ -54,8 +54,46 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     16-bit multiply range use full-width shift/add lowering. Constant indexes
     remain direct offsets, and byte indexing remains unscaled.
   - Matching assembler selection is required: use `-m68000` for baseline output
-    and `-m68020` for scaled output. Full-extension, memory-indirect, `.w` index,
-    and unrelated 68020 instruction optimizations remain deferred.
+    and `-m68020` for scaled output. Memory-indirect, `.w` index, and unrelated
+    68020 instruction optimizations remain deferred.
+
+- **Full-extension indexed addressing for `--cpu 68020`** (Phase 1 of
+  `docs/CPU_68020_IMPLEMENTATION_PLAN.md`):
+  - `lower_indexed_address()` now emits scaled indexed operands with
+    displacements outside the previous -128..127 "brief" range (e.g.
+    `1000(a0,d1.l*4)`) when the target CPU supports full-extension addressing,
+    instead of raising an error or falling back to explicit shift/add
+    arithmetic. `TargetSpec.for_cpu(M68020)` sets
+    `supports_full_index_extension=True`; `--cpu 68000` is unaffected and
+    continues to reject out-of-range displacements the same way as before.
+  - Applies to dynamic array/pointer indexing and struct-array field access
+    in `hasc/codegen_indexed_address.py`. The `--cpu 68000` default output
+    path is unchanged (verified byte-identical against prior committed output).
+  - Reachable today for dynamic array/pointer indexing with large per-element
+    strides; see `examples/cpu68020_dynamic_large_index.has`. Struct-array
+    field access also folds into this path, but scaled struct addressing is
+    only enabled when a struct's total size is exactly 2, 4, or 8 bytes, so no
+    real HAS struct layout can currently exceed the brief-range displacement
+    for that case (see `examples/cpu68020_struct_array_indexing.has`); the
+    out-of-range struct-field path is covered only by direct unit tests of the
+    lowering helper.
+
+- **`.w` index selection via conservative range analysis for `--cpu 68020`**
+  (Phase 2 of `docs/CPU_68020_IMPLEMENTATION_PLAN.md`):
+  - Added `index_fits_word_range()` in `hasc/indexed_address.py`, which
+    returns `True` only when an index expression is a compile-time constant
+    within the signed 16-bit range (-32768..32767).
+  - When true and the target supports scaled indexing (68020 only),
+    `lower_indexed_address()` emits a `.w`-sized index register (e.g.
+    `4(a0,d1.w*8)`) instead of the previous always-`.l` operand (e.g.
+    `4(a0,d1.l*8)`), producing a smaller/faster operand on 68020.
+  - Applied at four call sites in `hasc/codegen_indexed_address.py`: struct-array
+    member read and store, array store, and typed-pointer store, wherever a raw
+    constant index reaches the indexed-address lowering helper. Typed-pointer
+    reads and address-of paths are intentionally excluded (scope decision;
+    those paths already constant-fold differently).
+  - `--cpu 68000` output is completely unaffected: the `.w` gate requires
+    `TargetSpec.supports_scaled_index`, which is only set for 68020.
 
 - **Bare-metal millisecond delay via CIA-A hardware timer**:
   - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by

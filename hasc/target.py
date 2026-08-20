@@ -21,7 +21,7 @@ class TargetSpec:
         if cpu_target is CpuTarget.M68000:
             return cls(cpu_target, False, False, False)
         if cpu_target is CpuTarget.M68020:
-            return cls(cpu_target, True, False, False)
+            return cls(cpu_target, True, True, False)
         raise ValueError(f"Unsupported CPU target: {cpu}")
 
 

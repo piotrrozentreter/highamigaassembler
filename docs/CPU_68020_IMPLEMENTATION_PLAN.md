@@ -9,8 +9,9 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
 ## Current Baseline
 
 - `--cpu` supports `68000` and `68020`, default is `68000`.
-- 68020 support currently focuses on scaled indexed addressing.
-- Full-extension indexed addressing, memory-indirect modes, and `.w` index selection are deferred.
+- 68020 support currently covers scaled indexed addressing, full-extension
+  indexed addressing (Phase 1), and constant-index `.w` selection (Phase 2).
+- Memory-indirect modes are deferred.
 
 ## Non-Goals (for now)
 

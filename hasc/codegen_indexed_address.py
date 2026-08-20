@@ -7,6 +7,12 @@ Phases 2+:
 - Phase 2: All paths emit 68000-style output (shifts in prelude, unscaled operands)
 - Phase 3: Displacement folding for struct fields
 - Phase 4: 68020 scaled operands for both 68000 and 68020 targets
+
+Note: these Phase 2-4 labels are internal migration stages for this module and
+predate docs/CPU_68020_IMPLEMENTATION_PLAN.md's Phase 0-3 numbering; they are
+not the same sequence. Full-extension out-of-brief-range displacements (that
+plan's Phase 1) are handled by lower_indexed_address() itself, called from the
+wrappers below.
 """
 
 
@@ -182,14 +188,21 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
     use_scaled = (
         codegen.target.supports_scaled_index
         and stride in (2, 4, 8)
-        and -128 <= field_offset <= 127
+        and (
+            -128 <= field_offset <= 127
+            or codegen.target.supports_full_index_extension
+        )
     )
+    from .indexed_address import index_fits_word_range
     prelude, operand = codegen._lower_indexed_address(
         "a0",
         "d1",
         stride,
         displacement=field_offset if use_scaled else 0,
         use_scaled=use_scaled,
+        # Defensive: only claim word-safety when a true scaled branch runs;
+        # lower_indexed_address() also gates on this as the source of truth.
+        index_word_safe=index_fits_word_range(index_expr) and use_scaled,
     )
     code.extend(prelude)
     if field_offset and not use_scaled:
@@ -302,8 +315,10 @@ def emit_array_store(codegen, name, index_expr, params, locals_info,
         code = [f"    lea {name},a0"]
         code.extend(index_code)
 
+    from .indexed_address import index_fits_word_range
     prelude, operand = codegen._lower_indexed_address(
-        "a0", reg_right, elem_bytes, use_scaled=True
+        "a0", reg_right, elem_bytes, use_scaled=True,
+        index_word_safe=index_fits_word_range(index_expr),
     )
     code.extend(prelude)
     from . import ast
@@ -319,7 +334,7 @@ def emit_typed_pointer_store(codegen, pointer_name, index_expr, params,
         index_expr, params, locals_info, "d1", "d2",
         target_type="int", frame_reg=frame_reg,
     )
-    from .indexed_address import index_may_clobber_address_register
+    from .indexed_address import index_may_clobber_address_register, index_fits_word_range
     load_pointer = f"    move.l {pointer_name},a0"
     if index_may_clobber_address_register(index_expr):
         code.extend(index_code)
@@ -328,7 +343,8 @@ def emit_typed_pointer_store(codegen, pointer_name, index_expr, params,
         code.append(load_pointer)
         code.extend(index_code)
     prelude, operand = codegen._lower_indexed_address(
-        "a0", "d1", elem_bytes, use_scaled=True
+        "a0", "d1", elem_bytes, use_scaled=True,
+        index_word_safe=index_fits_word_range(index_expr),
     )
     code.extend(prelude)
     from . import ast
@@ -361,14 +377,21 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
     use_scaled = (
         codegen.target.supports_scaled_index
         and stride in (2, 4, 8)
-        and -128 <= field_offset <= 127
+        and (
+            -128 <= field_offset <= 127
+            or codegen.target.supports_full_index_extension
+        )
     )
+    from .indexed_address import index_fits_word_range
     prelude, operand = codegen._lower_indexed_address(
         "a0",
         reg_right,
         stride,
         displacement=field_offset if use_scaled else 0,
         use_scaled=use_scaled,
+        # Defensive: only claim word-safety when a true scaled branch runs;
+        # lower_indexed_address() also gates on this as the source of truth.
+        index_word_safe=index_fits_word_range(index_expr) and use_scaled,
     )
     code.extend(prelude)
     if field_offset and not use_scaled:

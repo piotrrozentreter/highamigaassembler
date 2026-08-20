@@ -89,7 +89,7 @@ def test_target_spec_is_conservative_for_both_supported_cpus():
     assert not baseline.supports_full_index_extension
     assert not baseline.supports_memory_indirect
     assert target_68020.supports_scaled_index
-    assert not target_68020.supports_full_index_extension
+    assert target_68020.supports_full_index_extension
     assert not target_68020.supports_memory_indirect
 
 
@@ -453,3 +453,39 @@ code main:
     assert asm_68000 != asm_68020
     assert "(a0,d1.l*4)" not in asm_68000
     assert "(a0,d1.l*4)" in asm_68020
+
+
+def test_phase1_struct_field_offset_within_brief_range_still_scales_on_68020():
+    """Phase 1 non-regression: struct field offsets that already fit the
+    brief range keep using scaled addressing on 68020, unscaled add on 68000.
+
+    Note: emit_struct_array_read/emit_struct_array_store only enable scaled
+    addressing when the *whole struct* fits in a 2/4/8-byte stride, so field
+    offsets reachable through real struct declarations can never exceed the
+    brief -128..127 range today. The full-extension relaxation for these
+    wrappers is exercised directly against codegen_indexed_address in
+    tests/test_codegen_68020_indexing.py using a synthetic out-of-range
+    offset, since no real struct layout can trigger it yet.
+    """
+    src = """
+bss test_bss:
+    struct items[4] { value.l, tag.w, pad.w }
+
+code main:
+    proc update(index: int, value: int) -> int {
+        items[index].tag = value;
+        return items[index].tag;
+    }
+    """
+    module = parser.parse(src)
+    baseline = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68000)).gen()
+    target_68020 = codegen.CodeGen(module, TargetSpec.for_cpu(CpuTarget.M68020)).gen()
+
+    assert baseline != target_68020
+    assert "4(a0,d1.l*8)" in target_68020
+
+    if VASM_PATH.exists():
+        rc_20, _, stderr_20 = vasm_assemble(target_68020, "68020")
+        assert rc_20 == 0, f"vasm -m68020 failed: {stderr_20}"
+        rc_00, _, stderr_00 = vasm_assemble(baseline, "68000")
+        assert rc_00 == 0, f"vasm -m68000 failed: {stderr_00}"

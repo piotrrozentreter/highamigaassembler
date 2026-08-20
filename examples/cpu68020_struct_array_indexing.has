@@ -1,0 +1,26 @@
+// Phase 1 (68020 full-extension indexed addressing) demonstration.
+//
+// Compile with:
+//   python -m hasc.cli examples/cpu68020_struct_array_indexing.has --cpu 68020 -o out.s
+//   python -m hasc.cli examples/cpu68020_struct_array_indexing.has --cpu 68000 -o out.s
+//
+// Struct-array field access folds the field byte offset into the indexed
+// operand when scaled addressing is enabled (68020 only). Note: the whole
+// struct here is exactly 8 bytes, so this only exercises the existing
+// brief-range (-128..127) scaled-displacement path; no real struct layout
+// can currently exceed that range because scaled struct addressing is only
+// enabled when the struct stride itself fits a 2/4/8-byte element size.
+// The out-of-range full-extension path is verified directly against
+// hasc.indexed_address.lower_indexed_address and the codegen_indexed_address
+// wrappers in tests/test_codegen_68020_indexing.py.
+
+bss entity_bss:
+    struct entities[8] { value.l, tag.w, pad.w }
+
+code main:
+    proc update_tag(index: int, new_tag: int) -> int {
+        entities[index].tag = new_tag;
+        // expect (68020): "4(a0,d1.l*8)" folded operand, no explicit add.l
+        // expect (68000): unscaled "(a0,d1.l)" plus an explicit add for the offset
+        return entities[index].tag;
+    }

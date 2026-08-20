@@ -447,7 +447,7 @@ class CodeGen:
         )
 
     def _lower_indexed_address(self, base_reg, index_reg, stride, displacement=0,
-                               use_scaled=False):
+                               use_scaled=False, index_word_safe=False):
         """Compatibility wrapper for the pure indexed-address lowering module."""
         return indexed_address.lower_indexed_address(
             self.target,
@@ -456,6 +456,7 @@ class CodeGen:
             stride,
             displacement,
             enable_scaled=use_scaled,
+            index_word_safe=index_word_safe,
         )
 
     def _emit_expr(self, expr, params, locals_info, reg_left="d0", reg_right="d1", target_type=None, frame_reg="a6"):

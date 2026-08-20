@@ -48,9 +48,21 @@ contract.
 ### CPU-dependent lowering
 
 The CLI accepts `--cpu 68000` and `--cpu 68020`, defaulting to `68000`. Index
-registers remain long-sized (`dN.l`). Scale factors `2`, `4`, and `8` are emitted
-only for 68020-capable paths; scale `1` is represented by the ordinary unscaled
-indexed operand. Constant indexes continue to use direct constant offsets.
+registers are long-sized (`dN.l`) by default. Scale factors `2`, `4`, and `8` are
+emitted only for 68020-capable paths; scale `1` is represented by the ordinary
+unscaled indexed operand. Constant indexes continue to use direct constant
+offsets.
+
+Under `--cpu 68020`, `index_fits_word_range()` in `hasc/indexed_address.py`
+checks whether an index expression is a compile-time constant fitting the
+signed 16-bit range (-32768..32767). When true, `lower_indexed_address()` uses
+a `.w`-sized index register (e.g. `4(a0,d1.w*8)`) instead of `.l` (e.g.
+`4(a0,d1.l*8)`), a smaller/faster operand. This is applied at four call sites
+in `hasc/codegen_indexed_address.py`: struct-array member read and store,
+array store, and typed-pointer store. Typed-pointer reads and address-of are
+not covered by this analysis, as those paths already constant-fold
+differently. `--cpu 68000` output is unaffected, since the `.w` gate requires
+`supports_scaled_index`.
 
 For struct-array members, a field displacement is folded into a scaled operand
 only when the stride is `2`, `4`, or `8` and the displacement fits the signed
@@ -147,8 +159,21 @@ Advanced tests:
 
 ### Current Limitations:
 - Local arrays not yet supported (stack allocation needed)
-- Full-extension indexed addressing and memory-indirect forms are not enabled
-- `.w` index selection is not enabled; indexes remain `.l`
+- Full-extension indexed addressing is enabled under `--cpu 68020` (Phase 1 of
+  `docs/CPU_68020_IMPLEMENTATION_PLAN.md`): scaled operands with displacements
+  outside the -128..127 brief range, such as `1000(a0,d1.l*4)`, are emitted
+  directly instead of falling back to explicit arithmetic. This is reachable
+  today for dynamic array/pointer indexing with large per-element strides (see
+  `examples/cpu68020_dynamic_large_index.has`). For struct-array field access,
+  scaled addressing is only enabled when the struct's total size is exactly 2,
+  4, or 8 bytes, so no real struct layout currently exceeds the brief-range
+  displacement; the out-of-range struct-field path is exercised only by direct
+  unit tests of the lowering helper. Memory-indirect forms remain unimplemented.
+- `.w` index selection (Phase 2 of `docs/CPU_68020_IMPLEMENTATION_PLAN.md`) is
+  enabled only for compile-time-constant indexes within the signed 16-bit
+  range, and only at the four call sites listed above; non-constant indexes
+  and the excluded call sites (typed-pointer reads, address-of) keep the `.l`
+  index size.
 - Other 68020 instruction substitutions are not part of this target
 - 3D+ arrays not implemented
 - Array bounds checking not implemented
