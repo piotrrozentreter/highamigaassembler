@@ -3,7 +3,7 @@
 ## Overview
 A small first-fit heap written in 68000 assembly. It uses a single fixed buffer and compact 4-byte headers—no free lists or OS calls.
 
-- **Fixed-size heap**: `HEAP_MEMORY = $FFFC` bytes in BSS
+- **Fixed-size heap**: `HEAP_MEMORY = 10*1024` bytes by default in CHIP RAM
 - **Simple header**: length (words) + status
 - **First-fit scan**: linear walk through blocks
 - **Coalescing**: merges adjacent free blocks on free
@@ -22,10 +22,33 @@ heap_end:
 - **Low word**: status (`0` = free, `1` = occupied)
 
 ## Constants (from lib/heap.s)
-- `HEAP_MEMORY` = `$FFFC` bytes total heap storage (long-aligned)
+- `HEAP_MEMORY` = `10*1024` bytes by default (long-aligned)
 - `HEAP_BLOCK_FREE` = `0`
 - `HEAP_BLOCK_OCCUPIED` = `1`
 - `NULL` = `0`
+
+### Choosing the Heap Size
+
+`HEAP_MEMORY` is an assembly-time constant. Override the 10 KiB default when assembling
+`lib/heap.s` with vasm:
+
+```bash
+vasmm68k_mot -Fhunk -devpac -I lib -D HEAP_MEMORY=65536 -o heap.o lib/heap.s
+```
+
+The heap is declared in `bss_c`, so every extra byte reserved here consumes CHIP RAM. The
+`scripts/build_game.sh` helper accepts the same setting through the environment and applies
+it only while assembling `lib/heap.s`:
+
+```bash
+HEAP_MEMORY=65536 ./scripts/build_game.sh examples/games/robots/robots.has
+```
+
+Keep overrides at or below roughly 128 KiB. Each block header stores the payload length as a
+16-bit word count, so a simple larger override is not allocator-safe. In particular, do not
+use `141312` bytes (138 KiB) for Jetpac yet; that size exceeds the current metadata limit and
+needs a future allocator header redesign. The safe usable size also depends on runtime demand
+and fragmentation.
 
 ## API
 ### HeapInit()

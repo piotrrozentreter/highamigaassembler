@@ -239,7 +239,12 @@ VASM_FLAGS=(-Fhunk -devpac -I "$LIB_DIR")
 OBJECTS=("$OUT_O")
 for lib in "${SELECTED_LIBS[@]}"; do
     obj="$BUILD/$(basename "${lib%.s}").o"
-    "$VASM" "${VASM_FLAGS[@]}" "$lib" -o "$obj"
+    if [[ "$(basename "$lib")" == "heap.s" && -n "${HEAP_MEMORY:-}" ]]; then
+        heap_flags=(-Fhunk -devpac -I "$LIB_DIR" -D "HEAP_MEMORY=${HEAP_MEMORY}")
+        "$VASM" "${heap_flags[@]}" "$lib" -o "$obj"
+    else
+        "$VASM" "${VASM_FLAGS[@]}" "$lib" -o "$obj"
+    fi
     OBJECTS+=("$obj")
 done
 

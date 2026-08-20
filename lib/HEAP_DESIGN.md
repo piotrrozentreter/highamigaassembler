@@ -4,6 +4,13 @@
 
 Created a **custom heap memory allocator** for Amiga 68000 targets rather than using Kickstart system routines. This provides better control, portability, and educational value for the High Assembler project. The current implementation is a compact first-fit scanner over a fixed internal heap buffer with 4-byte headers and no external dependencies.
 
+The buffer defaults to `10*1024` bytes and is allocated in the `bss_c` section, so it uses CHIP
+RAM. Projects may override the size when assembling `lib/heap.s` with
+`-D HEAP_MEMORY=<bytes>`; `scripts/build_game.sh` also accepts `HEAP_MEMORY` and passes it only
+to that library. Keep overrides at or below roughly 128 KiB. The high word of each header stores
+the payload length as a 16-bit word count, so a `141312`-byte (138 KiB) override is not
+allocator-safe and should not be enabled for Jetpac until the metadata is redesigned.
+
 ## Design Decision: Custom vs. Kickstart
 
 ### Why NOT Kickstart's AllocMem/FreeMem
