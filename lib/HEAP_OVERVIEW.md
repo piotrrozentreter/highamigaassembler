@@ -4,6 +4,14 @@
 
 Complete, production-ready heap memory manager for 68000/Amiga systems (current implementation in `lib/heap.s`):
 
+The default heap is `10*1024` bytes in CHIP RAM (`bss_c`). Override it with
+`-D HEAP_MEMORY=<bytes>` when assembling `lib/heap.s`, or set `HEAP_MEMORY` when using
+`scripts/build_game.sh`; the helper limits that define to the heap library assembly. Keep the
+override at or below roughly 128 KiB because block lengths are stored as 16-bit word counts.
+The `141312`-byte (138 KiB) value is not currently allocator-safe and should not be enabled for
+Jetpac until the allocator metadata is redesigned. Runtime demand and fragmentation can reduce
+the practical capacity further.
+
 ```
 lib/
 ├── heap.s                  # Core implementation (current, ~330–530 lines)

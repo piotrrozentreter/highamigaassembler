@@ -12,6 +12,24 @@
 ### 1. Initialize Heap
 
 The current heap uses an internal buffer defined in heap.s. No arguments are required.
+It reserves 10 KiB by default in CHIP RAM. To change the size for a direct vasm build, pass
+`-D HEAP_MEMORY=<bytes>` while assembling `lib/heap.s`:
+
+```bash
+vasmm68k_mot -Fhunk -devpac -I lib -D HEAP_MEMORY=65536 -o heap.o lib/heap.s
+```
+
+For game builds, set the environment variable instead:
+
+```bash
+HEAP_MEMORY=65536 ./scripts/build_game.sh examples/games/robots/robots.has
+```
+
+The build helper passes this define only to `heap.s`; the generated HAS source and other
+libraries are unchanged. Because the heap lives in `bss_c`, its size comes from CHIP RAM.
+Keep the override at or below roughly 128 KiB: block lengths are stored as 16-bit word counts,
+so `141312` bytes (138 KiB) is not currently allocator-safe and should not be enabled for
+Jetpac. Runtime demand and fragmentation may require a smaller practical heap.
 
 ```asm
 ; In your startup code:

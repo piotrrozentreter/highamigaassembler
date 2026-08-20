@@ -106,12 +106,19 @@ End marker: length=0, status ignored
 
 ### Constants (current heap.s)
 ```asm
-HEAP_MEMORY   equ $FFFC         ; Heap base label in heap.s
+HEAP_MEMORY   equ 10*1024       ; Default heap size in bytes
 HEAP_LENGTH   equ heap_end-HEAP_MEMORY
 HEAP_HEADER   equ 4
 STATUS_USED   equ 1
 STATUS_FREE   equ 0
 ```
+
+`HEAP_MEMORY` can be overridden when assembling `lib/heap.s` with
+`-D HEAP_MEMORY=<bytes>`. `scripts/build_game.sh` exposes the same override as an optional
+`HEAP_MEMORY` environment variable and applies it only to the heap library. The heap is in
+`bss_c`, so it consumes CHIP RAM. Keep overrides at or below roughly 128 KiB: the block header
+stores lengths as 16-bit word counts, making a `141312`-byte (138 KiB) heap unsafe until the
+allocator metadata is redesigned. Practical capacity still depends on demand and fragmentation.
 
 ## Performance Profile
 

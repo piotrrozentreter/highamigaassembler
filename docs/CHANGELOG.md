@@ -2,6 +2,43 @@
 
 All notable changes to the HAS (High Assembler) project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Configurable heap buffer size** in `lib/heap.s` and `scripts/build_game.sh`:
+  - The heap now defaults to `10*1024` bytes instead of the previous roughly 138 KiB
+    reservation. Pass `-D HEAP_MEMORY=<bytes>` to vasm for a direct heap assembly, or set
+    `HEAP_MEMORY=<bytes>` when using `scripts/build_game.sh`; the build helper applies the
+    define only to `lib/heap.s`.
+  - The heap remains in `bss_c` and therefore consumes CHIP RAM. Keep overrides at or below
+    roughly 128 KiB because block lengths are stored as 16-bit word counts. A `141312`-byte
+    (138 KiB) override is not allocator-safe until the heap metadata is redesigned, so Jetpac
+    should not enable that size yet.
+
+- **Opt-in memory savings for unused graphics modes** in `lib/graphics.s`:
+  - Three new assembly-time defines - `DISABLE_320x256`, `DISABLE_640x256`,
+    `DISABLE_HAM` - let apps that only use a subset of the three supported
+    graphics modes (lores 320x256x32, hires 640x256x16, HAM6 320x256) skip
+    reserving the corresponding chip-RAM screen buffer(s), e.g.:
+    `vasmm68k_mot -Fhunk -D DISABLE_640x256=1 -D DISABLE_HAM=1 -o graphics.o lib/graphics.s`
+    saves ~225,280 of the baseline 327,680 bytes reserved by the `screen`
+    section when only lores mode is used. Any combination of the three may be
+    defined.
+  - The same flags also omit the corresponding mode-specific copper list,
+    including its palette and pointer entries, while retaining all copper-list
+    labels for assembly and linking compatibility.
+  - The buffer labels always stay defined regardless of which defines are
+    set, so unrelated code in `graphics.s` still assembles/links; a disabled
+    buffer shrinks to a 2-byte placeholder rather than 0 bytes, since an
+    entirely empty `bss_c` `screen` section previously crashed `vlink`
+    (V0.17a) with an access violation.
+  - `SetGraphicsMode()` now refuses to activate a mode whose buffer was
+    disabled at assembly time, returning its existing `d0 = -1` error code
+    instead of running against the shrunk placeholder buffer. Callers must
+    still check the return value (or avoid calling a disabled mode).
+  - See [docs/GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#opt-in-memory-savings-disabling-unused-screen-buffers-and-copper-lists).
+
 ## [0.9.5] - 2026-08-19
 
 ### Fixed
@@ -456,7 +493,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 - **`GuiHitTestRect(x, y, w, h)`**: Returns 1 if the left button was just pressed inside the given pixel rect. Suitable for inline buttons in HAS without a GADGET struct.
 - **`GuiHitTest(gadget_ptr)`**: Same click detection driven by a GADGET struct.
 - **`GetGuiMouseX()` / `GetGuiMouseY()`**: Zero-frame accessors returning the current accumulated absolute mouse pixel position as a signed long. Use these to feed a hardware sprite cursor.
-- **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 â†’ `DrawMsgBox`, type 1 â†’ `DrawButton`.
+  - **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 â†’ `DrawMsgBox`, type 1 â†’ `DrawButton`.
 - **GADGET struct** (20 bytes, defined in `lib/gui.i`): `X, Y, W, H, BG, BORDER, TEXT (long), TCOLOR, TYPE`.
 - **Hardware sprite mouse cursor** in `examples/msgbox_demo.has`:
   - 11-line classic arrow shape defined in a `data cursor_data:` section (fast RAM; `CreateSprite` copies to chip RAM).
