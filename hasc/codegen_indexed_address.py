@@ -193,19 +193,26 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
             or codegen.target.supports_full_index_extension
         )
     )
+    # d8(An,Xn) brief-displacement indexed addressing (no scale) is legal on
+    # 68000 too; this is scoped to 68020 (supports_scaled_index) deliberately,
+    # to limit blast radius rather than because 68000 lacks the addressing mode.
+    can_fold_displacement = codegen.target.supports_scaled_index and (
+        -128 <= field_offset <= 127
+        or codegen.target.supports_full_index_extension
+    )
     from .indexed_address import index_fits_word_range
     prelude, operand = codegen._lower_indexed_address(
         "a0",
         "d1",
         stride,
-        displacement=field_offset if use_scaled else 0,
+        displacement=field_offset if can_fold_displacement else 0,
         use_scaled=use_scaled,
         # Defensive: only claim word-safety when a true scaled branch runs;
         # lower_indexed_address() also gates on this as the source of truth.
         index_word_safe=index_fits_word_range(index_expr) and use_scaled,
     )
     code.extend(prelude)
-    if field_offset and not use_scaled:
+    if field_offset and not can_fold_displacement:
         code.append(codegen._emit_add_immediate("    ", "d1", field_offset))
 
     if field_suffix in (".b", ".w") and reg_left == "d1":
@@ -382,19 +389,26 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
             or codegen.target.supports_full_index_extension
         )
     )
+    # d8(An,Xn) brief-displacement indexed addressing (no scale) is legal on
+    # 68000 too; this is scoped to 68020 (supports_scaled_index) deliberately,
+    # to limit blast radius rather than because 68000 lacks the addressing mode.
+    can_fold_displacement = codegen.target.supports_scaled_index and (
+        -128 <= field_offset <= 127
+        or codegen.target.supports_full_index_extension
+    )
     from .indexed_address import index_fits_word_range
     prelude, operand = codegen._lower_indexed_address(
         "a0",
         reg_right,
         stride,
-        displacement=field_offset if use_scaled else 0,
+        displacement=field_offset if can_fold_displacement else 0,
         use_scaled=use_scaled,
         # Defensive: only claim word-safety when a true scaled branch runs;
         # lower_indexed_address() also gates on this as the source of truth.
         index_word_safe=index_fits_word_range(index_expr) and use_scaled,
     )
     code.extend(prelude)
-    if field_offset and not use_scaled:
+    if field_offset and not can_fold_displacement:
         code.append(codegen._emit_add_immediate("    ", reg_right, field_offset))
     code.append(f"    move{field_suffix} {reg_value},{operand}")
     return code

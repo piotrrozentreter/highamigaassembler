@@ -499,3 +499,77 @@ def test_emit_struct_array_store_stride_outside_scaled_set_stays_long():
     assert any("(a0,d1.l)" in line for line in code)
     assert not any(".w*" in line for line in code)
     assert not any("(a0,d1.w)" in line for line in code)
+
+
+def test_emit_struct_array_read_folds_small_offset_for_unscaled_stride_on_68020():
+    """A stride outside {2,4,8} (e.g. 12) should still fold a small field
+    offset into the addressing-mode displacement on 68020, even though no
+    scale factor is used."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("8(a0,d1.l)" in line for line in code)
+    assert not any("add.l #8,d1" in line for line in code)
+    assert not any("*" in line for line in code if "(a0,d1" in line)
+
+
+def test_emit_struct_array_store_folds_small_offset_for_unscaled_stride_on_68020():
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_store(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "d1",
+        "a6", stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("8(a0,d1.l)" in line for line in code)
+    assert not any("add.l #8,d1" in line for line in code)
+    assert not any("*" in line for line in code if "(a0,d1" in line)
+
+
+def test_emit_struct_array_read_unscaled_stride_offset_folding_disabled_on_68000():
+    """68000 has no indexed-displacement support here; the fallback add
+    instruction must remain unchanged."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(BASELINE), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("add.l #8,d1" in line for line in code)
+    assert not any("8(a0,d1.l)" in line for line in code)
+
+
+def test_emit_struct_array_store_unscaled_stride_offset_folding_disabled_on_68000():
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_store(
+        _StubCodeGen(BASELINE), "items", index_expr, [], [], "d0", "d1",
+        "a6", stride=12, field_offset=8, field_suffix=".l",
+    )
+    assert any("add.l #8,d1" in line for line in code)
+    assert not any("8(a0,d1.l)" in line for line in code)
+
+
+def test_emit_struct_array_read_folds_large_offset_for_unscaled_stride_with_full_extension():
+    """A field offset outside the -128..127 brief range still folds when the
+    target supports full-extension indexed addressing."""
+    from hasc import codegen_indexed_address
+    from hasc import ast as hast
+
+    index_expr = hast.VarRef(name="index")
+    code = codegen_indexed_address.emit_struct_array_read(
+        _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
+        stride=12, field_offset=200, field_suffix=".l",
+    )
+    assert any("200(a0,d1.l)" in line for line in code)
+    assert not any("add.l #200,d1" in line for line in code)

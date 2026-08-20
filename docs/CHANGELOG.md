@@ -95,6 +95,29 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - `--cpu 68000` output is completely unaffected: the `.w` gate requires
     `TargetSpec.supports_scaled_index`, which is only set for 68020.
 
+- **Struct field displacement folding for arbitrary strides on `--cpu 68020`**:
+  - `emit_struct_array_read()` and `emit_struct_array_store()` in
+    `hasc/codegen_indexed_address.py` now fold a struct field's
+    `field_offset` directly into the indexed-addressing operand's
+    displacement (e.g. `8(a0,d1.l)`) instead of emitting a separate
+    `add.l #8,d1`-style instruction, for struct sizes outside the `{2, 4, 8}`
+    scaled-addressing set. This closes part of the gap noted in Phase 1
+    above, where struct-array addressing only benefited structs of exactly
+    2, 4, or 8 bytes: real-world structs such as the 10-, 11-, and 29-byte
+    `explosions`, `Enemy`, and `bullet` structs in
+    `examples/games/launchers/launchers.has` now save one instruction per
+    struct-field access on 68020.
+  - Gated on `codegen.target.supports_scaled_index` (68020 only) and either
+    the field offset fitting the signed 8-bit brief-displacement range
+    (-128..127) or `target.supports_full_index_extension` for larger
+    offsets. `--cpu 68000` output is completely unaffected and continues to
+    use the explicit `add.l`-style instruction.
+  - Hardened the displacement-range validation in `lower_indexed_address()`
+    (`hasc/indexed_address.py`) to apply the brief-range check to any
+    non-zero displacement, not only scaled ones, whenever the target lacks
+    full-extension support. This is a correctness guard and does not change
+    behavior for existing callers.
+
 - **Bare-metal millisecond delay via CIA-A hardware timer**:
   - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by
     CIA-A Timer A one-shot loads on the PAL E-clock (709379 Hz), chained in

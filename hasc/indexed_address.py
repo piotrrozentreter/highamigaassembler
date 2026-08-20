@@ -102,13 +102,11 @@ def lower_indexed_address(
         raise ValueError(f"Stride must be positive, got {stride}")
     if (
         displacement
-        and enable_scaled
-        and target.supports_scaled_index
         and not target.supports_full_index_extension
         and not -128 <= displacement <= 127
     ):
         raise ValueError(
-            "Scaled indexed displacement must fit signed 8-bit brief form"
+            "Indexed displacement must fit signed 8-bit brief form"
         )
 
     prelude: List[str] = []
