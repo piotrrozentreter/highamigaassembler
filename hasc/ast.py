@@ -63,6 +63,9 @@ def size_suffix(size_bytes: int) -> str:
 @dataclass
 class Module:
     items: List[Any] = field(default_factory=list)
+    # Side-channel: id(stmt_node) -> source line number, populated by the parser
+    # (best-effort; not all statement kinds are covered). See --annotate in cli.py.
+    node_lines: dict = field(default_factory=dict)
 
 
 @dataclass

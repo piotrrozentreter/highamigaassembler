@@ -6,6 +6,25 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`--annotate` CLI flag** for `hasc.cli`, a debug/readability aid for reading
+  generated assembly:
+  - Fully opt-in and off by default; passing it emits comment-only lines
+    interleaved into the output: `; L{n}: <original HAS source line text>`
+    before most statements (best-effort - not every statement kind is
+    guaranteed to have a line recorded, in which case it is silently
+    skipped), plus `; end for` / `; end while` / `; end repeat` markers
+    right after the corresponding loop's end label.
+  - Zero effect on generated instructions/labels when the flag is not
+    passed - verified byte-identical across the full `examples/*.has` suite
+    on both `--cpu 68000` and `--cpu 68020`. Composes with
+    `--strip-unused-procs` and `--cpu 68020`.
+  - Known limitation: for sources using `#include`, the printed line number
+    and quoted text are read from the original, un-expanded file while the
+    line bookkeeping is keyed against the pre-processed/expanded text, so
+    past an `#include` point the two may not line up. This is cosmetic only
+    and does not affect compiled program behavior.
+  - See [README.md](../README.md#annotate-generated-assembly-debug-aid).
+
 - **Configurable heap buffer size** in `lib/heap.s` and `scripts/build_game.sh`:
   - The heap now defaults to `10*1024` bytes instead of the previous roughly 138 KiB
     reservation. Pass `-D HEAP_MEMORY=<bytes>` to vasm for a direct heap assembly, or set

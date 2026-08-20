@@ -229,7 +229,7 @@ def strip_unused_procs(module: ast.Module, enabled: bool = False):
 
         new_items.append(ast.CodeSection(name=item.name, is_chip=item.is_chip, items=filtered))
 
-    new_module = ast.Module(items=new_items)
+    new_module = ast.Module(items=new_items, node_lines=getattr(module, "node_lines", {}))
     report = StripReport(
         enabled=True,
         skipped_due_to_asm=has_top_level_asm,

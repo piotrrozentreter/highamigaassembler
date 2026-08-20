@@ -291,6 +291,32 @@ proc helper()    -> void { ... }   // kept (called by game_init)
 proc dead_code() -> void { ... }   // removed (never called)
 ```
 
+### Annotate Generated Assembly (debug aid)
+
+```bash
+python -m hasc.cli program.has --annotate -o program.s
+```
+
+`--annotate` is fully opt-in and off by default. When passed, the compiler
+interleaves comment-only lines into the generated assembly:
+
+- `; L{n}: <original HAS source line text>` before most statements
+  (best-effort - not every statement kind is guaranteed to have a source
+  line recorded; if unavailable it is silently skipped).
+- `; end for` / `; end while` / `; end repeat` markers right after the
+  corresponding loop's end label.
+
+These are pure comments and never affect instructions, labels, or layout:
+with `--annotate` omitted, output is byte-for-byte identical to before this
+flag existed. It composes with `--strip-unused-procs` and `--cpu 68020`.
+
+**Known limitation**: for sources using `#include`, the printed line number
+and quoted source text are taken from the original, un-expanded file, while
+the underlying line bookkeeping is keyed against the pre-processed/expanded
+text. Past an `#include` point the printed `L{n}` and quoted text may not
+line up with the real source line. This is a cosmetic limitation of the
+debug aid only and has no effect on compiled program behavior.
+
 ### Build Complete Executable
 
 ```bash
