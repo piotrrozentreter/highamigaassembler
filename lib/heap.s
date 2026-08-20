@@ -1,10 +1,10 @@
 ; =============================================================================
 ; (c) 2026 by Piotr Rozentreter (Rozsoft)
 ; heap.s
-; Memory block header format (4 bytes):
-; High word (bits 31-16): Block memory length in words
-; Low word (bits 15-0): Block status (0=free, 1=occupied)
-; End of heap is detected when high word = 0
+; Memory block header format (8 bytes):
+; +0.l: Block memory length in words
+; +4.l: Block status (0=free, 1=occupied)
+; End of heap is detected when length = 0
 
 ; =============================================================================
 
@@ -18,9 +18,14 @@
 
 HEAP_BLOCK_FREE         EQU 0
 HEAP_BLOCK_OCCUPIED     EQU 1
+HEAP_HEADER_BYTES       EQU 8
+HEAP_HEADER_WORDS       EQU 4
     ifnd HEAP_MEMORY
 HEAP_MEMORY             EQU 10*1024       ; default heap size in bytes
     endif
+    ifle HEAP_MEMORY-(HEAP_HEADER_BYTES*2+2)
+    fail "HEAP_MEMORY too small"
+    endc
 NULL                    EQU 0
 
     ; Blitter-visible scratch/background buffers are allocated from this heap
@@ -37,11 +42,12 @@ heap_end:
 HeapInit:
     movem.l a0-a1/d0,-(a7)
     lea heap_start,a0
-    ; Initial free block covers data area only: total bytes minus header and end marker
-    move.l #((HEAP_MEMORY-8)/2)<<16,d0  ; length in words, upper word
-    move.l d0,(a0)                      ; write initial free block header
-    lea heap_end-4,a1
-    clr.l (a1)                          ; write end marker (length=0)
+    move.l #((HEAP_MEMORY-(HEAP_HEADER_BYTES*2))/2),d0
+    move.l d0,(a0)                      ; initial free block length in words
+    move.l #HEAP_BLOCK_FREE,4(a0)
+    lea heap_end-HEAP_HEADER_BYTES,a1
+    clr.l (a1)                          ; end marker length=0
+    clr.l 4(a1)
     movem.l (a7)+,a0-a1/d0
     rts
 
@@ -62,16 +68,13 @@ HeapAlloc:
     lea heap_start,a0               ; cursor at heap start
 
 .scan_loop:
-    move.l (a0),d1                  ; d1 = header
-    move.l d1,d2
-    swap d2                         ; d2 = length (words)
-    and.l #$0000FFFF,d2             ; treat length as unsigned 16-bit
+    move.l (a0),d2                  ; d2 = length (words)
 
-    tst.w d2
+    tst.l d2
     beq .alloc_at_end               ; end marker reached
 
-    move.w d1,d3                    ; d3 = status
-    cmp.w #HEAP_BLOCK_OCCUPIED,d3
+    move.l 4(a0),d3                 ; d3 = status
+    cmp.l #HEAP_BLOCK_OCCUPIED,d3
     beq .next_block                 ; skip occupied
 
     ; free block and big enough? (unsigned compare)
@@ -83,40 +86,34 @@ HeapAlloc:
     sub.l d0,d4                     ; d4 = remaining words
 
     ; if not enough room for a new header + at least 0 data, consume whole block
-    cmp.l #2,d4
+    cmp.l #HEAP_HEADER_WORDS,d4
     ble .alloc_whole
 
-    subq.l #2,d4                    ; remove header cost for remainder
+    subq.l #HEAP_HEADER_WORDS,d4    ; remove header cost for remainder
 
     ; split block
-    move.w d0,d1
-    swap d1
-    move.w #HEAP_BLOCK_OCCUPIED,d1
-    move.l d1,(a0)                  ; write allocated header
+    move.l d0,(a0)                  ; write allocated header
+    move.l #HEAP_BLOCK_OCCUPIED,4(a0)
 
     ; tail header location
     move.l a0,a1
     move.l d0,d3
     lsl.l #1,d3                     ; bytes of payload
     add.l d3,a1
-    addq.l #4,a1                    ; skip allocated header
+    addq.l #HEAP_HEADER_BYTES,a1    ; skip allocated header
 
-    move.w d4,d1                    ; remainder words
-    swap d1
-    move.w #HEAP_BLOCK_FREE,d1
-    move.l d1,(a1)                  ; write free tail header
+    move.l d4,(a1)                  ; write free tail header
+    move.l #HEAP_BLOCK_FREE,4(a1)
 
-    addq.l #4,a0
+    addq.l #HEAP_HEADER_BYTES,a0
     move.l a0,d0
     movem.l (sp)+,d1-d4/a0-a1
     unlk a6
     rts
 
 .alloc_whole:
-    and.l #$FFFF0000,d1
-    move.w #HEAP_BLOCK_OCCUPIED,d1
-    move.l d1,(a0)
-    addq.l #4,a0
+    move.l #HEAP_BLOCK_OCCUPIED,4(a0)
+    addq.l #HEAP_HEADER_BYTES,a0
     move.l a0,d0
     movem.l (sp)+,d1-d4/a0-a1
     unlk a6
@@ -125,7 +122,7 @@ HeapAlloc:
 .next_block:
     move.l d2,d4                    ; use unsigned length in long
     lsl.l #1,d4                     ; bytes of payload
-    addq.l #4,d4                    ; header size
+    addq.l #HEAP_HEADER_BYTES,d4    ; header size
     add.l d4,a0                     ; advance
     bra .scan_loop
 
@@ -134,24 +131,23 @@ HeapAlloc:
     sub.l a0,a1                     ; bytes left (from end marker position)
     move.l d0,d2
     lsl.l #1,d2                     ; bytes requested
-    addq.l #8,d2                    ; header + new end marker
+    add.l #(HEAP_HEADER_BYTES*2),d2 ; header + new end marker
     cmp.l d2,a1
     blt .no_memory_available
 
-    move.w d0,d1
-    swap d1
-    move.w #HEAP_BLOCK_OCCUPIED,d1
-    move.l d1,(a0)                  ; write header at end marker spot
+    move.l d0,(a0)                  ; write header at end marker spot
+    move.l #HEAP_BLOCK_OCCUPIED,4(a0)
 
     move.l d0,d2
     lsl.l #1,d2
     move.l a0,d3                    ; save header addr
     add.l d2,a0                     ; skip data
-    addq.l #4,a0                    ; reach new end marker slot
-    clr.l (a0)                      ; new end marker
+    addq.l #HEAP_HEADER_BYTES,a0    ; reach new end marker slot
+    clr.l (a0)                      ; new end marker length=0
+    clr.l 4(a0)
 
     move.l d3,d0
-    addq.l #4,d0
+    addq.l #HEAP_HEADER_BYTES,d0
     movem.l (sp)+,d1-d4/a0-a1
     unlk a6
     rts
@@ -178,56 +174,42 @@ HeapFree:
     lea heap_start,a2
     lea heap_end,a3
     move.l a0,a4                    ; temp address for bounds check
-    subq.l #4,a4                    ; a4 = header address
+    subq.l #HEAP_HEADER_BYTES,a4    ; a4 = header address
     cmp.l a2,a4
-    bls .hf_done                    ; header before heap start (unsigned compare)
+    blo .hf_done                    ; header before heap start (unsigned compare)
     cmp.l a3,a4
     bcc .hf_done                    ; header at or beyond heap end (unsigned compare)
     
     move.l a4,a0                    ; a0 = header address (already calculated above)
-    move.l (a0),d1                  ; header
-    move.w d1,d2
-    cmp.w #HEAP_BLOCK_OCCUPIED,d2
+    move.l 4(a0),d2                 ; status
+    cmp.l #HEAP_BLOCK_OCCUPIED,d2
     bne .hf_done                    ; already free or invalid
 
     ; mark as free
-    and.l #$FFFF0000,d1
-    move.w #HEAP_BLOCK_FREE,d1
-    move.l d1,(a0)
+    move.l #HEAP_BLOCK_FREE,4(a0)
 
     ; try to coalesce with next blocks
 .hf_coalesce_next:
-    move.l (a0),d1                  ; current header (A0 points to header)
-    move.l d1,d2
-    swap d2                         ; d2 = current length (words)
-    moveq #0,d3
-    move.w d2,d3                    ; cur_words (unsigned)
+    move.l (a0),d3                  ; cur_words
     move.l d3,d4
     lsl.l #1,d4                     ; bytes for data
-    add.l #4,d4                     ; include header
+    add.l #HEAP_HEADER_BYTES,d4     ; include header
     move.l a0,a1                    ; copy header addr to A1
     add.l d4,a1                     ; a1 = next header address
-    move.l (a1),d5                  ; next header
-    move.l d5,d6
-    swap d6
-    tst.w d6
+    cmp.l a3,a1
+    bcc .hf_after_forward
+    move.l (a1),d6                  ; next length
+    tst.l d6
     beq .hf_after_forward           ; next is end marker (length=0)
-    move.w d5,d2                    ; get next status field into d2 (preserve d6 with length)
-    cmp.w #HEAP_BLOCK_FREE,d2
+    move.l 4(a1),d2                 ; next status
+    cmp.l #HEAP_BLOCK_FREE,d2
     bne .hf_after_forward           ; next not free
     ; next is free and has non-zero length -> merge
-    move.l (a1),d5
-    move.l d5,d6
-    swap d6
-    moveq #0,d7
-    move.w d6,d7                    ; next_words (unsigned)
     move.l d3,d4                    ; cur_words -> use D4 as temp (preserve D0 for backward scan)
-    add.l d7,d4
-    add.l #2,d4                     ; account for removed header (2 words)
-    move.l d4,d1                    ; move merged size to d1
-    swap d1
-    move.w #HEAP_BLOCK_FREE,d1
-    move.l d1,(a0)                  ; write merged header at current header
+    add.l d6,d4
+    add.l #HEAP_HEADER_WORDS,d4     ; account for removed header
+    move.l d4,(a0)                  ; write merged length at current header
+    move.l #HEAP_BLOCK_FREE,4(a0)
     bra .hf_coalesce_next           ; try to merge further
 
 .hf_after_forward:
@@ -235,47 +217,32 @@ HeapFree:
     lea heap_start,a2
     move.l a2,a3                    ; cursor
 .hf_find_prev:
-    move.l (a3),d1                  ; header at cursor
-    move.l d1,d2
-    swap d2
-    moveq #0,d3
-    move.w d2,d3                    ; words (unsigned)
+    move.l (a3),d3                  ; words
     move.l d3,d4
     lsl.l #1,d4
-    add.l #4,d4
+    add.l #HEAP_HEADER_BYTES,d4
     move.l a3,a5
     add.l d4,a5                     ; a5 = next header after cursor
     cmp.l a5,a0
     beq .hf_prev_check
     lea heap_end,a4
-    cmp.l a5,a4
+    cmp.l a4,a5
     bcc .hf_done                    ; if a5 >= heap_end, stop searching
     move.l a5,a3
     bra.s .hf_find_prev
 
 .hf_prev_check:
     ; a3 is prev header, check if free
-    move.l (a3),d1
-    move.w d1,d2
-    cmp.w #HEAP_BLOCK_FREE,d2
+    move.l 4(a3),d2
+    cmp.l #HEAP_BLOCK_FREE,d2
     bne .hf_done                    ; prev not free
     ; merge prev and current: new_words = prev_words + cur_words + 2
-    move.l (a3),d1
-    move.l d1,d2
-    swap d2
-    moveq #0,d3
-    move.w d2,d3                    ; prev_words (unsigned)
-    move.l (a0),d4                  ; current header value (A0)
-    move.l d4,d5
-    swap d5
-    moveq #0,d6
-    move.w d5,d6                    ; cur_words (unsigned)
+    move.l (a3),d3                  ; prev_words
+    move.l (a0),d6                  ; cur_words
     add.l d3,d6
-    add.l #2,d6
-    move.l d6,d1                    ; merged size to d1
-    swap d1                         ; move to upper word
-    move.w #HEAP_BLOCK_FREE,d1      ; set status
-    move.l d1,(a3)                  ; write merged header at prev header
+    add.l #HEAP_HEADER_WORDS,d6
+    move.l d6,(a3)                  ; write merged length at prev header
+    move.l #HEAP_BLOCK_FREE,4(a3)
     bra .hf_done
 
 .hf_done:

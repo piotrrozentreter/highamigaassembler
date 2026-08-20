@@ -2,6 +2,7 @@ import re
 
 from hasc.indexed_address import lower_indexed_address
 from hasc import codegen, parser
+from hasc import validator
 from hasc.target import CpuTarget, TargetSpec
 
 
@@ -259,6 +260,110 @@ code main:
 
     assert "move.l 8(a6),a0" in asm
     assert "move.l 8(a4),a0" not in asm
+
+
+def test_nested_pointer_argument_preserves_palette_value_on_both_targets():
+    source = """
+code main:
+    extern func SetColor(index: int, color: int) -> void;
+    native proc peek_w(__reg(a0) address: long) -> int {
+        asm { move.w (a0),d0; ext.l d0; }
+    }
+
+    proc upload(pal: int) -> void {
+        var i: int;
+        for i = 0 to 31 {
+            call SetColor(i, peek_w(pal + (i << 1)));
+        }
+    }
+    """
+    module = parser.parse(source)
+    asm_68000 = codegen.CodeGen(module, BASELINE).gen()
+    asm_68020 = codegen.CodeGen(module, TARGET_68020).gen()
+
+    for assembly in (asm_68000, asm_68020):
+        body = assembly[assembly.index("upload:"):]
+        assert body.index("move.l 8(a6),a0") < body.index("jsr peek_w")
+        assert body.index("move.l d0,-(a7)") < body.index("jsr SetColor")
+        assert "(a0,d1.l*2)" not in body
+
+
+def test_register_argument_is_stabilized_before_nested_sibling_call():
+    source = """
+code main:
+    native proc read(__reg(a0) address: long) -> int {
+        asm { move.w (a0),d0; ext.l d0; }
+    }
+    native proc pair(__reg(a0) first: long, __reg(a1) second: long) -> void {
+        asm { nop; }
+    }
+
+    proc use(address: int) -> void {
+        call pair(address, read(address));
+    }
+    """
+    module = parser.parse(source)
+    body = codegen.CodeGen(module, BASELINE).gen()
+    body = body[body.index("use:"):]
+
+    first_argument_load = body.index("move.l 8(a6),a0")
+    first_push = body.index("move.l a0,-(a7)", first_argument_load)
+    nested_call = body.index("jsr read")
+    restore_first = body.index("move.l (a7)+,a0\n    ; param first")
+    assert first_push < nested_call < restore_first
+
+
+def test_d0_register_argument_does_not_replace_call_result():
+    source = """
+code main:
+    extern func produce(__reg(d0) value: int) -> int;
+
+    proc use(value: int) -> int {
+        return produce(value);
+    }
+    """
+    module = parser.parse(source)
+    for target in (BASELINE, TARGET_68020):
+        body = codegen.CodeGen(module, target).gen()
+        body = body[body.index("use:"):]
+        call_pos = body.index("jsr produce")
+        result_end = body.index("rts", call_pos)
+        assert "move.l (a7)+,d0" not in body[call_pos:result_end]
+
+
+def test_statement_call_does_not_restore_caller_saved_d0():
+    source = """
+code main:
+    extern func consume(__reg(d0) value: int) -> void;
+
+    proc use(value: int) -> void {
+        call consume(value);
+    }
+    """
+    module = parser.parse(source)
+    body = codegen.CodeGen(module, BASELINE).gen()
+    body = body[body.index("use:"):]
+    call_pos = body.index("jsr consume")
+    assert "move.l (a7)+,d0" not in body[call_pos:]
+
+
+def test_pointer_warning_does_not_suggest_address_of_pointer_value():
+    source = """
+code main:
+    extern func LoadPalette(palette_ptr: ptr, count: int) -> void;
+
+    proc use(pal: int*) -> void {
+        call LoadPalette(pal, 32);
+    }
+
+    proc ambiguous(value: int) -> void {
+        call LoadPalette(value, 32);
+    }
+    """
+    warnings = validator.Validator(parser.parse(source)).validate()
+
+    assert not any("&pal" in warning for warning in warnings)
+    assert any("&value" in warning for warning in warnings)
 
 
 def test_typed_pointer_stores_load_pointee_before_indexing():

@@ -561,7 +561,7 @@ class Validator:
                     )
                 # Check for pointer parameter mismatches (convert CallStmt to dict-like for compatibility)
                 call_like = type('CallLike', (), {'name': stmt.name, 'args': stmt.args})()
-                self._check_pointer_parameter_matches(call_like, params, proc)
+                self._check_pointer_parameter_matches(call_like, params, proc, symbols)
         
         elif isinstance(stmt, ast.MacroCall):
             # Validate macro call arguments
@@ -704,7 +704,7 @@ class Validator:
                 # Check for pointer parameter mismatches
                 # If a parameter name suggests it expects a pointer (contains 'ptr'),
                 # warn if the argument is a bare variable (not &variable)
-                self._check_pointer_parameter_matches(expr, params, proc)
+                self._check_pointer_parameter_matches(expr, params, proc, symbols)
         
         elif isinstance(expr, ast.GetReg):
             # Validate GetReg register parameter
@@ -724,7 +724,7 @@ class Validator:
             # Validate the value expression
             self._validate_expr(expr.value, symbols, proc)
     
-    def _check_pointer_parameter_matches(self, call_expr, params, proc):
+    def _check_pointer_parameter_matches(self, call_expr, params, proc, symbols=None):
         """Check for potential pointer parameter mismatches.
         
         Warns when:
@@ -741,6 +741,12 @@ class Validator:
             
             # Check if argument is a bare VarRef (not &variable)
             arg_is_bare_var = isinstance(arg, ast.VarRef)
+
+            # A declared pointer is already the address value the callee expects;
+            # taking its address would pass a pointer to the pointer storage.
+            arg_type = symbols.get(arg.name) if arg_is_bare_var and symbols else None
+            if arg_type and ast.is_pointer(arg_type):
+                continue
             
             if is_pointer_param and arg_is_bare_var:
                 self.warnings.append(

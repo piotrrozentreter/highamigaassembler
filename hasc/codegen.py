@@ -1722,7 +1722,7 @@ class CodeGen:
                 stack_params = [(i, p) for i, p in enumerate(callee_params) if not p.register]
 
                 # Save registers that will be used for parameters
-                regs_to_save = [r for _, r in reg_params]
+                regs_to_save = [r for _, r in reg_params if r != "d0"]
                 for r in regs_to_save:
                     code.append(f"    move.l {r},-(a7)")
 
@@ -1738,6 +1738,13 @@ class CodeGen:
                         arg = expr.args[idx]
                         arg_code = self._emit_expr(arg, params, locals_info, reg, "d1", target_type=callee_params[idx].ptype, frame_reg=frame_reg)
                         code.extend(arg_code)
+                        # Stabilize each argument before evaluating the next one: a
+                        # nested call in a sibling expression may clobber this ABI
+                        # register before the callee is entered.
+                        code.append(f"    move.l {reg},-(a7)")
+
+                for _, reg in reversed(reg_params):
+                    code.append(f"    move.l (a7)+,{reg}")
 
                 code.append(f"    jsr {expr.name}")
 
@@ -3336,7 +3343,7 @@ class CodeGen:
 
             if self.print_debug:
                 print(reg_params, stack_params)
-            regs_to_save = [r for _, r in reg_params]
+            regs_to_save = [r for _, r in reg_params if r != "d0"]
             for r in regs_to_save:
                 # Defensive: never emit move.l None,-(a7)
                 if r is None or r == 'None':
@@ -3357,6 +3364,10 @@ class CodeGen:
                     for l in code:
                         for sub in str(l).splitlines():
                             self.emit(sub if sub.startswith(indent) else indent + sub)
+                    self.emit(indent + f"move.l {reg},-(a7)")
+
+            for _, reg in reversed(reg_params):
+                self.emit(indent + f"move.l (a7)+,{reg}")
 
             # Emit parameter comments (show register or stack)
             for idx, p in enumerate(callee_params):
