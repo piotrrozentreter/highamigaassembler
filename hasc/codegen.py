@@ -17,11 +17,17 @@ class CodeGenError(Exception):
 
 
 class CodeGen:
-    def __init__(self, module: ast.Module, target: TargetSpec = DEFAULT_TARGET):
+    def __init__(self, module: ast.Module, target: TargetSpec = DEFAULT_TARGET,
+                 node_lines: dict = None, source_lines: list = None, annotate: bool = False):
         self.print_debug = False  # Set to True to enable debug printing
         self.module = module
         self.target = target
         self.lines = []
+        # --annotate debug aid: comment-only source-line/loop-end annotations.
+        # No effect whatsoever on generated instructions when annotate=False.
+        self.annotate = annotate
+        self.node_lines = node_lines if node_lines is not None else {}
+        self.source_lines = source_lines if source_lines is not None else []
         self.proc_sigs = self._build_proc_signatures(module)
         self.array_dims = self._build_array_dimensions(module)
         self.macro_expander = MacroExpander(module, ast, self._normalize_expr)
@@ -362,6 +368,21 @@ class CodeGen:
 
     def emit(self, s=""):
         self.lines.append(s)
+
+    def _emit_source_line_comment(self, stmt, indent=""):
+        """--annotate aid: emit '; L{n}: {source text}' for stmt if a line is known."""
+        if not self.annotate:
+            return
+        line = self.node_lines.get(id(stmt))
+        if line is None:
+            return
+        text = None
+        if 1 <= line <= len(self.source_lines):
+            text = self.source_lines[line - 1].strip()
+        if text:
+            self.emit(indent + f"; L{line}: {text}")
+        else:
+            self.emit(indent + f"; L{line}:")
 
     def _normalize_expr(self, expr):
         """Normalize parser-specific or placeholder nodes into our AST types.
@@ -2288,6 +2309,8 @@ class CodeGen:
 
     def _emit_stmt(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
         """Emit a single statement within a procedure."""
+        if self.annotate:
+            self._emit_source_line_comment(stmt, indent)
         if isinstance(stmt, ast.VarDecl):
             # VarDecl with initialization: emit code to initialize the variable
             if stmt.init_expr:
@@ -2852,6 +2875,8 @@ class CodeGen:
 
             self.emit(indent + f"bra {start_label}")
             self.emit(f"{end_label}:")
+            if self.annotate:
+                self.emit(indent + "; end while")
 
             # Pop loop context
             self.loop_stack.pop()
@@ -2921,6 +2946,8 @@ class CodeGen:
                 self.emit(f"{cont_label}:")
                 self.emit(indent + f"dbra d7,{start_label}")
                 self.emit(f"{end_label}:")
+                if self.annotate:
+                    self.emit(indent + "; end for")
                 self._dbra_loop_exit(indent, nested)
 
                 self.loop_stack.pop()
@@ -3014,6 +3041,8 @@ class CodeGen:
             # Jump back to loop start
             self.emit(indent + f"bra {start_label}")
             self.emit(f"{end_label}:")
+            if self.annotate:
+                self.emit(indent + "; end for")
 
             # Pop loop context
             self.loop_stack.pop()
@@ -3054,6 +3083,8 @@ class CodeGen:
             # dbra d7,start_label: decrement d7 and branch if not -1
             self.emit(indent + f"dbra d7,{start_label}")
             self.emit(f"{end_label}:")
+            if self.annotate:
+                self.emit(indent + "; end repeat")
             self._dbra_loop_exit(indent, nested)
 
             # Pop loop context

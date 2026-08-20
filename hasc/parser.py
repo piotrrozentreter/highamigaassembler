@@ -198,7 +198,22 @@ class ASTBuilder(Transformer):
     def __init__(self):
         self.print_debug = False
         self.const_values = {}
+        # Side-channel for --annotate: id(stmt_node) -> source line number.
+        # Populated opportunistically by statement-building methods decorated
+        # with @v_args(meta=True); coverage is best-effort (see _record_line).
+        self.node_lines = {}
         super().__init__()
+
+    def _record_line(self, node, meta):
+        """Best-effort: remember the source line a statement node came from.
+
+        Never raises; simply skips recording if meta has no line info.
+        """
+        if node is not None and not getattr(meta, 'empty', True):
+            line = getattr(meta, 'line', None)
+            if line is not None:
+                self.node_lines[id(node)] = line
+        return node
 
     def _val(self, item):
         # Token objects have .value; strings are already str
@@ -833,30 +848,34 @@ class ASTBuilder(Transformer):
         """macro_params: CNAME ("," CNAME)*"""
         return [self._val(item) for item in items]
 
-    def macro_call_stmt(self, items):
+    @v_args(meta=True)
+    def macro_call_stmt(self, meta, items):
         """macro_call_stmt: CNAME "(" [arglist] ")" ";" """
         name = self._val(items[0])
         args = []
         if len(items) > 1 and isinstance(items[1], list):
             args = items[1]
-        return ast.MacroCall(name=name, args=args)
+        return self._record_line(ast.MacroCall(name=name, args=args), meta)
 
-    def python_stmt(self, items):
+    @v_args(meta=True)
+    def python_stmt(self, meta, items):
         """python_stmt: "@python" STRING ";" """
         code = self._val(items[0])
         if isinstance(code, str) and code.startswith('"'):
             # STRING form - remove quotes
             code = code[1:-1]
-        return ast.PythonStmt(code=code)
+        return self._record_line(ast.PythonStmt(code=code), meta)
 
 
-    def var_decl(self, items):
+    @v_args(meta=True)
+    def var_decl(self, meta, items):
         name = self._val(items[0])
         vtype = self._val(items[1])
         init_expr = items[2] if len(items) > 2 else None
-        return ast.VarDecl(name=name, vtype=vtype, init_expr=init_expr)
+        return self._record_line(ast.VarDecl(name=name, vtype=vtype, init_expr=init_expr), meta)
 
-    def asm_stmt(self, items):
+    @v_args(meta=True)
+    def asm_stmt(self, meta, items):
         token = items[0]
         s = self._val(token)
         # Handle STRING form: quoted string
@@ -865,17 +884,19 @@ class ASTBuilder(Transformer):
                 s = s[1:-1]  # Strip quotes from STRING
             elif s.startswith('{BLOCK_') and s.endswith('}'):
                 s = s[1:-1]  # Strip braces from ASMBLOCK placeholder
-        return ast.AsmBlock(content=s)
+        return self._record_line(ast.AsmBlock(content=s), meta)
 
-    def assign_stmt(self, items):
+    @v_args(meta=True)
+    def assign_stmt(self, meta, items):
         # items: [lvalue, expr]
         lvalue_info = items[0]  # This is now a tuple from lvalue transformer
         expr = items[1]
         
         target, is_deref = lvalue_info
-        return ast.Assign(target=target, expr=expr, is_deref=is_deref)
+        return self._record_line(ast.Assign(target=target, expr=expr, is_deref=is_deref), meta)
     
-    def compound_assign_stmt(self, items):
+    @v_args(meta=True)
+    def compound_assign_stmt(self, meta, items):
         # items: [CNAME, PLUS_ASSIGN | MINUS_ASSIGN | ... , expr]
         # The middle item is a Token for one of the compound assignment operators
         if len(items) < 3:
@@ -900,7 +921,7 @@ class ASTBuilder(Transformer):
         else:
             op = str(op_item)
         expr = items[2]
-        return ast.CompoundAssign(target=target, op=op, expr=expr)
+        return self._record_line(ast.CompoundAssign(target=target, op=op, expr=expr), meta)
     
     def lvalue(self, items):
         # Simple variable: CNAME
@@ -966,18 +987,21 @@ class ASTBuilder(Transformer):
 
 
 
-    def return_stmt(self, items):
+    @v_args(meta=True)
+    def return_stmt(self, meta, items):
         # items[0] is the expression, or items may be empty for void return
         if items:
-            return ast.Return(expr=items[0])
+            return self._record_line(ast.Return(expr=items[0]), meta)
         else:
-            return ast.Return(expr=None)
+            return self._record_line(ast.Return(expr=None), meta)
 
-    def break_stmt(self, items):
-        return ast.Break()
+    @v_args(meta=True)
+    def break_stmt(self, meta, items):
+        return self._record_line(ast.Break(), meta)
 
-    def continue_stmt(self, items):
-        return ast.Continue()
+    @v_args(meta=True)
+    def continue_stmt(self, meta, items):
+        return self._record_line(ast.Continue(), meta)
 
 
     def stmt_block(self, items):
@@ -1011,29 +1035,34 @@ class ASTBuilder(Transformer):
             print(f"[DEBUG] stmt_or_block: output={[items[0]]}", file=sys.stderr)
         return [items[0]]
 
-    def if_stmt(self, items):
+    @v_args(meta=True)
+    def if_stmt(self, meta, items):
         cond = items[0]
         then_body = items[1] if len(items) > 1 else []
         else_body = items[2] if len(items) > 2 else None
-        return ast.If(cond=cond, then_body=then_body, else_body=else_body)
+        return self._record_line(ast.If(cond=cond, then_body=then_body, else_body=else_body), meta)
 
-    def while_stmt(self, items):
+    @v_args(meta=True)
+    def while_stmt(self, meta, items):
         cond = items[0]
         body = items[1] if len(items) > 1 else []
-        return ast.While(cond=cond, body=body)
+        return self._record_line(ast.While(cond=cond, body=body), meta)
 
-    def do_while_stmt(self, items):
+    @v_args(meta=True)
+    def do_while_stmt(self, meta, items):
         body = items[0] if len(items) > 0 else []
         cond = items[1] if len(items) > 1 else []
-        return ast.DoWhile(body=body, cond=cond)
+        return self._record_line(ast.DoWhile(body=body, cond=cond), meta)
 
-    def expr_stmt(self, items):
-        return ast.ExprStmt(expr=items[0])
+    @v_args(meta=True)
+    def expr_stmt(self, meta, items):
+        return self._record_line(ast.ExprStmt(expr=items[0]), meta)
 
     def add(self, items):
         return ast.BinOp(op='+', left=items[0], right=items[1])
 
-    def for_stmt(self, items):
+    @v_args(meta=True)
+    def for_stmt(self, meta, items):
         # for_stmt: "for" CNAME = expr "to" expr ["by" expr] stmt_or_block
         # items: [var_name, start_expr, end_expr, (optional: step_expr or None), body_stmts]
         var = self._val(items[0])
@@ -1053,7 +1082,7 @@ class ASTBuilder(Transformer):
         import sys
         if self.print_debug:
             print(f"[DEBUG] for_stmt: var={var} start={start} end={end} step={step} body={body}", file=sys.stderr)
-        return ast.ForLoop(var=var, start=start, end=end, step=step, body=body)
+        return self._record_line(ast.ForLoop(var=var, start=start, end=end, step=step, body=body), meta)
 
     def eq(self, items):
         return ast.BinOp(op='==', left=items[0], right=items[1])
@@ -1172,7 +1201,8 @@ class ASTBuilder(Transformer):
         value_expr = items[1]
         return ast.SetReg(register=reg_str, value=value_expr)
 
-    def call_stmt(self, items):
+    @v_args(meta=True)
+    def call_stmt(self, meta, items):
         # call form: CNAME, [arglist]
         import sys
         if self.print_debug:
@@ -1181,29 +1211,32 @@ class ASTBuilder(Transformer):
         args = items[1] if len(items) > 1 and isinstance(items[1], list) else []
         if self.print_debug:
             print(f"[DEBUG] call_stmt: name={name} args={args}", file=sys.stderr)
-        return ast.CallStmt(name=name, args=args)
+        return self._record_line(ast.CallStmt(name=name, args=args), meta)
 
     def arglist(self, items):
         return items
 
-    def push_stmt(self, items):
+    @v_args(meta=True)
+    def push_stmt(self, meta, items):
         # items[0] is a reglist Tree
         if hasattr(items[0], 'data') and items[0].data == 'reglist':
             regs = [self._val(r) for r in items[0].children]
         else:
             regs = items[0]  # Already processed
-        return ast.PushRegs(registers=regs)
+        return self._record_line(ast.PushRegs(registers=regs), meta)
 
-    def pop_stmt(self, items):
+    @v_args(meta=True)
+    def pop_stmt(self, meta, items):
         # No arguments needed
-        return ast.PopRegs()
+        return self._record_line(ast.PopRegs(), meta)
 
-    def repeat_stmt(self, items):
+    @v_args(meta=True)
+    def repeat_stmt(self, meta, items):
         # repeat_stmt: "repeat" expr stmt_block
         # items: [count_expr, body_stmts]
         count = items[0]
         body = items[1] if isinstance(items[1], list) else [items[1]]
-        return ast.RepeatLoop(count=count, body=body)
+        return self._record_line(ast.RepeatLoop(count=count, body=body), meta)
 
 
 # Add aliases for reserved keywords that can't be used as method names
@@ -1490,8 +1523,12 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
         inner = m.group(1)  # content between braces
         asm_blocks.append(inner)
         # Return a placeholder in the form asm {BLOCK_N} where N is the index
-        # Include a space before { so the lexer can tokenize properly
-        return f"asm {{BLOCK_{len(asm_blocks)-1}}}"
+        # Include a space before { so the lexer can tokenize properly.
+        # Pad with the same number of newlines the original match spanned so
+        # meta.line for everything after this block stays aligned with the
+        # original source (needed for --annotate and line-number diagnostics).
+        newlines = m.group(0).count("\n")
+        return f"asm {{BLOCK_{len(asm_blocks)-1}}}" + "\n" * newlines
     
     # Match 'asm' followed by whitespace and '{' ... '}' (non-greedy, with DOTALL to capture newlines)
     # The replacement will have a space before the brace so ASM_BLOCK can lex correctly
@@ -1502,7 +1539,9 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
     def _extract_python_block(m):
         inner = m.group(1)  # content between braces
         python_blocks.append(inner)
-        return f'@python "PYTHON_{len(python_blocks)-1}";'
+        # Same line-count-preserving padding as asm blocks above.
+        newlines = m.group(0).count("\n")
+        return f'@python "PYTHON_{len(python_blocks)-1}";' + "\n" * newlines
     
     # Match '@python' followed by '{' ... '}'
     text3 = re.sub(r"@python\s*\{(.*?)\}", _extract_python_block, text2, flags=re.S)
@@ -1672,6 +1711,7 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
                 ) from original
             raise SyntaxError(f"Constant expression error{const_prefix}: {original}") from original
         raise
+    module.node_lines = builder.node_lines
     
     # Step 3: Restore extracted blocks
     # Helper to restore placeholders in various node types

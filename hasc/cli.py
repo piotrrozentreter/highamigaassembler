@@ -51,6 +51,11 @@ def main(argv=None):
         action="store_true",
         help="Print kept/removed procedure report (implies --strip-unused-procs)",
     )
+    ap.add_argument(
+        "--annotate",
+        action="store_true",
+        help="Emit HAS source-line and loop-end comments in generated assembly (debug aid, no effect on generated instructions)",
+    )
     args = ap.parse_args(argv)
     target = TargetSpec.for_cpu(args.cpu)
 
@@ -138,7 +143,13 @@ def main(argv=None):
         print(f"Strip report kept: {kept}", file=sys.stderr)
         print(f"Strip report removed: {removed}", file=sys.stderr)
 
-    cg = codegen.CodeGen(mod, target)
+    cg = codegen.CodeGen(
+        mod,
+        target,
+        node_lines=getattr(mod, "node_lines", None),
+        source_lines=src.splitlines(),
+        annotate=args.annotate,
+    )
     try:
         asm = cg.gen()
     except codegen.CodeGenError as e:
