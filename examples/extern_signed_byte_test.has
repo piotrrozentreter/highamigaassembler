@@ -1,0 +1,39 @@
+// Demonstrates that "extern var name: i8;" declarations are now sign-extended
+// on load (instead of always zero-extended, which was the pre-existing bug).
+//
+// Compile with:
+//   python -m hasc.cli examples/extern_signed_byte_test.has --cpu 68000 -o out.s
+//   python -m hasc.cli examples/extern_signed_byte_test.has --cpu 68020 -o out.s
+//
+// This only validates codegen (vasm assembly), not linking - the extern symbol
+// is left unresolved (XREF), consistent with other extern-var examples.
+
+code main:
+    extern var signedExternByte: i8;
+    extern var unsignedExternByte: u8;
+
+    proc check_signed() -> int {
+        // expect (68020): "extb.l"
+        // expect (68000): "ext.w" + "ext.l"
+        if (signedExternByte < 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    proc check_unsigned() -> int {
+        // expect: "andi.l #$FF" (zero-extend, unaffected by this fix)
+        if (unsignedExternByte < 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    proc main() -> int {
+        var result: int;
+        result = check_signed();
+        result = check_unsigned();
+        return result;
+    }
+
+    asm { jmp main }

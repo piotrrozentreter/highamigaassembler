@@ -1,0 +1,46 @@
+// Realistic game scenario for the typed signed global fix: a per-frame
+// horizontal velocity ("dx") stored as a global signed byte. Before the fix,
+// ANY global/extern byte (legacy ".b" suffix or the new typed form) was
+// always zero-extended on load, so a negative velocity like -3 (0xFD) would
+// have been read back as +253 and the "moving left" branch below would
+// never have been taken - silently breaking leftward movement.
+//
+// Compile with:
+//   python -m hasc.cli examples/games/signed_global_velocity_demo.has --cpu 68000 -o out.s
+//   python -m hasc.cli examples/games/signed_global_velocity_demo.has --cpu 68020 -o out.s
+
+data velocity_globals:
+    dx: i8 = 0xFD   // -3 as a signed byte: move 3 pixels per frame to the left
+
+bss player_state:
+    pos_x.l: 1      // current on-screen X position (kept as a long, as in launchers.has)
+    moved_left.l: 1 // 1 if the last update moved the player left, else 0
+
+code main:
+    // Applies one frame of horizontal movement using the signed velocity.
+    proc update_position() -> int
+    {
+        pos_x = pos_x + dx;
+
+        // expect (68020): "extb.l" (sign-extend dx before the compare)
+        // expect (68000): "ext.w" + "ext.l"
+        if (dx < 0)
+        {
+            moved_left = 1;
+            return -1;
+        }
+
+        moved_left = 0;
+        return 0;
+    }
+
+    proc main() -> int
+    {
+        pos_x = 100;
+        moved_left = 0;
+
+        // expect: pos_x becomes 97, moved_left becomes 1 (leftward move detected)
+        return update_position();
+    }
+
+    asm { jmp main }

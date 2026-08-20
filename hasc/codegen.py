@@ -229,18 +229,21 @@ class CodeGen:
         return constants
 
     def _build_globals(self, module: ast.Module):
+        # Value shape: {'size': 'b'|'w'|'l', 'signed': bool}. 'signed' is only True for
+        # the opt-in "name: type = value" typed form (ast.GlobalVarDecl.signed); the
+        # legacy ".b"/".w"/".l" suffix form always yields signed=False (unchanged behavior).
         globals_map = {}
         for item in module.items:
             if isinstance(item, ast.DataSection) or isinstance(item, ast.BssSection):
                 for var in item.variables:
                     if isinstance(var, ast.StructVarDecl):
-                        globals_map[var.name] = 'l'  # default width when used as scalar
+                        globals_map[var.name] = {'size': 'l', 'signed': False}  # default width when used as scalar
                     else:
                         # Prioritize size_suffix over size (size is byte count, size_suffix is 'b'/'w'/'l')
                         size = var.size_suffix if hasattr(var, 'size_suffix') and var.size_suffix else (var.size if var.size else 'l')
                         if size not in ('b', 'w', 'l'):
                             size = 'l'
-                        globals_map[var.name] = size
+                        globals_map[var.name] = {'size': size, 'signed': getattr(var, 'signed', False)}
         return globals_map
 
     def _build_struct_info(self, module: ast.Module):
@@ -275,7 +278,10 @@ class CodeGen:
         return info
 
     def _build_extern_vars(self, module: ast.Module):
-        """Collect extern variable declarations with their sizes."""
+        """Collect extern variable declarations with their sizes and signedness.
+        Value shape: {'size': 'b'|'w'|'l', 'signed': bool}, derived from ast.is_signed()
+        on the declared signature string (defaults to unsigned when unrecognized/absent,
+        matching prior zero-extend-only behavior)."""
         extern_vars = {}
         for item in module.items:
             if isinstance(item, ast.CodeSection):
@@ -283,22 +289,26 @@ class CodeGen:
                     if isinstance(code_item, ast.ExternDecl) and code_item.kind == 'var':
                         # Extract size from signature if available (e.g., "u8", "int", etc.)
                         size = 'l'  # default to long
+                        signed = False
                         if code_item.signature:
                             sig = code_item.signature
                             if sig in ('u8', 'i8', 'byte', 'UBYTE', 'BYTE'):
                                 size = 'b'
                             elif sig in ('u16', 'i16', 'word', 'UWORD', 'WORD'):
                                 size = 'w'
-                        extern_vars[code_item.name] = size
+                            signed = ast.is_signed(sig)
+                        extern_vars[code_item.name] = {'size': size, 'signed': signed}
             elif isinstance(item, ast.ExternDecl) and item.kind == 'var':
                 size = 'l'
+                signed = False
                 if item.signature:
                     sig = item.signature
                     if sig in ('u8', 'i8', 'byte', 'UBYTE', 'BYTE'):
                         size = 'b'
                     elif sig in ('u16', 'i16', 'word', 'UWORD', 'WORD'):
                         size = 'w'
-                extern_vars[item.name] = size
+                    signed = ast.is_signed(sig)
+                extern_vars[item.name] = {'size': size, 'signed': signed}
         return extern_vars
 
     def _build_extern_funcs(self, module: ast.Module):
@@ -915,35 +925,55 @@ class CodeGen:
 
             # Check globals (moved outside param_obj block so globals are checked even if not a parameter)
             if name in self.globals:
-                size = self.globals.get(name, 'l')
+                ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                size = ginfo['size']
+                signed = ginfo['signed']
                 suffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(size, '.l')
                 if suffix == '.b':
-                    return [
-                        f"    move.b {name},{reg_left}",
-                        f"    andi.l #$FF,{reg_left}"
-                    ]
+                    code = [f"    move.b {name},{reg_left}"]
+                    if signed:
+                        if self.target.supports_extb_l:
+                            code.append(f"    extb.l {reg_left}")
+                        else:
+                            code.append(f"    ext.w {reg_left}")
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        code.append(f"    andi.l #$FF,{reg_left}")
+                    return code
                 elif suffix == '.w':
-                    return [
-                        f"    move.w {name},{reg_left}",
-                        f"    andi.l #$FFFF,{reg_left}"
-                    ]
+                    code = [f"    move.w {name},{reg_left}"]
+                    if signed:
+                        code.append(f"    ext.l {reg_left}")
+                    else:
+                        code.append(f"    andi.l #$FFFF,{reg_left}")
+                    return code
                 else:
                     return [f"    move.l {name},{reg_left}"]
 
             # Check extern vars
             if name in self.extern_vars:
-                size = self.extern_vars.get(name, 'l')
+                einfo = self.extern_vars.get(name, {'size': 'l', 'signed': False})
+                size = einfo['size']
+                signed = einfo['signed']
                 suffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(size, '.l')
                 if suffix == '.b':
-                    return [
-                        f"    move.b {name},{reg_left}",
-                        f"    andi.l #$FF,{reg_left}"
-                    ]
+                    code = [f"    move.b {name},{reg_left}"]
+                    if signed:
+                        if self.target.supports_extb_l:
+                            code.append(f"    extb.l {reg_left}")
+                        else:
+                            code.append(f"    ext.w {reg_left}")
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        code.append(f"    andi.l #$FF,{reg_left}")
+                    return code
                 elif suffix == '.w':
-                    return [
-                        f"    move.w {name},{reg_left}",
-                        f"    andi.l #$FFFF,{reg_left}"
-                    ]
+                    code = [f"    move.w {name},{reg_left}"]
+                    if signed:
+                        code.append(f"    ext.l {reg_left}")
+                    else:
+                        code.append(f"    andi.l #$FFFF,{reg_left}")
+                    return code
                 else:
                     return [f"    move.l {name},{reg_left}"]
 
@@ -1430,12 +1460,24 @@ class CodeGen:
                             self._fail(f"Unresolved stack parameter '{name}' in post-increment expression")
                 elif name in self.globals:
                     # Global variable post-increment
-                    gsize = self.globals.get(name, 'l')
+                    ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                    gsize, gsigned = ginfo['size'], ginfo['signed']
                     gsuffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(gsize, '.l')
-                    # Load current value into reg_left (zero-extend for < long)
-                    if gsuffix in ('.b', '.w'):
-                        code.append(f"    clr.l {reg_left}")
-                    code.append(f"    move{gsuffix} {name},{reg_left}")
+                    # Load current value into reg_left (sign-extend when signed, else legacy zero-extend)
+                    if gsuffix in ('.b', '.w') and gsigned:
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
+                        if gsuffix == '.b':
+                            if self.target.supports_extb_l:
+                                code.append(f"    extb.l {reg_left}")
+                            else:
+                                code.append(f"    ext.w {reg_left}")
+                                code.append(f"    ext.l {reg_left}")
+                        else:
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        if gsuffix in ('.b', '.w'):
+                            code.append(f"    clr.l {reg_left}")
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
                     # Increment stored value
                     code.append(f"    add{gsuffix} #1,{name}")
                 elif name in self.extern_vars:
@@ -1483,12 +1525,24 @@ class CodeGen:
                             self._fail(f"Unresolved stack parameter '{name}' in post-decrement expression")
                 elif name in self.globals:
                     # Global variable post-decrement
-                    gsize = self.globals.get(name, 'l')
+                    ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                    gsize, gsigned = ginfo['size'], ginfo['signed']
                     gsuffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(gsize, '.l')
-                    # Load current value into reg_left (zero-extend for < long)
-                    if gsuffix in ('.b', '.w'):
-                        code.append(f"    clr.l {reg_left}")
-                    code.append(f"    move{gsuffix} {name},{reg_left}")
+                    # Load current value into reg_left (sign-extend when signed, else legacy zero-extend)
+                    if gsuffix in ('.b', '.w') and gsigned:
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
+                        if gsuffix == '.b':
+                            if self.target.supports_extb_l:
+                                code.append(f"    extb.l {reg_left}")
+                            else:
+                                code.append(f"    ext.w {reg_left}")
+                                code.append(f"    ext.l {reg_left}")
+                        else:
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        if gsuffix in ('.b', '.w'):
+                            code.append(f"    clr.l {reg_left}")
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
                     # Decrement stored value
                     code.append(f"    sub{gsuffix} #1,{name}")
                 elif name in self.extern_vars:
@@ -1535,13 +1589,25 @@ class CodeGen:
                             self._fail(f"Unresolved stack parameter '{name}' in pre-increment expression")
                 elif name in self.globals:
                     # Global variable pre-increment
-                    gsize = self.globals.get(name, 'l')
+                    ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                    gsize, gsigned = ginfo['size'], ginfo['signed']
                     gsuffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(gsize, '.l')
                     code.append(f"    add{gsuffix} #1,{name}")
-                    # Load new value into reg_left (zero-extend for < long)
-                    if gsuffix in ('.b', '.w'):
-                        code.append(f"    clr.l {reg_left}")
-                    code.append(f"    move{gsuffix} {name},{reg_left}")
+                    # Load new value into reg_left (sign-extend when signed, else legacy zero-extend)
+                    if gsuffix in ('.b', '.w') and gsigned:
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
+                        if gsuffix == '.b':
+                            if self.target.supports_extb_l:
+                                code.append(f"    extb.l {reg_left}")
+                            else:
+                                code.append(f"    ext.w {reg_left}")
+                                code.append(f"    ext.l {reg_left}")
+                        else:
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        if gsuffix in ('.b', '.w'):
+                            code.append(f"    clr.l {reg_left}")
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
                 elif name in self.extern_vars:
                     code.append(f"    add.l #1,{name}")
                     code.append(f"    move.l {name},{reg_left}")
@@ -1585,13 +1651,25 @@ class CodeGen:
                             self._fail(f"Unresolved stack parameter '{name}' in pre-decrement expression")
                 elif name in self.globals:
                     # Global variable pre-decrement
-                    gsize = self.globals.get(name, 'l')
+                    ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                    gsize, gsigned = ginfo['size'], ginfo['signed']
                     gsuffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(gsize, '.l')
                     code.append(f"    sub{gsuffix} #1,{name}")
-                    # Load new value into reg_left (zero-extend for < long)
-                    if gsuffix in ('.b', '.w'):
-                        code.append(f"    clr.l {reg_left}")
-                    code.append(f"    move{gsuffix} {name},{reg_left}")
+                    # Load new value into reg_left (sign-extend when signed, else legacy zero-extend)
+                    if gsuffix in ('.b', '.w') and gsigned:
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
+                        if gsuffix == '.b':
+                            if self.target.supports_extb_l:
+                                code.append(f"    extb.l {reg_left}")
+                            else:
+                                code.append(f"    ext.w {reg_left}")
+                                code.append(f"    ext.l {reg_left}")
+                        else:
+                            code.append(f"    ext.l {reg_left}")
+                    else:
+                        if gsuffix in ('.b', '.w'):
+                            code.append(f"    clr.l {reg_left}")
+                        code.append(f"    move{gsuffix} {name},{reg_left}")
                 elif name in self.extern_vars:
                     code.append(f"    sub.l #1,{name}")
                     code.append(f"    move.l {name},{reg_left}")
@@ -1757,9 +1835,21 @@ class CodeGen:
             # Globals (data/bss) come next
             if name in self.globals:
                 # Push the VALUE of the global, never its address unless explicitly using '&'
-                gsize = self.globals.get(name, 'l')
+                ginfo = self.globals.get(name, {'size': 'l', 'signed': False})
+                gsize, gsigned = ginfo['size'], ginfo['signed']
                 gsuffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(gsize, '.l')
-                if gsuffix in ('.b', '.w'):
+                if gsuffix in ('.b', '.w') and gsigned:
+                    lines.append(f"{indent}move{gsuffix} {name},d0")
+                    if gsuffix == '.b':
+                        if self.target.supports_extb_l:
+                            lines.append(f"{indent}extb.l d0")
+                        else:
+                            lines.append(f"{indent}ext.w d0")
+                            lines.append(f"{indent}ext.l d0")
+                    else:
+                        lines.append(f"{indent}ext.l d0")
+                    lines.append(f"{indent}move.l d0,-(a7)")
+                elif gsuffix in ('.b', '.w'):
                     lines.append(f"{indent}clr.l d0")
                     lines.append(f"{indent}move{gsuffix} {name},d0")
                     lines.append(f"{indent}move.l d0,-(a7)")
@@ -1768,9 +1858,21 @@ class CodeGen:
                 return lines
             # Extern variables (xref)
             if name in self.extern_vars:
-                esize = self.extern_vars.get(name, 'l')
+                einfo = self.extern_vars.get(name, {'size': 'l', 'signed': False})
+                esize, esigned = einfo['size'], einfo['signed']
                 esuffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(esize, '.l')
-                if esuffix in ('.b', '.w'):
+                if esuffix in ('.b', '.w') and esigned:
+                    lines.append(f"{indent}move{esuffix} {name},d0")
+                    if esuffix == '.b':
+                        if self.target.supports_extb_l:
+                            lines.append(f"{indent}extb.l d0")
+                        else:
+                            lines.append(f"{indent}ext.w d0")
+                            lines.append(f"{indent}ext.l d0")
+                    else:
+                        lines.append(f"{indent}ext.l d0")
+                    lines.append(f"{indent}move.l d0,-(a7)")
+                elif esuffix in ('.b', '.w'):
                     lines.append(f"{indent}clr.l d0")
                     lines.append(f"{indent}move{esuffix} {name},d0")
                     lines.append(f"{indent}move.l d0,-(a7)")
@@ -2542,7 +2644,7 @@ class CodeGen:
                     else:
                         # Global or extern variable assignment
                         if isinstance(target_name, str) and target_name in self.globals:
-                            size_code = self.globals.get(target_name, 'l')
+                            size_code = self.globals.get(target_name, {'size': 'l', 'signed': False})['size']
                             suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(size_code, '.l')
                             # OPTIMIZATION: For simple constants, emit size-appropriate move directly
                             if isinstance(stmt.expr, ast.Number):
@@ -2554,7 +2656,7 @@ class CodeGen:
                                         self.emit(sub if sub.startswith(indent) else indent + sub)
                                 self.emit(indent + f"move{suffix} d0,{target_name}")
                         elif isinstance(target_name, str) and target_name in self.extern_vars:
-                            size_code = self.extern_vars.get(target_name, 'l')
+                            size_code = self.extern_vars.get(target_name, {'size': 'l', 'signed': False})['size']
                             suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(size_code, '.l')
                             code = self._emit_expr(stmt.expr, params, locals_info, "d0", frame_reg=frame_reg)
                             for l in code:
@@ -3002,7 +3104,7 @@ class CodeGen:
                         else:
                             self._fail(f"Unresolved stack parameter '{name}' in increment/decrement statement")
                 elif name in self.globals:
-                    gsize = self.globals.get(name, 'l')
+                    gsize = self.globals.get(name, {'size': 'l', 'signed': False})['size']
                     gsuffix = {'b': '.b', 'w': '.w', 'l': '.l'}.get(gsize, '.l')
                     code.append(f"    {op}{gsuffix} #1,{name}")
                 elif name in self.extern_vars:
