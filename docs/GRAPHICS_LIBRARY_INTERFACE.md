@@ -86,7 +86,7 @@ vlink -bamigahunk -o my_program my_program.o graphics.o
 - **mode 0**: 320x256 resolution, 32 colors (5 bitplanes)
 - **mode 1**: 640x256 resolution, 16 colors (4 bitplanes, hires)
 - **mode 2**: 320x256 resolution, HAM6 (6 bitplanes, single-buffered)
-- Returns 0 on success, -1 on error (including when the mode's screen buffer was disabled at assembly time - see [Opt-in Memory Savings](#opt-in-memory-savings-disabling-unused-screen-buffers) below)
+- Returns 0 on success, -1 on error (including when the mode's screen buffer or copper list was disabled at assembly time - see [Opt-in Memory Savings](#opt-in-memory-savings-disabling-unused-screen-buffers-and-copper-lists) below)
 
 ```has
 var result: int = SetGraphicsMode(0);  // 320x256x32
@@ -250,11 +250,11 @@ greeting:
     }
 ```
 
-## Opt-in Memory Savings: Disabling Unused Screen Buffers
+## Opt-in Memory Savings: Disabling Unused Screen Buffers and Copper Lists
 
 By default, `lib/graphics.s` reserves chip-RAM screen buffers for all three
 supported graphics modes in its `screen` `bss_c` section (~327,680 bytes
-total):
+total) and emits the mode-specific copper lists in the `copper` section.
 
 | Mode | Buffers | Size each | Total |
 |------|---------|-----------|-------|
@@ -269,6 +269,10 @@ more of these constants when assembling `lib/graphics.s` with vasm:
 - `DISABLE_320x256` - drops the lores mode 0 buffers (`gfx_screen1`, `gfx_screen2`)
 - `DISABLE_640x256` - drops the hires mode 1 buffers (`gfx_screen1_hires`, `gfx_screen2_hires`)
 - `DISABLE_HAM` - drops the HAM6 mode 2 buffer (`gfx_screen1_ham6`)
+
+Each flag also omits that mode's copper list and its palette, bitplane-pointer,
+and sprite-pointer entries. The copper-list labels remain defined as inert
+placeholders, so code still assembles and links when a mode is disabled.
 
 ```bash
 # Only using lores mode 0: drop hires and HAM6 buffers to save ~225,280 bytes

@@ -15,6 +15,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     saves ~225,280 of the baseline 327,680 bytes reserved by the `screen`
     section when only lores mode is used. Any combination of the three may be
     defined.
+  - The same flags also omit the corresponding mode-specific copper list,
+    including its palette and pointer entries, while retaining all copper-list
+    labels for assembly and linking compatibility.
   - The buffer labels always stay defined regardless of which defines are
     set, so unrelated code in `graphics.s` still assembles/links; a disabled
     buffer shrinks to a 2-byte placeholder rather than 0 bytes, since an
@@ -24,7 +27,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     disabled at assembly time, returning its existing `d0 = -1` error code
     instead of running against the shrunk placeholder buffer. Callers must
     still check the return value (or avoid calling a disabled mode).
-  - See [docs/GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#opt-in-memory-savings-disabling-unused-screen-buffers).
+  - See [docs/GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#opt-in-memory-savings-disabling-unused-screen-buffers-and-copper-lists).
 
 ## [0.9.5] - 2026-08-19
 

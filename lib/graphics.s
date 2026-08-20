@@ -654,6 +654,7 @@ gfx_init_sprites:
     lea.l gfx_null_sprite,a0
     move.l a0,d0
     
+    ifnd DISABLE_320x256
     ; Initialize lores copper list sprite pointers
     lea.l gfx_sprcop_lores,a1
     addq.l #2,a1        ; Skip to value word
@@ -667,7 +668,9 @@ gfx_init_sprites:
     move.w d1,(a1)      ; Low word
     addq.l #4,a1
     dbf d2,.init_lores_loop
+    endif
     
+    ifnd DISABLE_640x256
     ; Initialize hires copper list sprite pointers
     lea.l gfx_sprcop_hires,a1
     addq.l #2,a1        ; Skip to value word
@@ -681,6 +684,7 @@ gfx_init_sprites:
     move.w d1,(a1)      ; Low word
     addq.l #4,a1
     dbf d2,.init_hires_loop
+    endif
     
     ; Write null sprite pointers to hardware registers as well
     lea $120(a5),a2     ; SPR0PTH
@@ -1218,6 +1222,7 @@ gfx_current_mode:
     SECTION copper,DATA_C
 
 gfx_copperlist_lores:
+    ifnd DISABLE_320x256
     ; Copper list for 320x256x32 mode with 32-color palette
     dc.w $1807,$fffe  ; Wait for vertical position $22
 
@@ -1288,8 +1293,16 @@ gfx_sprcop_lores:
     dc.w SPR7PTL,0
 
     dc.w $FFFF,$FFFE
+    else
+    ds.b 2
+gfx_bplcop_lores:
+    ds.b 2
+gfx_sprcop_lores:
+    ds.b 2
+    endif
 
 gfx_copperlist_hires:
+    ifnd DISABLE_640x256
     ; Copper list for 640x256x16 mode with 16-color palette
     dc.w $1807,$fffe  ; Wait for vertical position $22
 
@@ -1342,9 +1355,17 @@ gfx_sprcop_hires:
     dc.w SPR7PTL,0
     
     dc.w $FFFF,$FFFE
+    else
+    ds.b 2
+gfx_bplcop_hires:
+    ds.b 2
+gfx_sprcop_hires:
+    ds.b 2
+    endif
 
 ; HAM6 Copper list (320x256 with 6 bitplanes and HAM mode)
 gfx_copperlist_ham6:
+    ifnd DISABLE_HAM
     dc.w $1807,$fffe  ; Wait for vertical position $22
 
     ; HAM6 palette (16 base colors)
@@ -1399,6 +1420,13 @@ gfx_sprcop_ham6:
     dc.w SPR7PTH,0
     dc.w SPR7PTL,0
     dc.w $FFFF,$FFFE
+    else
+    ds.b 2
+gfx_bplcop_ham6:
+    ds.b 2
+gfx_sprcop_ham6:
+    ds.b 2
+    endif
 
 ; Null sprite (invisible sprite for unused slots)
 ; Must be in chip RAM
@@ -1406,7 +1434,8 @@ gfx_null_sprite:
     dc.w $0000,$0000    ; Control words: VSTART=0, VSTOP=0 (invisible)
     dc.w $0000,$0000    ; Terminator
 
-; Screen buffers
+; Screen buffers and copper lists are grouped by mode and use the same
+; DISABLE_* flags, so an unused mode does not reserve either resource.
 ; Define DISABLE_320x256 / DISABLE_640x256 / DISABLE_HAM (e.g. via
 ; `vasmm68k_mot -D DISABLE_640x256=1 ...`) to omit the chip RAM buffers for
 ; modes not used by the application. Labels always stay defined so unrelated
