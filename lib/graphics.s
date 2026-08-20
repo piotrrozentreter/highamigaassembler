@@ -374,6 +374,9 @@ _SetGraphicsMode:
     bra .mode_320x256_ham6     ; Mode 2 = 320x256 HAM6
 
 .mode_320x256:
+    ifd DISABLE_320x256
+    bra .error          ; buffer was shrunk at assembly time; refuse this mode at runtime
+    endif
     move.w #%0000000111100000,DMACON(a5)    ; Disable selected DMA
     move.w #0,FMODE(a5)                      ; AGA fetch mode off (ECS-compatible 16-bit fetch)
     move.w #$0C00,BPLCON3(a5)                ; Default ECS/AGA compatibility state
@@ -399,6 +402,9 @@ _SetGraphicsMode:
     bra .success
 
 .mode_640x256:
+    ifd DISABLE_640x256
+    bra .error          ; buffer was shrunk at assembly time; refuse this mode at runtime
+    endif
     move.w #%0000000111100000,DMACON(a5)    ; Disable selected DMA
     move.w #0,FMODE(a5)                      ; AGA fetch mode off (ECS-compatible 16-bit fetch)
     move.w #$0C00,BPLCON3(a5)                ; Default ECS/AGA compatibility state
@@ -428,6 +434,9 @@ _SetGraphicsMode:
     bra .success
 
 .mode_320x256_ham6:
+    ifd DISABLE_HAM
+    bra .error          ; buffer was shrunk at assembly time; refuse this mode at runtime
+    endif
     move.w #%0000000111100000,DMACON(a5)    ; Disable selected DMA
     move.w #0,FMODE(a5)                      ; AGA fetch mode off (use classic HAM6 timings)
     move.w #$0C00,BPLCON3(a5)                ; Default ECS/AGA compatibility state
@@ -1398,24 +1407,53 @@ gfx_null_sprite:
     dc.w $0000,$0000    ; Terminator
 
 ; Screen buffers
+; Define DISABLE_320x256 / DISABLE_640x256 / DISABLE_HAM (e.g. via
+; `vasmm68k_mot -D DISABLE_640x256=1 ...`) to omit the chip RAM buffers for
+; modes not used by the application. Labels always stay defined so unrelated
+; code referencing them still assembles; a disabled buffer only reserves a
+; 2-byte placeholder (must stay >0 or the bss_c section becomes empty and
+; crashes vlink when all three constants are combined - do not change back to
+; ds.b 0). SetGraphicsMode() also refuses (returns -1) any mode whose define
+; is set, so a disabled mode can no longer be selected at runtime and corrupt
+; the shrunk buffer.
     SECTION screen,bss_c
 
 gfx_screen1:
+    ifnd DISABLE_320x256
     ds.b 320*256/8*5
+    else
+    ds.b 2
+    endif
     even
 
 gfx_screen2:
+    ifnd DISABLE_320x256
     ds.b 320*256/8*5
+    else
+    ds.b 2
+    endif
     even
 
 gfx_screen1_hires:
+    ifnd DISABLE_640x256
     ds.b 640*256/8*4
+    else
+    ds.b 2
+    endif
     even
 
 gfx_screen2_hires:
+    ifnd DISABLE_640x256
     ds.b 640*256/8*4
+    else
+    ds.b 2
+    endif
     even
 
 gfx_screen1_ham6:
+    ifnd DISABLE_HAM
     ds.b 320*256/8*6
+    else
+    ds.b 2
+    endif
     even

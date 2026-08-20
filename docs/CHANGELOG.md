@@ -2,6 +2,30 @@
 
 All notable changes to the HAS (High Assembler) project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Opt-in memory savings for unused graphics modes** in `lib/graphics.s`:
+  - Three new assembly-time defines - `DISABLE_320x256`, `DISABLE_640x256`,
+    `DISABLE_HAM` - let apps that only use a subset of the three supported
+    graphics modes (lores 320x256x32, hires 640x256x16, HAM6 320x256) skip
+    reserving the corresponding chip-RAM screen buffer(s), e.g.:
+    `vasmm68k_mot -Fhunk -D DISABLE_640x256=1 -D DISABLE_HAM=1 -o graphics.o lib/graphics.s`
+    saves ~225,280 of the baseline 327,680 bytes reserved by the `screen`
+    section when only lores mode is used. Any combination of the three may be
+    defined.
+  - The buffer labels always stay defined regardless of which defines are
+    set, so unrelated code in `graphics.s` still assembles/links; a disabled
+    buffer shrinks to a 2-byte placeholder rather than 0 bytes, since an
+    entirely empty `bss_c` `screen` section previously crashed `vlink`
+    (V0.17a) with an access violation.
+  - `SetGraphicsMode()` now refuses to activate a mode whose buffer was
+    disabled at assembly time, returning its existing `d0 = -1` error code
+    instead of running against the shrunk placeholder buffer. Callers must
+    still check the return value (or avoid calling a disabled mode).
+  - See [docs/GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#opt-in-memory-savings-disabling-unused-screen-buffers).
+
 ## [0.9.5] - 2026-08-19
 
 ### Fixed

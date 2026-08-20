@@ -85,7 +85,8 @@ vlink -bamigahunk -o my_program my_program.o graphics.o
 #### SetGraphicsMode(mode: int) -> int
 - **mode 0**: 320x256 resolution, 32 colors (5 bitplanes)
 - **mode 1**: 640x256 resolution, 16 colors (4 bitplanes, hires)
-- Returns 0 on success, -1 on error
+- **mode 2**: 320x256 resolution, HAM6 (6 bitplanes, single-buffered)
+- Returns 0 on success, -1 on error (including when the mode's screen buffer was disabled at assembly time - see [Opt-in Memory Savings](#opt-in-memory-savings-disabling-unused-screen-buffers) below)
 
 ```has
 var result: int = SetGraphicsMode(0);  // 320x256x32
@@ -248,6 +249,54 @@ greeting:
         return 0;
     }
 ```
+
+## Opt-in Memory Savings: Disabling Unused Screen Buffers
+
+By default, `lib/graphics.s` reserves chip-RAM screen buffers for all three
+supported graphics modes in its `screen` `bss_c` section (~327,680 bytes
+total):
+
+| Mode | Buffers | Size each | Total |
+|------|---------|-----------|-------|
+| 0 - lores 320x256x32 | `gfx_screen1`, `gfx_screen2` | 51,200 bytes | 102,400 bytes |
+| 1 - hires 640x256x16 | `gfx_screen1_hires`, `gfx_screen2_hires` | 81,920 bytes | 163,840 bytes |
+| 2 - HAM6 320x256 | `gfx_screen1_ham6` (single-buffered) | 61,440 bytes | 61,440 bytes |
+
+If your application only calls `SetGraphicsMode()` with a subset of these
+modes, you can opt out of reserving the unused buffers by defining one or
+more of these constants when assembling `lib/graphics.s` with vasm:
+
+- `DISABLE_320x256` - drops the lores mode 0 buffers (`gfx_screen1`, `gfx_screen2`)
+- `DISABLE_640x256` - drops the hires mode 1 buffers (`gfx_screen1_hires`, `gfx_screen2_hires`)
+- `DISABLE_HAM` - drops the HAM6 mode 2 buffer (`gfx_screen1_ham6`)
+
+```bash
+# Only using lores mode 0: drop hires and HAM6 buffers to save ~225,280 bytes
+vasmm68k_mot -Fhunk -D DISABLE_640x256=1 -D DISABLE_HAM=1 -o graphics.o lib/graphics.s
+```
+
+Any combination of the three can be defined. Defining all three shrinks the
+entire `screen` section down to a small placeholder.
+
+**Safety guarantees:**
+
+- The buffer labels (`gfx_screen1`, `gfx_screen2`, `gfx_screen1_hires`,
+  `gfx_screen2_hires`, `gfx_screen1_ham6`) always stay defined regardless of
+  which `DISABLE_*` constants are set, so other code in `graphics.s` that
+  references them still assembles and links normally.
+- `SetGraphicsMode()` refuses to activate a mode whose buffer was disabled at
+  assembly time: it returns `d0 = -1` (its existing error code) instead of
+  proceeding to use the shrunk placeholder buffer. Callers must still check
+  the return value (or simply avoid calling a disabled mode) - the guard
+  prevents memory corruption, but it does not make calling a disabled mode
+  meaningful.
+
+**Placeholder caveat:** a disabled buffer is not shrunk to `ds.b 0` - it
+reserves a 2-byte placeholder instead. Assembling with all three constants
+defined previously produced a fully empty `bss_c` `screen` section, which
+crashed `vlink` (V0.17a) with an access violation. Reserving a tiny 2-byte
+placeholder per disabled buffer avoids that linker defect while still saving
+nearly all of the chip RAM.
 
 ## Important Notes
 
