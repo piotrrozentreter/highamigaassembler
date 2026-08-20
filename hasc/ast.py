@@ -120,6 +120,7 @@ class GlobalVarDecl:
     dimensions: Optional[List[Union[int, str]]] = None  # [size] for 1D, [size1, size2] for 2D, etc.
     values: Optional[List[Any]] = None      # For data arrays: list of initial values
     size_suffix: Optional[str] = None       # 'b', 'w', 'l' - element size for bss arrays/vars
+    signed: bool = False  # True only for the opt-in "name: type = value" typed form (see data_var_typed)
 
 
 @dataclass

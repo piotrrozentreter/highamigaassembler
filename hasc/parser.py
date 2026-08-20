@@ -58,6 +58,8 @@ data_section: "data" CNAME ":" data_item* -> data_section
 ?data_item: data_var | struct_data_var | const_decl_nosemi
 data_var: CNAME [SIZE_SUFFIX] array_dims? "=" data_value_list
     | CNAME [SIZE_SUFFIX] array_dims? -> data_var_uninit
+    | CNAME ":" CNAME array_dims? "=" data_value_list -> data_var_typed
+    | CNAME ":" CNAME array_dims? -> data_var_typed_uninit
 array_dims: ("[" (NUMBER | CNAME) "]")+
 data_value_list: data_value ("," data_value)*
 data_value: NUMBER | STRING | "{" data_init_list "}"
@@ -576,6 +578,85 @@ class ASTBuilder(Transformer):
             dimensions=dimensions,
             values=None,
             size_suffix=size_suffix
+        )
+
+    def data_var_typed(self, items):
+        # Opt-in "name: type = value" form (e.g. "signedVar: i8 = 0xFB;").
+        # Derives size/signedness from the type name via ast.type_size()/ast.is_signed()
+        # instead of a bare SIZE_SUFFIX; the legacy ".b"/".w"/".l" form is untouched.
+        items = [item for item in items if item is not None]
+        name = self._val(items[0])
+        type_name = self._val(items[1])
+        size_suffix = ast.size_suffix(ast.type_size(type_name))[1:]
+        signed = ast.is_signed(type_name)
+        idx = 2
+        is_array = False
+        dimensions = None
+        values = None
+        value = None
+
+        # NOTE: array_dims and data_value_list are both plain Python lists here, and
+        # lark's Token is a str subclass, so checking for "(int, str)" would wrongly
+        # match a data_value_list of NUMBER tokens too. Match data_var's own convention
+        # (isinstance(..., int) only) to disambiguate - named-const array dims aren't
+        # supported for this form either, same pre-existing limitation as data_var.
+        if idx < len(items) and isinstance(items[idx], list) and items[idx] and isinstance(items[idx][0], int):
+            is_array = True
+            dimensions = items[idx]
+            idx += 1
+
+        if idx < len(items):
+            val_list = items[idx] if isinstance(items[idx], list) else [items[idx]]
+            parsed_values = []
+            for val in val_list:
+                if isinstance(val, list):
+                    parsed_values.extend(val)
+                elif hasattr(val, 'type') and val.type == 'STRING':
+                    str_val = self._val(val)
+                    parsed_values.append(str_val[1:-1] if str_val.startswith('"') else str_val)
+                else:
+                    parsed_values.append(self._parse_number(self._val(val)))
+            if len(parsed_values) == 1:
+                value = parsed_values[0]
+            else:
+                values = parsed_values
+                if not is_array and values is not None:
+                    is_array = True
+                    dimensions = [len(values)]
+
+        return ast.GlobalVarDecl(
+            name=name,
+            value=value,
+            size=size_suffix,
+            is_array=is_array,
+            dimensions=dimensions,
+            values=values,
+            size_suffix=size_suffix,
+            signed=signed
+        )
+
+    def data_var_typed_uninit(self, items):
+        # Opt-in "name: type;" uninitialized form - defaults to zero, same as data_var_uninit.
+        items = [item for item in items if item is not None]
+        name = self._val(items[0])
+        type_name = self._val(items[1])
+        size_suffix = ast.size_suffix(ast.type_size(type_name))[1:]
+        signed = ast.is_signed(type_name)
+        is_array = False
+        dimensions = None
+        idx = 2
+        if len(items) > idx and isinstance(items[idx], list):
+            is_array = True
+            dimensions = items[idx]
+        return ast.GlobalVarDecl(
+            name=name,
+            value=0,
+            size=size_suffix,
+            is_array=is_array,
+            dimensions=dimensions,
+            values=None,
+            size_suffix=size_suffix,
+            signed=signed
         )
 
     def struct_field(self, items):

@@ -1,0 +1,41 @@
+// Demonstrates the opt-in "name: type = value" typed global syntax for the
+// DATA section, which lets a signed byte global be sign-extended on load
+// (instead of always zero-extended like the legacy ".b"/".w"/".l" suffix form).
+//
+// Compile with:
+//   python -m hasc.cli examples/global_signed_byte_test.has --cpu 68000 -o out.s
+//   python -m hasc.cli examples/global_signed_byte_test.has --cpu 68020 -o out.s
+//
+// 0xFB is the two's-complement byte pattern for -5. The legacy ".b" suffix
+// form would zero-extend this to 251; the typed "i8" form sign-extends it to -5.
+
+data globals:
+    signedGlobal: i8 = 0xFB   // -5 as a signed byte
+    legacyGlobal.b = 0xFB     // same bit pattern, legacy unsigned-suffix form (unchanged behavior)
+
+code main:
+    proc check_signed() -> int {
+        // expect (68020): "extb.l"
+        // expect (68000): "ext.w" + "ext.l"
+        if (signedGlobal < 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    proc check_legacy() -> int {
+        // expect: "andi.l #$FF" (zero-extend, unaffected by this fix)
+        if (legacyGlobal < 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    proc main() -> int {
+        var result: int;
+        result = check_signed();
+        result = check_legacy();
+        return result;
+    }
+
+    asm { jmp main }

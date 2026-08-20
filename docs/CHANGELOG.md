@@ -6,6 +6,23 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Fixed
 
+- **Signed byte/word global and extern variables are now sign-extended on load**:
+  - Previously, loading a `data`/`bss` section global or an `extern var` byte
+    or word into a register always zero-extended it (`andi.l #$FF`/`#$FFFF`),
+    regardless of its declared signedness - so a negative value like `-3`
+    (`0xFD`) would read back as `253`, silently breaking comparisons/arithmetic
+    that depended on the sign (e.g. `if (dx < 0)`).
+  - `extern var name: i8;` / `word`/`i16`-typed extern declarations now
+    correctly emit `extb.l` (on `--cpu 68020`) or `ext.w`+`ext.l` (on
+    `--cpu 68000`) instead of zero-extending.
+  - Added an opt-in typed global declaration syntax for `data`/`bss` sections,
+    `name: i8 = value;` (also `byte`/`i16`/`word`/etc.), which sign-extends on
+    load. The legacy `name.b = value;` / `name.w = value;` suffix syntax is
+    unchanged and still zero-extends (existing examples compile to identical
+    assembly).
+  - See `examples/global_signed_byte_test.has`, `examples/extern_signed_byte_test.has`,
+    and `examples/games/signed_global_velocity_demo.has`.
+
 - **`MirrorBobHorizontally` no longer requires `--add-word`** in `lib/bob.s`:
   - Previously always subtracted 16px from the source data-header width,
     assuming every BOB was built with the `--add-word` blitter-scroll padding
