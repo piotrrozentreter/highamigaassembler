@@ -1,0 +1,35 @@
+// Phase 4 (68020 targeted instruction substitution) demonstration.
+//
+// Compile with:
+//   python -m hasc.cli examples/cpu68020_extb_sign_extend.has --cpu 68020 -o out.s
+//   python -m hasc.cli examples/cpu68020_extb_sign_extend.has --cpu 68000 -o out.s
+//
+// Unlike the 32-bit muldiv example, this is a pure codegen optimization with
+// no compile-time restriction difference between targets - both CPUs compile
+// this file successfully. On 68020, reading a signed `byte` local/parameter
+// into a 32-bit register uses the single `extb.l` instruction. On 68000,
+// the same sign extension still requires the two-instruction `ext.w`+`ext.l`
+// sequence, because `extb.l` is 68020-exclusive.
+
+code main:
+    proc byte_param_extend(v: byte) -> int {
+        // expect (68020): "extb.l"
+        // expect (68000): "ext.w" + "ext.l"
+        return v * 2;
+    }
+
+    proc byte_local_extend() -> int {
+        var b: byte = -10;
+        // expect (68020): "extb.l"
+        // expect (68000): "ext.w" + "ext.l"
+        return b + 100;
+    }
+
+    proc main() -> int {
+        var result: int;
+        result = byte_param_extend(-5);
+        result = byte_local_extend();
+        return result;
+    }
+
+    asm { jmp main }

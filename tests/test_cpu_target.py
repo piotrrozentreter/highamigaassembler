@@ -88,9 +88,13 @@ def test_target_spec_is_conservative_for_both_supported_cpus():
     assert not baseline.supports_scaled_index
     assert not baseline.supports_full_index_extension
     assert not baseline.supports_memory_indirect
+    assert not baseline.supports_32bit_muldiv
     assert target_68020.supports_scaled_index
     assert target_68020.supports_full_index_extension
     assert not target_68020.supports_memory_indirect
+    assert target_68020.supports_32bit_muldiv
+    assert not baseline.supports_extb_l
+    assert target_68020.supports_extb_l
 
 
 def test_cli_rejects_unknown_cpu(tmp_path):

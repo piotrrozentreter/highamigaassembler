@@ -1,0 +1,38 @@
+// Phase 4 (68020 native 32-bit multiply/divide/modulo) demonstration.
+//
+// Compile with:
+//   python -m hasc.cli examples/cpu68020_32bit_arithmetic.has --cpu 68020 -o out.s
+//   python -m hasc.cli examples/cpu68020_32bit_arithmetic.has --cpu 68000 -o out.s
+//
+// On 68000, `*`/`/`/`%` are lowered to 16-bit-operand `muls.w`/`divs.w`
+// sequences, so any operand outside the signed 16-bit range (-32768..32767)
+// is a hard compile-time error. On 68020, native `muls.l`/`divsl.l` support
+// full 32-bit operands - the constant below (100000) exceeds the 16-bit
+// range on purpose, so this file only compiles successfully with --cpu 68020.
+
+code main:
+    proc scale_large(value: int) -> int {
+        // expect (68020): "muls.l" emitted, no ext.l preamble, compiles cleanly
+        // expect (68000): compile error - "outside signed 16-bit range"
+        return value * 100000;
+    }
+
+    proc divide_large(value: int) -> int {
+        // expect (68020): "divsl.l" emitted with a scratch remainder register
+        return value / 100000;
+    }
+
+    proc modulo_large(value: int) -> int {
+        // expect (68020): "divsl.l" emitted, remainder moved into the result register
+        return value % 100000;
+    }
+
+    proc main() -> int {
+        var result: int;
+        result = scale_large(7);
+        result = divide_large(result);
+        result = modulo_large(result);
+        return result;
+    }
+
+    asm { jmp main }

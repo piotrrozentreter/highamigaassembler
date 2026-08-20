@@ -44,7 +44,7 @@ def test_scaled_index_can_include_a_displacement():
     ) == ([], "(a0,d1.l*8)")
 
 
-BRIEF_ONLY_68020 = TargetSpec(CpuTarget.M68020, True, False, False)
+BRIEF_ONLY_68020 = TargetSpec(CpuTarget.M68020, True, False, False, True, True)
 
 
 def test_scaled_displacement_requires_brief_index_range_without_full_extension():

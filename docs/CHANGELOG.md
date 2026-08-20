@@ -118,6 +118,40 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     full-extension support. This is a correctness guard and does not change
     behavior for existing callers.
 
+- **Native 32-bit `muls.l`/`divsl.l` for `*`, `/`, `%` on `--cpu 68020`** (Phase 4
+  of `docs/CPU_68020_IMPLEMENTATION_PLAN.md`):
+  - `TargetSpec.supports_32bit_muldiv` (`hasc/target.py`) is `True` only for
+    `--cpu 68020`. When set, `*`/`/`/`%` on `int`/`long` operands in
+    `hasc/codegen.py` now emit a single `muls.l` (multiply) or `divsl.l`
+    (divide/modulo, with the remainder captured directly from the paired
+    64-bit result register pair) instead of the 68000-only 16-bit-operand
+    sequences (`ext.l`+`ext.l`+`muls.w` for multiply; `ext.l`+`divs.w`+`ext.l`
+    for divide; `ext.l`+`divs.w`+`swap`+`ext.l` for modulo).
+  - **Behavior change on `--cpu 68020` only**: HAS has always required
+    multiply/divide/modulo constant operands to fit the signed 16-bit range
+    (`-32768..32767`) because the underlying 68000 instructions are
+    16-bit-operand only; this restriction is unchanged on `--cpu 68000` (the
+    default). Under `--cpu 68020`, this compile-time restriction is now
+    **lifted** for `*`, `/`, `%`: full 32-bit constant and runtime operands
+    are supported natively, matching what users would expect from a 32-bit
+    `int`/`long` type. This is a genuine capability upgrade for 68020 users,
+    not just a speed optimization.
+  - Division/modulo by a constant `0` remains a compile-time error on both
+    targets. See `tests/test_codegen_68020_arithmetic.py`.
+
+- **Native `extb.l` for signed byte-to-long sign extension on `--cpu 68020`**
+  (Phase 4 of `docs/CPU_68020_IMPLEMENTATION_PLAN.md`):
+  - `TargetSpec.supports_extb_l` (`hasc/target.py`) is `True` only for
+    `--cpu 68020`. When set, the two codegen call sites in `hasc/codegen.py`
+    that sign-extend a signed `byte` local variable load and a signed
+    `byte` stack-parameter load now emit a single `extb.l` instead of the
+    68000 two-instruction `ext.w`+`ext.l` sequence.
+  - This is a pure optimization: unlike the `muls.l`/`divsl.l` change above,
+    there is no compile-time-restriction difference between targets. The
+    same signed-byte-arithmetic source compiles successfully under both
+    `--cpu 68000` and `--cpu 68020`; only the emitted instruction count
+    differs. See `examples/cpu68020_extb_sign_extend.has`.
+
 - **Bare-metal millisecond delay via CIA-A hardware timer**:
   - Added `lib/timer.s` with `WaitMs(ms: int) -> void`, a busy-wait driven by
     CIA-A Timer A one-shot loads on the PAL E-clock (709379 Hz), chained in

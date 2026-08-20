@@ -95,6 +95,13 @@ class CodeGen:
                 f"{side} operand cannot be proven safe at compile time."
             )
 
+    def _muldiv_remainder_reg(self, reg_left: str, reg_right: str) -> str:
+        """Pick a scratch data register for DIVSL.L remainder capture, distinct from the operand registers."""
+        for candidate in ("d2", "d3", "d4", "d5", "d6"):
+            if candidate != reg_left and candidate != reg_right:
+                return candidate
+        raise CodeGenError("Unable to allocate scratch register for 32-bit divide remainder.")
+
     def _is_unsigned_expr(self, expr, locals_info, params=None) -> bool:
         """Best-effort check if expr should be treated as unsigned for comparisons.
         Uses declared local/parameter types (u8/u16/u32/UBYTE/UWORD/ULONG).
@@ -829,8 +836,11 @@ class CodeGen:
                     # 8-bit load with sign/zero extension based on type
                     code.append(f"    move.b {-offset}({frame_reg}),{reg_left}")
                     if vtype and ast.is_signed(vtype):
-                        code.append(f"    ext.w {reg_left}")
-                        code.append(f"    ext.l {reg_left}")
+                        if self.target.supports_extb_l:
+                            code.append(f"    extb.l {reg_left}")
+                        else:
+                            code.append(f"    ext.w {reg_left}")
+                            code.append(f"    ext.l {reg_left}")
                     else:
                         code.append(f"    andi.l #$FF,{reg_left}")
                     return code
@@ -873,6 +883,11 @@ class CodeGen:
                             # Byte parameter packed in low byte of pushed long.
                             # Use signed/unsigned extension based on declared type.
                             if param_type and ast.is_signed(param_type):
+                                if self.target.supports_extb_l:
+                                    return [
+                                        f"    move.l {off}(a6),{reg_left}",
+                                        f"    extb.l {reg_left}"
+                                    ]
                                 return [
                                     f"    move.l {off}(a6),{reg_left}",
                                     f"    ext.w {reg_left}",
@@ -1127,31 +1142,46 @@ class CodeGen:
             elif expr.op == '-':
                 code.append(f"    sub.l {reg_right},{reg_left}")
             elif expr.op == '*':
-                # Use signed 16x16 -> 32 multiply for int arithmetic on 68000
-                # Assumes operands fit in 16 bits; result in reg_left (32-bit)
-                self._require_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
-                self._require_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
-                code.append(f"    ext.l {reg_left}  ; normalize to signed 16-bit source semantics")
-                code.append(f"    ext.l {reg_right}  ; normalize to signed 16-bit source semantics")
-                code.append(f"    muls.w {reg_right},{reg_left}")
+                if self.target.supports_32bit_muldiv:
+                    # 68020 native 32x32 -> 32 signed multiply; no 16-bit range limit.
+                    code.append(f"    muls.l {reg_right},{reg_left}")
+                else:
+                    # Use signed 16x16 -> 32 multiply for int arithmetic on 68000
+                    # Assumes operands fit in 16 bits; result in reg_left (32-bit)
+                    self._require_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
+                    self._require_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
+                    code.append(f"    ext.l {reg_left}  ; normalize to signed 16-bit source semantics")
+                    code.append(f"    ext.l {reg_right}  ; normalize to signed 16-bit source semantics")
+                    code.append(f"    muls.w {reg_right},{reg_left}")
             elif expr.op == '/':
-                # Use DIVS.W for signed division. Do not rewrite to ASR for powers
-                # of two because ASR rounds negative values differently than DIVS.
-                self._require_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Division by zero constant in expression.")
-                code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
-                code.append(f"    divs.w {reg_right},{reg_left}")
-                code.append(f"    ext.l {reg_left}  ; isolate quotient and clear remainder word")
+                if self.target.supports_32bit_muldiv:
+                    # 68020 native 32/32 -> 32 signed divide; no 16-bit range limit.
+                    rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
+                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, quotient in {reg_left}")
+                else:
+                    # Use DIVS.W for signed division. Do not rewrite to ASR for powers
+                    # of two because ASR rounds negative values differently than DIVS.
+                    self._require_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
+                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    code.append(f"    divs.w {reg_right},{reg_left}")
+                    code.append(f"    ext.l {reg_left}  ; isolate quotient and clear remainder word")
             elif expr.op == '%':
-                # Modulo - after divs.w, remainder is in upper word
-                self._require_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Modulo by zero constant in expression.")
-                code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
-                code.append(f"    divs.w {reg_right},{reg_left}")
-                code.append(f"    swap {reg_left}  ; get remainder")
-                code.append(f"    ext.l {reg_left}  ; sign-extend")
+                if self.target.supports_32bit_muldiv:
+                    # 68020 native 32/32 -> 32 signed divide; remainder captured directly.
+                    rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
+                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, remainder in {rem_reg}")
+                    code.append(f"    move.l {rem_reg},{reg_left}  ; result = remainder")
+                else:
+                    # Modulo - after divs.w, remainder is in upper word
+                    self._require_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
+                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    code.append(f"    divs.w {reg_right},{reg_left}")
+                    code.append(f"    swap {reg_left}  ; get remainder")
+                    code.append(f"    ext.l {reg_left}  ; sign-extend")
             elif expr.op == '==':
                 # Equal: result is 1 if equal, 0 if not
                 code.append(f"    cmp.l {reg_right},{reg_left}")
