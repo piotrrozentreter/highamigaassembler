@@ -1,0 +1,32 @@
+// dos_hello.has
+// Minimal non-bare-metal AmigaDOS CLI example using lib/dos.s.
+// Opens dos.library, prints a greeting and a number, then returns to the OS.
+
+#include "includes/dos_defs.has";
+
+code main:
+    // Execution starts HERE (first instruction)
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        var status: int;
+
+        status = InitDOS();
+        if (status != 0) {
+            return -1;
+        }
+
+        call PrintOut(&hello_msg);
+        call PrintNum(42);
+        call PrintOut(&trailing_msg);
+
+        call CloseDOS();
+        return 0;
+    }
+
+data dos_hello_data:
+    hello_msg.b = "Hello from HAS DOS!",10,"The answer is: ",0
+    trailing_msg.b = 10,"Goodbye!",10,0

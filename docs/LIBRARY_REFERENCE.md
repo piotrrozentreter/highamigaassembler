@@ -25,6 +25,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `keyboard.s`      | Keyboard interrupt driver                 | this file                                            |
 | `takeover.s`      | Amiga OS takeover/release                 | this file                                            |
 | `fileio.s`        | AmigaDOS file I/O wrappers                | [FILE_IO_LIBRARY.md](FILE_IO_LIBRARY.md)             |
+| `dos.s`           | AmigaDOS CLI stdout output (text/numbers) | [DOS_LIBRARY.md](DOS_LIBRARY.md)                     |
 | `trackio.s`       | DOS-free raw floppy loader                | [TRACKIO_LIBRARY.md](TRACKIO_LIBRARY.md)             |
 | `ptplayer.s`      | ProTracker 2.3B music player              | this file                                            |
 | `font8x8.s`       | 8×8 pixel bitmap font data               | used via `SetFont` in `graphics.s`                   |

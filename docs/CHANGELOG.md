@@ -6,6 +6,24 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **AmigaDOS CLI output library (`lib/dos.s`)** for non-bare-metal AmigaDOS
+  CLI tools written in HAS:
+  - `InitDOS() -> int` - opens `dos.library` and caches its base plus the
+    current CLI/Workbench stdout handle (via DOS `Output()`); idempotent.
+  - `CloseDOS() -> int` - closes the cached `dos.library` base; idempotent.
+  - `PrintOut(msg: ptr) -> int` - writes a NUL-terminated string to stdout.
+  - `PrintOutLen(msg: ptr, length: int) -> int` - writes exactly `length`
+    bytes without scanning for a NUL.
+  - `PrintNum(value: int) -> int` - formats a signed 32-bit decimal (no
+    trailing newline) and writes it to stdout.
+  - Independent of `lib/fileio.s` and `lib/debug.s` (each caches its own
+    `dos.library` base separately, per existing convention); same
+    takeover/`TakeSystem()` safety rule as `lib/fileio.s` applies.
+  - Registered in `scripts/build_example.sh` (`LIB_SOURCES`/`ORDERED_LIBS`).
+  - New runtime example: `examples/dos_hello.has`, with declarations in
+    `examples/includes/dos_defs.has`.
+  - See [DOS_LIBRARY.md](DOS_LIBRARY.md).
+
 - **`SetTextMode(mode: int) -> int`** graphics library function (`lib/graphics.s`)
   to toggle opaque (`1`) vs transparent (`0`, default) text background
   rendering for `Print`/`Text`, backed by new `gfx_text_mode` state read by
