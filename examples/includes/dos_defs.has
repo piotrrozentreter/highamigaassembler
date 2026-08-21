@@ -1,0 +1,9 @@
+// HAS <-> lib/dos.s interop declarations.
+// Minimal AmigaDOS CLI stdout helpers (dos.library Output()/Write()).
+
+extern func InitDOS() -> int;
+extern func CloseDOS() -> int;
+
+extern func PrintOut(msg: ptr) -> int;
+extern func PrintOutLen(msg: ptr, length: int) -> int;
+extern func PrintNum(value: int) -> int;
