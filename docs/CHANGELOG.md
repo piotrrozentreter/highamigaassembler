@@ -6,6 +6,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`SetTextMode(mode: int) -> int`** graphics library function (`lib/graphics.s`)
+  to toggle opaque (`1`) vs transparent (`0`, default) text background
+  rendering for `Print`/`Text`, backed by new `gfx_text_mode` state read by
+  `_DrawChar`. See [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#settextmodemode-int---int).
+
 - **`#if IDENT OP EXPR` preprocessor directive**, usable alongside
   `#ifdef`/`#ifndef`/`#else`/`#endif`:
   - `IDENT` must be a previously-defined `const`; `EXPR` is evaluated with the

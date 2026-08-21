@@ -80,6 +80,7 @@ extern func LoadPalette(palette_ptr: ptr, num_colors: int) -> int;
 extern func ShowPicture(picture_addr: ptr) -> int;
 extern func Text(x: int, y: int, msg: ptr, color: int) -> int;
 extern func Print(msg: ptr, color: int) -> int;
+extern func SetTextMode(mode: int) -> int;
 
 extern func StrLen(s: ptr) -> int;
 extern func StrCmp(a: ptr, b: ptr) -> int;

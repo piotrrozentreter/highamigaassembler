@@ -947,6 +947,13 @@ call SetFont(fonts);
 
 Each character is stored as 8 consecutive bytes (one byte per row, 8 pixels wide). The table covers ASCII 32–127. Character index is `(char_code * 8)` bytes from the start of the `fonts` label.
 
+`graphics.s` also exports `SetTextMode(mode: int) -> int`, which controls how `Print`/`Text` render each 8×8 glyph cell:
+
+- **mode 0** (default): transparent text - only glyph foreground pixels are drawn; background pixels are left untouched.
+- **mode 1**: opaque text - the glyph's 8×8 cell background is cleared to color 0 (all bitplanes) before the foreground is drawn.
+
+State is kept in the word variable `gfx_text_mode` (default `0`) and read by `_DrawChar`, so the setting applies to both `Print` and `Text` without changing their signatures. See [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#setTextModemode-int---int) for the full API entry.
+
 ---
 
 ## See also

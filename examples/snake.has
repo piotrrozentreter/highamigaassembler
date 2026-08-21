@@ -65,6 +65,7 @@ extern func WaitVBlank()               -> void;
 extern func SetColor(id: int, col: int) -> int;
 extern func SetFont(ptr: int)          -> int;
 extern func Text(x: int, y: int, msg: int, color: int) -> int;
+extern func SetTextMode(mode: int)     -> int;
 extern func DrawBox(x: int, y: int, w: int, h: int, bg: int, border: int) -> int;
 extern func TakeSystem()               -> void;
 extern func ReleaseSystem()            -> void;
