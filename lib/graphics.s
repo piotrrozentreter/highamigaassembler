@@ -49,6 +49,7 @@ WAITBLIT:MACRO
     XDEF ClearScreen
     XDEF SetPixel
     XDEF SetFont
+    XDEF SetTextMode
     XDEF Print
     XDEF Text
     XDEF gfx_current_mode
@@ -359,6 +360,26 @@ SetFont:
     link a6,#0
     move.l 8(a6),d0
     move.l d0,gfx_font_ptr
+    moveq #0,d0
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: SetTextMode
+; Input: 8(a6)=mode
+; Output: d0=0
+; Description: Selects transparent (0) or opaque (1) text rendering.
+; Notes: Any nonzero mode value is normalized to 1. Stored in gfx_text_mode
+;    and consumed by _DrawChar's glyph background-clearing step.
+; -----------------------------------------------------------------------------
+SetTextMode:
+    link a6,#0
+    move.l 8(a6),d0
+    tst.l d0
+    beq.s .stm_store
+    moveq #1,d0
+.stm_store:
+    move.w d0,gfx_text_mode
     moveq #0,d0
     unlk a6
     rts
@@ -1091,12 +1112,21 @@ _DrawChar:
     mulu d1,d2          ; d2 = plane * width_bytes (40)
     add.l d2,a4         ; a4 = address for this plane/row/column
 
-    ; Clear current glyph footprint from this plane
+    ; Clear current glyph footprint from this plane (transparent) or the
+    ; whole cell (opaque), selected by gfx_text_mode. d0 (font byte) must
+    ; survive both paths for the OR step below.
+    tst.w gfx_text_mode
+    bne.s .dc_clear_opaque
     move.b (a4),d6
     move.b d0,d2
     not.b d2
     and.b d2,d6
     move.b d6,(a4)
+    bra.s .dc_clear_done
+.dc_clear_opaque:
+    moveq #0,d6
+    move.b d6,(a4)
+.dc_clear_done:
 
     ; Test whether this plane should be set for the requested color
     move.l 4(sp),d2     ; Color was saved at 4(sp) offset
@@ -1257,6 +1287,9 @@ gfx_text_cursor_y:
 ;Current graphics mode (0=320x256x32, 1=640x256x16)
 gfx_current_mode:
     dc.w 0  ; Current graphics mode
+
+gfx_text_mode:
+    dc.w 0  ; Text rendering mode (0=transparent, 1=opaque)
     
 
 

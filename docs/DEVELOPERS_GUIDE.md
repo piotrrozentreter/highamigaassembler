@@ -1039,10 +1039,41 @@ const MODE = 0;
 #endif
 ```
 
-- `#ifdef NAME` is true only when `const NAME` exists and its folded value equals `1`.
+- `#ifdef NAME` is true whenever `const NAME` is defined, regardless of its
+  value (so `const NAME = 0;` still counts as defined).
 - `#ifndef NAME` is true when `NAME` is not defined.
 - `#else` selects the opposite branch within the current conditional block.
 - `#endif` closes the current conditional block.
+
+`#if IDENT OP EXPR` compares a previously-defined `const` against a
+constant expression, evaluated with the same evaluator used for `const`
+declarations (arithmetic and parentheses are supported):
+
+```has
+const API_VERSION = 3;
+
+#if API_VERSION >= 3
+const USE_NEW_API = 1;
+#else
+const USE_NEW_API = 0;
+#endif
+
+const RETRY_LIMIT = 5;
+
+#if RETRY_LIMIT > (2+2)
+#warning "Retry limit is higher than the recommended default";
+#endif
+```
+
+- Supported operators: `==` (or its alias `=`), `!=` (or its alias `<>`),
+  `>`, `<`, `>=`, `<=`.
+- `IDENT` must be a `const` defined earlier in the file; referencing an
+  undefined identifier is a compile error, *unless* the `#if` itself is
+  inside an already-inactive/dead branch, in which case the condition is
+  not evaluated at all (matching `#ifdef`/`#ifndef`/`#include` behavior in
+  dead code).
+- `#if` frames nest freely with `#ifdef`/`#ifndef`, and support `#else`/`#endif`
+  the same way.
 
 ---
 

@@ -10,6 +10,7 @@ code main:
     extern func SetPixel(x: int, y: int, color: int) -> int;
     extern func Text(x: int, y: int, msg: int, color: int) -> int;  // msg is pointer
     extern func Print(msg: int, color: int) -> int;                  // msg is pointer
+    extern func SetTextMode(mode: int) -> int;
     extern func SwapScreen() -> int;
     extern func UpdateCopperList() -> int;
     

@@ -8,6 +8,15 @@ const DEBUG_ENABLED = 0;
 const DEBUG_ENABLED = 1;
 #endif
 
+// #if IDENT OP EXPR: comparison-based gating against a previously-defined const.
+const API_VERSION = 3;
+
+#if API_VERSION >= 3
+const USE_NEW_API = 1;
+#else
+const USE_NEW_API = 0;
+#endif
+
 code conditional_demo:
 #ifdef BUILD_FAST
     proc selected_mode() -> int {
@@ -20,6 +29,6 @@ code conditional_demo:
 #endif
 
     proc main() -> int {
-        // Returns 1 for fast mode + optional debug flag.
-        return selected_mode() + DEBUG_ENABLED;
+        // Returns 1 for fast mode + optional debug flag + new-API flag.
+        return selected_mode() + DEBUG_ENABLED + USE_NEW_API;
     }

@@ -35,6 +35,7 @@ code main:
     extern func SwapScreen() -> int;
     extern func UpdateCopperList() -> int;
     extern func SetFont(font_ptr: int) -> int;
+    extern func SetTextMode(mode: int) -> int;
     extern func SetColor(idx: int, value: int) -> int;
     extern func ToRGB(r: int, g: int, b: int) -> int;
 ```
@@ -162,6 +163,18 @@ Prints text at specific character coordinates (not pixel coordinates).
 
 ```has
 call Text(10, 5, msg_ptr, 31);  // Print at column 10, row 5
+```
+
+#### SetTextMode(mode: int) -> int
+Controls whether `Print`/`Text` draw glyphs transparently or with an opaque background.
+- **mode 0** (default): transparent - only the glyph foreground pixels are drawn; existing background pixels in the 8x8 cell are left untouched.
+- **mode 1**: opaque - the entire 8x8 glyph cell background is cleared to color 0 (across all bitplanes) before the glyph foreground is drawn.
+
+```has
+// Draw HUD text with a solid background, then restore default transparent text
+call SetTextMode(1);
+call Text(0, 0, hud_msg_ptr, 31);
+call SetTextMode(0);
 ```
 
 ### Color Functions

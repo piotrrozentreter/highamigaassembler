@@ -6,6 +6,33 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`SetTextMode(mode: int) -> int`** graphics library function (`lib/graphics.s`)
+  to toggle opaque (`1`) vs transparent (`0`, default) text background
+  rendering for `Print`/`Text`, backed by new `gfx_text_mode` state read by
+  `_DrawChar`. See [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md#settextmodemode-int---int).
+
+- **`#if IDENT OP EXPR` preprocessor directive**, usable alongside
+  `#ifdef`/`#ifndef`/`#else`/`#endif`:
+  - `IDENT` must be a previously-defined `const`; `EXPR` is evaluated with the
+    same constant-expression evaluator used for `const` declarations
+    (arithmetic and parentheses supported), e.g. `#if VAL >= (2+3)`.
+  - Supported operators: `==` (alias `=`), `!=` (alias `<>`), `>`, `<`, `>=`, `<=`.
+  - Referencing an undefined `IDENT` is a compile error unless the `#if` is
+    itself inside an already-inactive/dead branch, matching the existing
+    dead-branch behavior of `#ifdef`/`#ifndef`/`#include`.
+  - `#if` frames nest and interoperate freely with `#ifdef`/`#ifndef`.
+  - See [docs/DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#directives).
+
+### Fixed
+
+- **`#ifdef NAME` no longer requires the constant's value to equal `1`**:
+  - Previously `#ifdef NAME` incorrectly returned false for any defined
+    `const NAME` whose folded value was not exactly `1` (e.g. `const NAME = 0;`
+    was treated as "not defined"). It now correctly returns true whenever
+    `NAME` is a defined constant, regardless of its value.
+  - `#ifndef NAME` is unaffected in intent (true when not defined) but now
+    correctly mirrors the fixed `#ifdef` check.
+
 - **Assembly output metadata preamble and configurable build statistics**:
   - Generated assembly now starts with a HAS preamble comment containing
     compiler version and build timestamp metadata.

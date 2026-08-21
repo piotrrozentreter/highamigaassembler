@@ -28,6 +28,7 @@ extern func LoadPalette(palette_ptr: ptr, num_colors: int) -> int;
 extern func ShowPicture(picture_addr: ptr) -> int;
 extern func Text(x: int, y: int, msg: ptr, color: int) -> int;  // msg is pointer
 extern func Print(msg: ptr, color: int) -> int;                  // msg is pointer
+extern func SetTextMode(mode: int) -> int;
 
 // String utilities from lib/str.s
 extern func StrLen(s: ptr) -> int;

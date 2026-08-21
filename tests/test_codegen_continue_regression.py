@@ -75,7 +75,7 @@ def _assert_continue_branch_skips_tail(
 def test_continue_single_level_for_early_continue():
     src = """
 bss vars:
-    arr.l: 8
+    arr.l[8]
 
 code test:
     proc single_level() -> int {
