@@ -132,16 +132,49 @@ for lib in "${LIB_SOURCES[@]}"; do
     )
 done
 
-mapfile -t EXTERN_SYMBOLS < <(
-    grep -Eio '^[[:space:]]*extern[[:space:]]+(func|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$SRC" \
-        | sed -E 's/^[[:space:]]*[eE][xX][tT][eE][rR][nN][[:space:]]+([fF][uU][nN][cC]|[vV][aA][rR])[[:space:]]+//' \
-        | sort -u
-)
+declare -A EXTERN_SYMBOLS=()
+declare -A SEEN_FILES=()
+
+collect_extern_symbols() {
+    local file="$1"
+    local resolved="$file"
+
+    [[ -n "${SEEN_FILES[$resolved]:-}" ]] && return
+    SEEN_FILES["$resolved"]=1
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*#include[[:space:]]*\"([^\"]+)\" ]]; then
+            local include_path="${BASH_REMATCH[1]}"
+            local include_file
+            if [[ "$include_path" == /* ]]; then
+                include_file="$include_path"
+            else
+                include_file="$(dirname "$resolved")/$include_path"
+            fi
+            if [[ -f "$include_file" ]]; then
+                collect_extern_symbols "$include_file"
+            elif [[ -f "$ROOT/$include_path" ]]; then
+                collect_extern_symbols "$ROOT/$include_path"
+            fi
+        fi
+    done < "$file"
+
+    while IFS= read -r sym; do
+        [[ -n "$sym" ]] || continue
+        [[ "$sym" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        EXTERN_SYMBOLS["$sym"]=1
+    done < <(
+        grep -Eio '^[[:space:]]*extern[[:space:]]+(func|var)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$file" \
+            | sed -E 's/^[[:space:]]*[eE][xX][tT][eE][rR][nN][[:space:]]+([fF][uU][nN][cC]|[vV][aA][rR])[[:space:]]+//' \
+            | sort -u
+    )
+}
+
+collect_extern_symbols "$SRC"
 
 # Resolve libraries directly from extern symbols.
 declare -A WANT_LIB=()
-for sym in "${EXTERN_SYMBOLS[@]}"; do
-    [[ "$sym" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+for sym in "${!EXTERN_SYMBOLS[@]}"; do
     lib="${SYM_TO_LIB[$sym]:-}"
     if [[ -n "$lib" ]]; then
         WANT_LIB["$lib"]=1
