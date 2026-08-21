@@ -1,0 +1,20 @@
+// Macro without parameters in asm
+macro clear_registers() {
+    asm "clr.l d0";
+    asm "clr.l d1";
+}
+
+// Macro with parameter expansion in HAS code (not asm)
+macro add_values(x, y, result) {
+    result = x + y;  // Parameters substituted in HAS expression
+}
+
+code test:
+    proc main() -> int {
+        clear_registers();           // No parameters
+        var a: int = 10;
+        var b: int = 20;
+        var sum: int = 0;
+        add_values(a, b, sum);       // Expands: sum = a + b;
+        return sum;
+    }

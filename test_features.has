@@ -1,0 +1,14 @@
+const MAX_SIZE = 100;
+const SIZE_WITH_FLOAT = 2.5;
+
+data test:
+    value = 42
+
+code feature_test:
+    proc main() -> int {
+        var x: byte = 10;
+        var y: word = 1000;
+        var z: int = 42;
+        
+        return z;
+    }

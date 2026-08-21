@@ -28,6 +28,13 @@ GFX_SPACE_CODE       EQU 32               ; Input byte used for a space
 GFX_SPACE_GLYPH      EQU 16               ; Font glyph used for a space
     endif
 
+; Poll DMACONR until the blitter is idle. Same technique as lib/bob.s.
+WAITBLIT:MACRO
+    tst DMACONR(a5)         ;for compatibility
+    btst #6,DMACONR(a5)
+    bne.s *-6
+    ENDM
+
     SECTION graphics_code,CODE
 
 ; =============================================================================
@@ -47,6 +54,7 @@ GFX_SPACE_GLYPH      EQU 16               ; Font glyph used for a space
     XDEF gfx_current_mode
     XDEF gfx_sprcop_lores
     XDEF gfx_sprcop_hires
+    XDEF gfx_sprcop_ham6
     XDEF gfx_current_screen_ptr
     XDEF SetColor
     XDEF LoadPalette
@@ -597,40 +605,61 @@ gfx_scroll_screen:
     rts
 
 ; Screen clearing functions
+; Blitter-based clear for lores/hires (D-channel only, minterm 0 -> always
+; writes zero, so A/B/C are irrelevant). Buffers are contiguous per mode, so
+; a single BLTSIZE covers the whole framebuffer with BLTDMOD=0.
+; HAM6 keeps blitter DMA disabled system-wide (see _SetGraphicsMode) to avoid
+; conflicts with the HAM colour-register fetches, so that branch must stay on
+; the CPU loop.
 gfx_clear_screen:
     movem.l d0-d2/a0,-(sp)
     move.l gfx_current_screen_ptr,a0
-    
-    ; Check current mode to determine buffer size
+
+    ; Check current mode to determine buffer size / clear strategy
     move.w gfx_current_mode,d2
     cmp.w #2,d2
     beq .clear_ham6
     cmp.w #1,d2
-    beq .clear_hires
-    
-    ; Mode 0: lores (320x256x5 = 51200 bytes = 12800 longs)
-    move.l #320*256/32*5-1,d0
-    bra.s .do_clear
-    
-.clear_hires:
-    ; Mode 1: hires (640x256x4 = 81920 bytes = 20480 longs)
-    move.l #640*256/32*4-1,d0
-    bra.s .do_clear
-    
+    beq .clear_hires_blit
+
+    ; Mode 0: lores (320x256x5 = 51200 bytes = 25600 words = 400 lines * 64 words)
+    WAITBLIT
+    move.l a0,BLTDPT(a5)
+    move.w #0,BLTDMOD(a5)
+    move.w #0,BLTCON1(a5)
+    move.w #$0100,BLTCON0(a5)      ; USED only, minterm $00 -> D always 0
+    move.w #400<<6,BLTSIZE(a5)     ; height=400, width=64 words (field 0), starts blit
+    WAITBLIT
+    bra.s .after_clear
+
+.clear_hires_blit:
+    ; Mode 1: hires (640x256x4 = 81920 bytes = 40960 words = 640 lines * 64 words)
+    WAITBLIT
+    move.l a0,BLTDPT(a5)
+    move.w #0,BLTDMOD(a5)
+    move.w #0,BLTCON1(a5)
+    move.w #$0100,BLTCON0(a5)      ; USED only, minterm $00 -> D always 0
+    move.w #640<<6,BLTSIZE(a5)     ; height=640, width=64 words (field 0), starts blit
+    WAITBLIT
+    bra.s .after_clear
+
 .clear_ham6:
-    ; Mode 2: HAM6 (320x256x6 = 61440 bytes = 15360 longs)
+    ; Mode 2: HAM6 (320x256x6 = 61440 bytes = 15360 longs) - blitter DMA is off
     move.l #320*256/32*6-1,d0
-    
-.do_clear:
     moveq #0,d1
-gfx_clear_loop:
+.clear_ham6_loop:
     move.l d1,(a0)+
-    dbra d0,gfx_clear_loop
+    dbra d0,.clear_ham6_loop
+
+.after_clear:
     move.w #0,gfx_text_cursor_x
     move.w #0,gfx_text_cursor_y
     movem.l (sp)+,d0-d2/a0
     rts
 
+; Legacy CPU-loop hires clear, used only from _SetGraphicsMode during mode
+; setup where blitter DMA is not guaranteed to be enabled yet - keep as a CPU
+; loop rather than risk a silent no-op blit.
 gfx_clear_screen_hires:
     movem.l d0-d1/a0,-(sp)
     move.l gfx_current_screen_ptr,a0
@@ -684,6 +713,22 @@ gfx_init_sprites:
     move.w d1,(a1)      ; Low word
     addq.l #4,a1
     dbf d2,.init_hires_loop
+    endif
+
+    ifnd DISABLE_HAM
+    ; Initialize HAM6 copper list sprite pointers
+    lea.l gfx_sprcop_ham6,a1
+    addq.l #2,a1        ; Skip to value word
+    moveq #7,d2         ; 8 sprites (0-7)
+.init_ham6_loop:
+    move.l d0,d1
+    swap d1
+    move.w d1,(a1)      ; High word
+    addq.l #4,a1
+    swap d1
+    move.w d1,(a1)      ; Low word
+    addq.l #4,a1
+    dbf d2,.init_ham6_loop
     endif
     
     ; Write null sprite pointers to hardware registers as well

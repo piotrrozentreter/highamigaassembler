@@ -1,7 +1,10 @@
 import argparse
 import sys
 import subprocess
+from datetime import datetime
+from collections import Counter
 from . import parser, codegen, validator
+from . import ast
 from . import reachability
 from .target import CpuTarget, TargetSpec
 import os
@@ -23,6 +26,96 @@ def _get_version():
 
 __version__ = _get_version()
 __author__ = "Piotr Rozentreter"
+
+
+def _build_asm_preamble() -> str:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return (
+        f"; High Amiga Assembler (HAS) by Piotr Rozentreter (Rozsoft) Version: {__version__}\n"
+        f"; Date: {timestamp}\n\n"
+    )
+
+
+def _count_ast_nodes(node, counter: Counter) -> None:
+    if node is None:
+        return
+    if isinstance(node, list):
+        for item in node:
+            _count_ast_nodes(item, counter)
+        return
+
+    if isinstance(node, ast.Proc):
+        counter["proc_count"] += 1
+    elif isinstance(node, ast.FuncDecl):
+        counter["func_decl_count"] += 1
+    elif isinstance(node, ast.While):
+        counter["while_count"] += 1
+    elif isinstance(node, ast.DoWhile):
+        counter["do_while_count"] += 1
+    elif isinstance(node, ast.ForLoop):
+        counter["for_loop_count"] += 1
+    elif isinstance(node, ast.RepeatLoop):
+        counter["repeat_loop_count"] += 1
+
+    if not hasattr(node, "__dict__"):
+        return
+
+    for value in vars(node).values():
+        if isinstance(value, list):
+            for item in value:
+                _count_ast_nodes(item, counter)
+        elif hasattr(value, "__dict__"):
+            _count_ast_nodes(value, counter)
+
+
+def _build_asm_statistics(mod: ast.Module, asm_body: str) -> str:
+    ast_counts = Counter()
+    _count_ast_nodes(mod, ast_counts)
+
+    lines = asm_body.splitlines()
+    total_lines = len(lines)
+    non_empty_lines = 0
+    comment_lines = 0
+    label_lines = 0
+    directive_lines = 0
+    instruction_lines = 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        non_empty_lines += 1
+        if stripped.startswith(";"):
+            comment_lines += 1
+            continue
+        if stripped.endswith(":"):
+            label_lines += 1
+            continue
+        if stripped.startswith("."):
+            directive_lines += 1
+            continue
+        instruction_lines += 1
+
+    total_loops = (
+        ast_counts["while_count"]
+        + ast_counts["do_while_count"]
+        + ast_counts["for_loop_count"]
+        + ast_counts["repeat_loop_count"]
+    )
+
+    return (
+        "; --- HAS Build Statistics ---\n"
+        f"; Source procedures: {ast_counts['proc_count']}\n"
+        f"; Source declarations: {ast_counts['func_decl_count']}\n"
+        f"; Source loops total: {total_loops} (while={ast_counts['while_count']}, do_while={ast_counts['do_while_count']}, for={ast_counts['for_loop_count']}, repeat={ast_counts['repeat_loop_count']})\n"
+        f"; Assembly lines total: {total_lines}\n"
+        f"; Assembly lines non-empty: {non_empty_lines}\n"
+        f"; Assembly instructions: {instruction_lines}\n"
+        f"; Assembly labels: {label_lines}\n"
+        f"; Assembly directives: {directive_lines}\n"
+        f"; Assembly comments: {comment_lines}\n"
+        "; ----------------------------\n\n"
+    )
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
@@ -55,6 +148,12 @@ def main(argv=None):
         "--annotate",
         action="store_true",
         help="Emit HAS source-line and loop-end comments in generated assembly (debug aid, no effect on generated instructions)",
+    )
+    ap.add_argument(
+        "--asm-stats",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include HAS Build Statistics comment block in output assembly (default: enabled)",
     )
     args = ap.parse_args(argv)
     target = TargetSpec.for_cpu(args.cpu)
@@ -157,8 +256,13 @@ def main(argv=None):
         print(f"  {e}", file=sys.stderr)
         sys.exit(1)
 
+    asm_output = _build_asm_preamble()
+    if args.asm_stats:
+        asm_output += _build_asm_statistics(mod, asm)
+    asm_output += asm
+
     with open(args.output, "w", encoding="utf-8") as f:
-        f.write(asm)
+        f.write(asm_output)
 
     print(f"Wrote assembly to {args.output}")
 

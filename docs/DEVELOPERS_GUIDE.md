@@ -229,6 +229,47 @@ code external:
     }
 ```
 
+### External Variables
+
+External variables can be declared with optional type annotation:
+
+```has
+code external_vars:
+    extern var screen_buffer: byte*;        ; Pointer (no type annotation)
+    extern var frame_counter: int;          ; Typed: 32-bit signed
+    extern var velocity_x: i16;             ; Typed: 16-bit signed, sign-extends
+    extern var palette: u8*;                ; Typed: unsigned byte pointer
+    
+    proc update_frame() -> long {
+        frame_counter = frame_counter + 1;  ; Loads with sign-extension
+        return frame_counter;
+    }
+```
+
+**Typed vs. Untyped External Variables:**
+
+- **Untyped** (`extern var name;`): Treated as generic pointers or 32-bit values; byte/word loads zero-extend
+- **Typed** (`extern var name: i8;` / `i16` / `u8` / `u16`): Sign-extend on load (for signed types) or zero-extend (unsigned types)
+
+Sign-extension is crucial for correct comparisons on signed extern globals:
+
+```has
+extern var dx: i8;     ; Signed displacement - sign-extends on load
+extern var flags: u8;  ; Unsigned flags - zero-extends on load
+
+proc check() -> int {
+    if (dx < 0) {      ; Correctly detects negative displacement
+        return -1;
+    }
+    if (flags < 0) {   ; Always false: zero-extended value is always >= 0
+        return -1;
+    }
+    return 0;
+}
+```
+
+See [examples/extern_signed_byte_test.has](../examples/extern_signed_byte_test.has) for complete example.
+
 ### Register Parameters (Performance)
 ```has
 code register_params:
@@ -312,15 +353,54 @@ rts
 
 This convention keeps HAS-compatible with the provided `lib/*.s` libraries and typical Amiga assembly interfaces while avoiding ambiguity with narrow types.
 
+**Sign Extension for Signed Types:**
+
+When loading 8-bit or 16-bit values (from global variables, local variables, or procedure parameters), the behavior depends on the variable's declared type:
+
+- **Typed form** (`var name: i8` / `i16` / `byte` / `word` in typed syntax): Sign-extended (for negative values)
+  - 68020: Single `extb.l` (for `i8`) or `ext.l` (for `i16`) instruction
+  - 68000: Two-instruction sequence (`ext.w`+`ext.l`)
+  
+- **Legacy form** (`var name.b` / `.w`): Always zero-extended (unsigned)
+  - Both targets: `andi.l #$FF` (byte) or `andi.l #$FFFF` (word)
+
+This applies to:
+- Global variables declared with `name: type = value;` (typed) vs. `name.b = value;` (legacy)
+- External variables declared with `extern var name: type;` (typed)
+- Local procedure parameters (always use declared type)
+
+**Example: Sign vs. Zero Extension**
+
+```has
+data globals:
+    signed_byte: i8 = 0xFB      ; -5 (sign-extended on load)
+    legacy_byte.b = 0xFB        ; 251 (zero-extended on load)
+
+code checks:
+    proc test() -> int {
+        if (signed_byte < 0) {   ; TRUE: signed_byte loads as -5
+            return -1;
+        }
+        if (legacy_byte < 0) {   ; FALSE: legacy_byte loads as 251 (always >= 0)
+            return 0;
+        }
+        return 0;
+    }
+```
+
 ---
 
 ## Variables and Constants
 
 ### Global Variables
+
+HAS supports two forms of global variable declaration in `data` sections, each with distinct sign-extension behavior:
+
+#### Legacy Form (Zero-Extends)
 ```has
 data globals:
-    counter = 100
-    name = "Game"
+    counter = 100        ; Initialize with value (always zero-extends)
+    name = "Game"        ; String data
 
 code variables:
     proc increment() -> long {
@@ -332,6 +412,56 @@ code variables:
         return increment();
     }
 ```
+
+The legacy form uses no type annotation. When loaded, byte/word values are always zero-extended (unsigned interpretation):
+
+```has
+data legacy_globals:
+    myByte.b = 0xFB     ; 0xFB is loaded as 251 (unsigned)
+    myWord.w = 0xFFFF   ; 0xFFFF is loaded as 65535 (unsigned)
+```
+
+#### Typed Form (Sign-Extends for Signed Types)
+
+**New in 0.9.5**: Opt-in syntax for explicit type annotation:
+
+```has
+data typed_globals:
+    signedByte: i8 = 0xFB    ; -5 (sign-extended)
+    signedWord: i16 = 0xFFFF ; -1 (sign-extended)
+    unsignedByte: u8 = 0xFB  ; 251 (zero-extended)
+    counter: int = 100       ; 32-bit signed (no extension needed)
+```
+
+When loaded, signed-typed values use sign-extension:
+- `i8`, `byte`: Load with `extb.l` (68020) or `ext.w`+`ext.l` (68000)
+- `i16`, `word`: Load with `ext.l`
+- `u8`, `u16`, `int`, `long`: Zero-extend (unchanged)
+
+**When to Use:**
+- Use **typed form** for signed arithmetic globals that must preserve sign (e.g., velocity, offset)
+- Use **legacy form** for bit patterns and masks that need zero-extension
+- Both forms compile correctly; the difference is semantic
+
+**Example: Sign Difference**
+```has
+data values:
+    signed: i8 = -5      ; 0xFB, loads as -5 → comparisons like "if (signed < 0)" work
+    legacy: byte.b = -5  ; 0xFB, loads as 251 → comparisons like "if (legacy < 0)" fail
+
+code checks:
+    proc test() -> int {
+        if (signed < 0) {
+            return -1;   ; Executes: signed loads as -5
+        }
+        if (legacy < 0) {
+            return -1;   ; Never executes: legacy loads as 251
+        }
+        return 0;
+    }
+```
+
+See [examples/global_signed_byte_test.has](../examples/global_signed_byte_test.has) for complete demonstration.
 
 ### Local Variables
 ```has
@@ -780,23 +910,41 @@ such as `y = x++` still preserve post-increment old-value semantics.
 ## Advanced Features
 
 ### Macros
+
+Macros provide compile-time code templates that expand their body at each call site. Macro parameters can be substituted into HAS statements (expressions, assignments, etc.), but **not into inline assembly strings**:
+
 ```has
-; Define reusable code patterns
-macro load_register(reg, value) {
-    move.l value,reg
+// Macro without parameters - works with asm blocks
+macro clear_registers() {
+    asm "clr.l d0";
+    asm "clr.l d1";
 }
 
-macro push_registers(list) {
-    PUSH(d0, d1, d2);
+// Macro with parameters - parameters substitute in HAS code, not asm
+macro add_values(x, y, result) {
+    result = x + y;  // Parameters substituted in HAS expressions
 }
 
 code macro_demo:
-    proc setup() -> long {
-        load_register(d0, 100);      ; Expands: move.l 100,d0
-        push_registers(d0, d1);      ; Expands: PUSH(d0, d1);
-        return 0;
+    proc test() -> long {
+        clear_registers();              // No parameters needed
+        
+        var a: int = 10;
+        var b: int = 20;
+        var sum: int = 0;
+        add_values(a, b, sum);          // Expands to: sum = a + b;
+        
+        return sum;
     }
 ```
+
+**Key Points:**
+- Macro bodies are compile-time expansions (not runtime function calls)
+- **Parameter substitution works in HAS statements only** (assignments, expressions, etc.)
+- **Parameter substitution does NOT work in asm blocks** (asm blocks are plain strings)
+- Macros can contain any valid HAS statement: variables, loops, conditionals, asm blocks
+- Variables in asm blocks (local or parameters) use the `@varname` syntax (e.g., `move.l @temp,d0`)
+- For register-parameter manipulation in asm, implement as a regular procedure instead (procedures support `@varname` substitution)
 
 ### Python Directives
 ```has
@@ -1215,6 +1363,132 @@ code app:
     }
 ```
 
+### Millisecond Delays with WaitMs()
+
+For precise timing independent of VBlank or display state, use the `WaitMs()` function from `lib/timer.s`:
+
+```has
+extern func WaitMs(ms: int) -> void;
+
+code timing:
+    proc wait_one_second() -> void {
+        WaitMs(1000);  ; Wait 1000 milliseconds
+    }
+    
+    proc animation_loop() -> void {
+        for frame = 0 to 60 {
+            render_frame();
+            WaitMs(16);   ; ~60 FPS at 16ms per frame
+        }
+    }
+```
+
+#### How WaitMs Works
+
+`WaitMs(ms)` performs a busy-wait using CIA-A Timer A in one-shot mode, driven by the E-clock (709379 Hz on PAL). The delay is accurate regardless of DMA or display state:
+
+- Accurate to within a few CIA clock cycles (~1.4 microseconds)
+- Non-blocking: other interrupts (keyboard, music) continue to work
+- Safe to use alongside `lib/ptplayer.s` music playback (uses CIA-B, not CIA-A)
+- Handles delays up to 90ms per load; longer waits are chained internally
+
+#### Timing Comparisons
+
+| Method | Accuracy | Display-Dependent | Interrupt-Safe | Notes |
+|--------|----------|------------------|-----------------|-------|
+| **WaitMs()** | E-clock (~1.4µs) | No | Yes | Minimal CPU use |
+| **WaitVBlank()** | ~20ms (PAL 50Hz) | Yes | Yes | Display-synchronized |
+| **Spin loop** | CPU-dependent | No | Blocks interrupts | Inefficient |
+
+Use **WaitMs()** for frame-rate timing or sub-second delays; use **WaitVBlank()** for synchronizing with display updates.
+
+#### Example: Millisecond Pulse
+
+```has
+extern func WaitMs(ms: int) -> void;
+
+code timing:
+    proc pulse_led(count: int) -> void {
+        for i = 0 to count {
+            write_led(1);     ; Turn on
+            WaitMs(500);      ; On for 500ms
+            write_led(0);     ; Turn off
+            WaitMs(500);      ; Off for 500ms
+        }
+    }
+```
+
+**Note:** `lib/timer.s` is automatically linked when the HAS compiler detects a `WaitMs` call. No manual library inclusion is required.
+
+### Runtime CPU Detection with GetCPUType()
+
+For games that support multiple Amiga models, detect the CPU at runtime and enable 68020-specific features dynamically:
+
+```has
+extern func GetCPUType() -> long;
+
+const CPUTYPE_68000  = 0;
+const CPUTYPE_68010  = 1;
+const CPUTYPE_68020  = 2;
+const CPUTYPE_68030  = 3;
+const CPUTYPE_68040  = 4;
+const CPUTYPE_68060  = 6;
+
+code main:
+    proc optimize_for_cpu() -> int {
+        var cpu: long = GetCPUType();
+        if (cpu >= CPUTYPE_68020) {
+            return setup_fast_path();  ; 68020+ specific code
+        } else {
+            return setup_baseline();   ; Fallback for 68000
+        }
+    }
+```
+
+#### Function Signature
+
+```
+GetCPUType() -> long
+```
+
+- **Returns:** CPU type constant (CPUTYPE_68000 through CPUTYPE_68060)
+- **Interrupts:** Safe to call at any time
+- **Implementation:** Queries Exec library `AttnFlags` and translates to HAS constants
+
+#### Supported CPU Types
+
+- `CPUTYPE_68000`: Original 68000
+- `CPUTYPE_68010`: 68010
+- `CPUTYPE_68020`: 68020
+- `CPUTYPE_68030`: 68030
+- `CPUTYPE_68040`: 68040
+- `CPUTYPE_68060`: 68060
+
+Unknown CPUs are reported as their closest lower type.
+
+#### Example: Feature Gating
+
+```has
+extern func GetCPUType() -> long;
+extern func fast_multiply(a: long, b: long) -> long;
+extern func slow_multiply(a: long, b: long) -> long;
+
+const CPUTYPE_68000  = 0;
+const CPUTYPE_68020  = 2;
+
+code features:
+    proc multiply(a: long, b: long) -> long {
+        var cpu: long = GetCPUType();
+        if (cpu >= CPUTYPE_68020) {
+            return fast_multiply(a, b);   ; Native 32-bit muls.l
+        } else {
+            return slow_multiply(a, b);   ; 16-bit sequence
+        }
+    }
+```
+
+See [examples/cpu_detection.has](../examples/cpu_detection.has) for a complete example.
+
 ---
 
 ## Compilation
@@ -1229,33 +1503,173 @@ python -m hasc.cli example.has --generate generator.py -o out.s
 
 # Skip validation
 python -m hasc.cli example.has --no-validate -o out.s
+
+# Emit debug annotations (source line comments)
+python -m hasc.cli example.has --annotate -o out.s
+
+# Explicitly enable build statistics comments (default)
+python -m hasc.cli example.has --asm-stats -o out.s
+
+# Disable build statistics comments
+python -m hasc.cli example.has --no-asm-stats -o out.s
 ```
+
+Generated assembly always starts with a HAS preamble comment (version/date).
+By default, a `HAS Build Statistics` comment block is emitted immediately after
+the preamble; use `--no-asm-stats` to disable that block.
+
+### Debug Output: Annotated Assembly
+
+The `--annotate` flag emits debug comments into generated assembly, helpful for understanding the compiler's output without affecting generated instructions:
+
+```bash
+python -m hasc.cli example.has --annotate -o out.s
+```
+
+**Output Example:**
+
+Without `--annotate`:
+```asm
+    move.l d0,d1
+    add.l #42,d1
+```
+
+With `--annotate`:
+```asm
+    ; L5: var result: long = input;
+    move.l d0,d1
+    ; L6: result = result + 42;
+    add.l #42,d1
+    ; end for
+```
+
+**Features:**
+- Emits `; L{n}: <source line>` comments before most statements
+- Adds `; end for`, `; end while`, `; end repeat` markers after loop ends
+- Zero effect on generated instructions or program behavior
+- Fully opt-in: off by default
+
+**Known Limitation:** With `#include` directives, source line numbers may not align perfectly with quoted text (cosmetic only; compiled program behavior is unaffected).
+
+**Use Cases:**
+- Debugging unexpected codegen output
+- Understanding compiler optimizations
+- Teaching/learning HAS compilation
+- Correlating assembly with HAS source during performance analysis
 
 ### CPU Targets and Assembler Flags
 
-HAS defaults to Motorola 68000 output. The opt-in 68020 target changes only
-instruction selection for supported indexed-address paths; it does not change
-HAS syntax, data layout, ABI, calling convention, alignment, or pointer size.
+HAS defaults to Motorola 68000 output. The opt-in 68020 target enables advanced
+instruction-selection optimizations for indexed addressing, arithmetic operations,
+and sign extension. It does not change HAS syntax, data layout, ABI, calling
+convention, alignment, or pointer size. All code compiles identically on both
+targets; only the generated instructions differ.
 
 ```bash
-# Default and explicit baseline output are identical
+# Default: 68000 baseline (100% compatible with original 68000/68010 hardware)
 python -m hasc.cli example.has -o out-68000.s
-python -m hasc.cli example.has --cpu 68000 -o out-68000-explicit.s
 vasmm68k_mot -m68000 -Fhunkexe -o out-68000.o out-68000.s
 
-# Opt in to 68020 scaled indexed addressing
+# Opt in: 68020 optimizations (requires 68020+ CPU)
 python -m hasc.cli example.has --cpu 68020 -o out-68020.s
 vasmm68k_mot -m68020 -Fhunkexe -o out-68020.o out-68020.s
 ```
 
-Only `68000` and `68020` are accepted by `--cpu`. On 68020, dynamic array,
-typed-pointer, struct-array, two-dimensional, and address-of paths may use
-`.l` scaled indexes (`*2`, `*4`, or `*8`) where legal. Constant indexes and
-unsupported strides/displacements retain direct-offset or arithmetic fallback
-lowering. Do not assemble 68020 output with `-m68000`; the scaled forms are not
-valid for 68000/68010 hardware. Full-extension and memory-indirect addressing,
-`.w` index selection, and unrelated 68020 instruction optimizations remain
-deferred.
+#### 68020 Instruction Selection Optimizations
+
+Only `68000` and `68020` are accepted by `--cpu`. When compiling for 68020, the following optimizations are applied:
+
+##### Scaled Indexed Addressing (Phases 0–2)
+
+Dynamic array, typed-pointer, struct-array, two-dimensional, and address-of paths
+may use scaled `.l` indexes (`*2`, `*4`, or `*8`) where legal:
+
+- **Phase 0 (Scaled `.l` indexes):** Basic scaled indexes (`a0,d1.l*2`)
+- **Phase 1 (Full-extension displacements):** Out-of-range displacements up to ±32KB
+  (e.g., `1000(a0,d1.l*4)` instead of separate `add.l` arithmetic)
+- **Phase 2 (`.w` index sizing):** Compile-time-constant indexes in 16-bit range emit
+  `.w`-sized indexes (e.g., `4(a0,d1.w*8)`) for smaller operands
+
+Constant indexes remain direct offsets. Unsupported strides and byte indexing remain
+unscaled. The default `--cpu 68000` output is completely unaffected.
+
+##### Struct Field Displacement Folding
+
+Struct-array member access folds field offsets directly into indexed-addressing operands
+for 68020, eliminating separate arithmetic instructions. This applies to arbitrary struct
+sizes (not just 2/4/8 bytes).
+
+Example (`--cpu 68020` only):
+```has
+struct Enemy {
+    x: word;
+    y: word;
+    health: byte;  ; offset +4
+}
+
+data enemies[100];
+
+proc check() -> int {
+    var i: int = 5;
+    if (enemies[i].health < 10) {  ; Folds offset 4 into indexed operand
+        return -1;
+    }
+    return 0;
+}
+```
+
+Generates (68020):
+```asm
+move.b 4(a0,d1.l*sizeof(Enemy)),d0  ; Offset folded directly
+```
+
+##### 32-Bit Multiply/Divide/Modulo (Phase 4)
+
+On `--cpu 68020`, `*`, `/`, `%` operators on `int`/`long` operands now natively
+use `muls.l` (multiply) or `divsl.l` (divide/modulo):
+
+```has
+code math:
+    proc calc() -> long {
+        var a: long = 1000000;
+        var b: long = 2000000;
+        var result: long = a * b;      ; Uses muls.l (native 32-bit)
+        var quotient: long = a / b;    ; Uses divsl.l
+        var remainder: long = a % b;   ; Uses divsl.l + remainder extraction
+        return result;
+    }
+```
+
+**Behavior Change:** The 16-bit constant restriction is lifted on 68020 only:
+
+- **68000 (default):** Multiply/divide constants must fit `-32768..32767` (16-bit range)
+- **68020:** Full 32-bit constants and runtime operands supported natively
+
+This is a genuine capability upgrade, not just a speed optimization.
+
+##### Sign Extension Optimization (Phase 4)
+
+On `--cpu 68020`, signed byte-to-long sign extension uses the single-instruction
+`extb.l` instead of the 68000 two-instruction `ext.w`+`ext.l` sequence:
+
+```has
+code signed_ops:
+    proc load_byte() -> long {
+        var b: i8 = -5;
+        return b;  ; Uses single "extb.l" on 68020, two instructions on 68000
+    }
+```
+
+The same signed-byte code compiles successfully on both targets; only the
+instruction count differs.
+
+#### Important Notes
+
+- Do **not** assemble 68020 output with `-m68000`; scaled instructions are not valid
+  for 68000/68010 hardware
+- Memory-indirect addressing and additional 68020 optimizations remain deferred
+- All 68020 optimizations are strictly transparent: the generated program produces
+  identical results on both targets
 
 ### Output
 The compiler generates Motorola assembly compatible with `vasm`. Select the
