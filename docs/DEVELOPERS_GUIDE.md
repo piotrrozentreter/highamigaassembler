@@ -910,23 +910,41 @@ such as `y = x++` still preserve post-increment old-value semantics.
 ## Advanced Features
 
 ### Macros
+
+Macros provide compile-time code templates that expand their body at each call site. Macro parameters can be substituted into HAS statements (expressions, assignments, etc.), but **not into inline assembly strings**:
+
 ```has
-; Define reusable code patterns
-macro load_register(reg, value) {
-    move.l value,reg
+// Macro without parameters - works with asm blocks
+macro clear_registers() {
+    asm "clr.l d0";
+    asm "clr.l d1";
 }
 
-macro push_registers(list) {
-    PUSH(d0, d1, d2);
+// Macro with parameters - parameters substitute in HAS code, not asm
+macro add_values(x, y, result) {
+    result = x + y;  // Parameters substituted in HAS expressions
 }
 
 code macro_demo:
-    proc setup() -> long {
-        load_register(d0, 100);      ; Expands: move.l 100,d0
-        push_registers(d0, d1);      ; Expands: PUSH(d0, d1);
-        return 0;
+    proc test() -> long {
+        clear_registers();              // No parameters needed
+        
+        var a: int = 10;
+        var b: int = 20;
+        var sum: int = 0;
+        add_values(a, b, sum);          // Expands to: sum = a + b;
+        
+        return sum;
     }
 ```
+
+**Key Points:**
+- Macro bodies are compile-time expansions (not runtime function calls)
+- **Parameter substitution works in HAS statements only** (assignments, expressions, etc.)
+- **Parameter substitution does NOT work in asm blocks** (asm blocks are plain strings)
+- Macros can contain any valid HAS statement: variables, loops, conditionals, asm blocks
+- Variables in asm blocks (local or parameters) use the `@varname` syntax (e.g., `move.l @temp,d0`)
+- For register-parameter manipulation in asm, implement as a regular procedure instead (procedures support `@varname` substitution)
 
 ### Python Directives
 ```has
