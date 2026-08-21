@@ -1,6 +1,7 @@
 import argparse
 import sys
 import subprocess
+from datetime import datetime
 from . import parser, codegen, validator
 from . import reachability
 from .target import CpuTarget, TargetSpec
@@ -23,6 +24,14 @@ def _get_version():
 
 __version__ = _get_version()
 __author__ = "Piotr Rozentreter"
+
+
+def _build_asm_preamble() -> str:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return (
+        f"; High Amiga Assembler (HAS) by Piotr Rozentreter (Rozsoft) Version: {__version__}\n"
+        f"; Date: {timestamp}\n\n"
+    )
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
@@ -156,6 +165,8 @@ def main(argv=None):
         print(f"Code generation error in {args.input}:", file=sys.stderr)
         print(f"  {e}", file=sys.stderr)
         sys.exit(1)
+
+    asm = _build_asm_preamble() + asm
 
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(asm)
