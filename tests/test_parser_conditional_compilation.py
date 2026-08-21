@@ -35,9 +35,9 @@ const X = 20;
     assert _const_by_name(mod, "X").value == 10
 
 
-def test_ifdef_false_when_const_not_one():
+def test_ifdef_true_when_const_defined_with_any_value():
     src = """
-const FEATURE = 2;
+const FEATURE = 0;
 #ifdef FEATURE
 const X = 10;
 #else
@@ -45,7 +45,28 @@ const X = 20;
 #endif
 """
     mod = has_parser.parse(src)
-    assert _const_by_name(mod, "X").value == 20
+    assert _const_by_name(mod, "X").value == 10
+
+    src2 = """
+const FEATURE = 5;
+#ifdef FEATURE
+const X = 10;
+#else
+const X = 20;
+#endif
+"""
+    mod2 = has_parser.parse(src2)
+    assert _const_by_name(mod2, "X").value == 10
+
+    src3 = """
+#ifdef FEATURE
+const X = 10;
+#else
+const X = 20;
+#endif
+"""
+    mod3 = has_parser.parse(src3)
+    assert _const_by_name(mod3, "X").value == 20
 
 
 def test_ifndef_true_when_symbol_undefined():
@@ -75,7 +96,7 @@ const SEL = 13;
 #endif
 """
     mod = has_parser.parse(src)
-    assert _const_by_name(mod, "SEL").value == 12
+    assert _const_by_name(mod, "SEL").value == 11
 
 
 def test_inactive_else_branch_with_invalid_syntax_is_ignored():
@@ -92,12 +113,18 @@ const BROKEN = ;
 
 
 def test_else_without_if_reports_preprocessor_error():
-    with pytest.raises(SyntaxError, match=r"Preprocessor error at line 2: '#else' without matching"):
+    with pytest.raises(
+        SyntaxError,
+        match=r"Preprocessor error at line 2: '#else' without matching '#ifdef/#ifndef/#if'",
+    ):
         has_parser.parse("\n#else\nconst X = 1;\n")
 
 
 def test_endif_without_if_reports_preprocessor_error():
-    with pytest.raises(SyntaxError, match=r"Preprocessor error at line 2: '#endif' without matching"):
+    with pytest.raises(
+        SyntaxError,
+        match=r"Preprocessor error at line 2: '#endif' without matching '#ifdef/#ifndef/#if'",
+    ):
         has_parser.parse("\n#endif\n")
 
 
@@ -159,7 +186,6 @@ proc main() -> int { return 1; }
 
 def test_include_in_inactive_branch_is_not_expanded(tmp_path):
     src = """
-const FEATURE = 0;
 #ifdef FEATURE
 #include "missing_file.has"
 #endif
@@ -178,3 +204,186 @@ const FEATURE = 1;
 """
     with pytest.raises(SyntaxError, match=r"#include: file not found"):
         has_parser.parse(src, base_dir=str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "op,rhs,expect_true",
+    [
+        ("==", "5", True),
+        ("==", "6", False),
+        ("=", "5", True),
+        ("=", "6", False),
+        ("!=", "5", False),
+        ("!=", "6", True),
+        ("<>", "5", False),
+        ("<>", "6", True),
+        (">", "4", True),
+        (">", "5", False),
+        ("<", "6", True),
+        ("<", "5", False),
+        (">=", "5", True),
+        (">=", "6", False),
+        ("<=", "5", True),
+        ("<=", "4", False),
+    ],
+)
+def test_if_comparison_operators_select_expected_branch(op, rhs, expect_true):
+    src = f"""
+const VAL = 5;
+#if VAL {op} {rhs}
+const X = 1;
+#else
+const X = 0;
+#endif
+"""
+    mod = has_parser.parse(src)
+    expected = 1 if expect_true else 0
+    assert _const_by_name(mod, "X").value == expected
+
+
+def test_if_with_else_selects_false_branch():
+    src = """
+const VAL = 3;
+#if VAL == 10
+const X = 1;
+#else
+const X = 2;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 2
+
+
+def test_if_nested_inside_ifdef():
+    src = """
+const FEATURE = 1;
+const VAL = 7;
+#ifdef FEATURE
+  #if VAL > 5
+  const X = 1;
+  #else
+  const X = 2;
+  #endif
+#else
+const X = 3;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 1
+
+
+def test_ifdef_nested_inside_if():
+    src = """
+const VAL = 1;
+const FEATURE = 1;
+#if VAL == 1
+  #ifdef FEATURE
+  const X = 1;
+  #else
+  const X = 2;
+  #endif
+#else
+const X = 3;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 1
+
+
+def test_if_with_arithmetic_parenthesized_rhs():
+    src = """
+const VAL = 5;
+#if VAL >= (2+3)
+const X = 1;
+#else
+const X = 0;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 1
+
+
+def test_if_undefined_constant_raises_syntax_error():
+    src = """
+#if MISSING == 1
+const X = 1;
+#endif
+"""
+    with pytest.raises(
+        SyntaxError,
+        match=r"undefined constant \x27MISSING\x27 used in \x27#if\x27 condition",
+    ):
+        has_parser.parse(src)
+
+
+def test_unterminated_if_reports_preprocessor_error():
+    src = """
+const VAL = 1;
+#if VAL == 1
+const X = 1;
+"""
+    with pytest.raises(SyntaxError, match=r"unterminated \x27#if VAL == 1\x27 opened at line 3"):
+        has_parser.parse(src)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "#if VAL >= ",
+        "#if VAL>=",
+        "#if VAL== ",
+    ],
+)
+def test_if_empty_rhs_reports_clear_error(line):
+    src = f"""
+const VAL = 5;
+{line}
+const X = 1;
+#endif
+"""
+    with pytest.raises(
+        SyntaxError,
+        match=r"\x27#if\x27 condition for \x27VAL\x27 is missing a right-hand side expression",
+    ):
+        has_parser.parse(src)
+
+
+def test_if_missing_operator_reports_clear_error():
+    src = """
+const VAL = 5;
+#if VAL
+const X = 1;
+#endif
+"""
+    with pytest.raises(
+        SyntaxError,
+        match=r"\x27#if\x27 condition \x27VAL\x27 must be \x27IDENT OP EXPR\x27",
+    ):
+        has_parser.parse(src)
+
+
+def test_if_undefined_constant_in_inactive_ifdef_branch_does_not_raise():
+    src = """
+#ifdef DISABLED
+  #if UNDEFINED_CONST == 1
+  const X = 1;
+  #endif
+#else
+const X = 2;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 2
+
+
+def test_if_with_trailing_comment_parses_correctly():
+    src = """
+const VAL = 5;
+#if VAL == 5 // comment
+const X = 1;
+#else
+const X = 0;
+#endif
+"""
+    mod = has_parser.parse(src)
+    assert _const_by_name(mod, "X").value == 1

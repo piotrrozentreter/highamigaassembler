@@ -1407,10 +1407,82 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
                         f"Preprocessor error at line {line_no}: invalid identifier '{arg}' in '#{kind}'"
                     )
 
-                condition = (arg in const_values and const_values[arg] == 1) if kind == 'ifdef' else (arg not in const_values)
+                # `#ifdef NAME` is true whenever NAME is a defined constant, regardless
+                # of its value (so `const NAME = 0;` still counts as defined).
+                condition = (arg in const_values) if kind == 'ifdef' else (arg not in const_values)
                 cond_stack.append(
                     {
                         'kind': kind,
+                        'name': arg,
+                        'line_opened': line_no,
+                        'parent_active': active,
+                        'condition': condition,
+                        'else_seen': False,
+                    }
+                )
+                active = active and condition
+                output.append(_blank_for_line(raw_line))
+                continue
+
+            m_if_cmp = re.match(r"^#if\b(.*)$", stripped)
+            if m_if_cmp:
+                arg = m_if_cmp.group(1).strip()
+                if arg.endswith(';'):
+                    arg = arg[:-1].strip()
+                if not arg:
+                    raise SyntaxError(f"Preprocessor error at line {line_no}: '#if' requires a condition")
+                # Split IDENT from the operator+RHS first so an empty/whitespace-only RHS
+                # can be reported clearly instead of letting `(.+)` backtrack the operator
+                # (e.g. '>=' -> '>') and swallow a leftover char as a bogus RHS token.
+                m_head = re.match(r"^([A-Za-z_]\w*)\s*(==|!=|<>|>=|<=|>|<|=)\s*(.*)$", arg)
+                if not m_head:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: '#if' condition '{arg}' must be "
+                        "'IDENT OP EXPR' (operators: ==, !=, <>, >, <, >=, <=)"
+                    )
+                name, op, rhs_expr = m_head.group(1), m_head.group(2), m_head.group(3).strip()
+                if not rhs_expr:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: '#if' condition for '{name}' is missing "
+                        "a right-hand side expression"
+                    )
+                if not active:
+                    # Dead branch: don't error on undefined constants or evaluate the RHS,
+                    # mirroring the '#include' guard below and the #ifdef/#ifndef precedent.
+                    cond_stack.append(
+                        {
+                            'kind': 'if',
+                            'name': arg,
+                            'line_opened': line_no,
+                            'parent_active': active,
+                            'condition': False,
+                            'else_seen': False,
+                        }
+                    )
+                    active = active and False
+                    output.append(_blank_for_line(raw_line))
+                    continue
+                if name not in const_values:
+                    raise SyntaxError(
+                        f"Preprocessor error at line {line_no}: undefined constant '{name}' used in '#if' condition"
+                    )
+                lhs = const_values[name]
+                rhs = _eval_preproc_const_expr(rhs_expr, line_no)
+                if op in ('==', '='):
+                    condition = lhs == rhs
+                elif op in ('!=', '<>'):
+                    condition = lhs != rhs
+                elif op == '>=':
+                    condition = lhs >= rhs
+                elif op == '<=':
+                    condition = lhs <= rhs
+                elif op == '>':
+                    condition = lhs > rhs
+                else:  # '<'
+                    condition = lhs < rhs
+                cond_stack.append(
+                    {
+                        'kind': 'if',
                         'name': arg,
                         'line_opened': line_no,
                         'parent_active': active,
@@ -1426,7 +1498,7 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
             if m_else:
                 if not cond_stack:
                     raise SyntaxError(
-                        f"Preprocessor error at line {line_no}: '#else' without matching '#ifdef/#ifndef'"
+                        f"Preprocessor error at line {line_no}: '#else' without matching '#ifdef/#ifndef/#if'"
                     )
                 frame = cond_stack[-1]
                 if frame['else_seen']:
@@ -1442,7 +1514,7 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
             if m_endif:
                 if not cond_stack:
                     raise SyntaxError(
-                        f"Preprocessor error at line {line_no}: '#endif' without matching '#ifdef/#ifndef'"
+                        f"Preprocessor error at line {line_no}: '#endif' without matching '#ifdef/#ifndef/#if'"
                     )
                 frame = cond_stack.pop()
                 active = frame['parent_active']
@@ -1503,7 +1575,7 @@ def parse(text: str, base_dir: str = None) -> ast.Module:
 
         return ''.join(output)
 
-    # Preprocess #ifdef/#ifndef/#else/#endif and #include together so
+    # Preprocess #ifdef/#ifndef/#if/#else/#endif and #include together so
     # directives inside inactive branches are not expanded.
     root_dir = base_dir if base_dir else os.getcwd()
     text = _preprocess_source(text, root_dir, {}, [])
