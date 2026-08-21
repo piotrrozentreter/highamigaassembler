@@ -1,0 +1,9 @@
+macro test_macro(val) {
+    move.l val,d0
+}
+
+code test:
+    proc main() -> int {
+        test_macro(42);
+        return 0;
+    }

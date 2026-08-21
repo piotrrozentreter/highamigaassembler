@@ -1,0 +1,11 @@
+code test:
+    native proc fast_add(__reg(d0) a: int, __reg(d1) b: int) -> int {
+        asm {
+            add.l d1,d0
+        }
+        return;
+    }
+    
+    proc main() -> int {
+        return fast_add(5, 3);
+    }
