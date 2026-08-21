@@ -42,6 +42,7 @@
 	
 	XREF gfx_sprcop_lores
 	XREF gfx_sprcop_hires
+	XREF gfx_sprcop_ham6
 	XREF gfx_current_mode
 
 ; Maximum hardware sprites
@@ -52,6 +53,12 @@ MAX_SPRITE_SIZE EQU 512  ; Max bytes per sprite (32 lines * 2 planes * 2 words +
 
 
     SECTION sprites_struct,DATA_C
+
+; Empty sprite data for unused or hidden slots. Sprite DMA must always point at
+; chip RAM, even for invisible sprites.
+null_sprite:
+	DC.W $0000,$0000
+	DC.W $0000,$0000
 
 ; Pre-allocated chip RAM for all 8 sprites (512 bytes each = 4096 bytes total)
 ; Each sprite gets a fixed slot, initialized to null sprite (0,0 terminator)
@@ -406,7 +413,12 @@ Sprite_UpdatePointers:
 	; Determine which copper list to update based on current graphics mode
 	move.w gfx_current_mode,d3
 	tst.w d3
-	bne .use_hires
+	beq.s .use_lores
+	cmp.w #1,d3
+	beq.s .use_hires
+	lea gfx_sprcop_ham6,a3
+	bra.s .got_copper
+.use_lores:
 	lea gfx_sprcop_lores,a3
 	bra.s .got_copper
 .use_hires:
@@ -419,6 +431,8 @@ Sprite_UpdatePointers:
 .loop:
 	move.l (a1),d0      ; get sprite data pointer
 	tst.l d0
+	beq .null_sprite
+	btst #0,8(a1)      ; only visible slots get real sprite pointers
 	beq .null_sprite
 	; Write pointer only to copper list buffer (copper is authoritative)
 	move.l d0,d1
@@ -445,11 +459,6 @@ Sprite_UpdatePointers:
 	movem.l (sp)+,d1-d3/a0-a3
 	moveq #0,d0
 	rts
-
-; Null sprite (empty sprite for unused slots)
-null_sprite:
-	DC.W $0000,$0000
-	DC.W 0,0
 
 ; Wrappers that follow 68000 cdecl-style stack args
 

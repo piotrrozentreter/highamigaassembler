@@ -54,6 +54,7 @@ WAITBLIT:MACRO
     XDEF gfx_current_mode
     XDEF gfx_sprcop_lores
     XDEF gfx_sprcop_hires
+    XDEF gfx_sprcop_ham6
     XDEF gfx_current_screen_ptr
     XDEF SetColor
     XDEF LoadPalette
@@ -712,6 +713,22 @@ gfx_init_sprites:
     move.w d1,(a1)      ; Low word
     addq.l #4,a1
     dbf d2,.init_hires_loop
+    endif
+
+    ifnd DISABLE_HAM
+    ; Initialize HAM6 copper list sprite pointers
+    lea.l gfx_sprcop_ham6,a1
+    addq.l #2,a1        ; Skip to value word
+    moveq #7,d2         ; 8 sprites (0-7)
+.init_ham6_loop:
+    move.l d0,d1
+    swap d1
+    move.w d1,(a1)      ; High word
+    addq.l #4,a1
+    swap d1
+    move.w d1,(a1)      ; Low word
+    addq.l #4,a1
+    dbf d2,.init_ham6_loop
     endif
     
     ; Write null sprite pointers to hardware registers as well
