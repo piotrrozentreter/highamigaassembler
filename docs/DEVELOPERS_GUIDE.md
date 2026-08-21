@@ -1506,7 +1506,17 @@ python -m hasc.cli example.has --no-validate -o out.s
 
 # Emit debug annotations (source line comments)
 python -m hasc.cli example.has --annotate -o out.s
+
+# Explicitly enable build statistics comments (default)
+python -m hasc.cli example.has --asm-stats -o out.s
+
+# Disable build statistics comments
+python -m hasc.cli example.has --no-asm-stats -o out.s
 ```
+
+Generated assembly always starts with a HAS preamble comment (version/date).
+By default, a `HAS Build Statistics` comment block is emitted immediately after
+the preamble; use `--no-asm-stats` to disable that block.
 
 ### Debug Output: Annotated Assembly
 

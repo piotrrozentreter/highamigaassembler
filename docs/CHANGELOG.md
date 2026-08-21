@@ -6,6 +6,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Assembly output metadata preamble and configurable build statistics**:
+  - Generated assembly now starts with a HAS preamble comment containing
+    compiler version and build timestamp metadata.
+  - A `HAS Build Statistics` comment block is now enabled by default and is
+    emitted near the top of the output, immediately after the preamble.
+  - Added boolean optional CLI switch `--asm-stats` / `--no-asm-stats`
+    (`--no-asm-stats` disables the statistics block).
+
 - **`--annotate` CLI flag** for `hasc.cli`, a debug/readability aid for reading
   generated assembly:
   - Fully opt-in and off by default; passing it emits comment-only lines
@@ -15,8 +23,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     skipped), plus `; end for` / `; end while` / `; end repeat` markers
     right after the corresponding loop's end label.
   - Zero effect on generated instructions/labels when the flag is not
-    passed - verified byte-identical across the full `examples/*.has` suite
-    on both `--cpu 68000` and `--cpu 68020`. Composes with
+    passed - verified across the full `examples/*.has` suite on both
+    `--cpu 68000` and `--cpu 68020`. Composes with
     `--strip-unused-procs` and `--cpu 68020`.
   - Known limitation: for sources using `#include`, the printed line number
     and quoted text are read from the original, un-expanded file while the

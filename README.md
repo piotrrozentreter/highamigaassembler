@@ -268,6 +268,30 @@ if __name__ == "__main__":
 python -m hasc.cli input.has --no-validate -o output.s
 ```
 
+### Assembly Metadata and Build Statistics
+
+Generated assembly now begins with a HAS preamble comment containing compiler
+version and timestamp information.
+
+By default, HAS also emits a `HAS Build Statistics` comment block near the top
+of the output, immediately after the preamble.
+
+Quick `--help` excerpt:
+
+```text
+--asm-stats, --no-asm-stats
+                        Include HAS Build Statistics comment block in output
+                        assembly (default: enabled)
+```
+
+```bash
+# Explicitly enable stats (default behavior)
+python -m hasc.cli input.has --asm-stats -o output.s
+
+# Disable stats block emission
+python -m hasc.cli input.has --no-asm-stats -o output.s
+```
+
 ### Remove Unused Procedures (dead-code elimination)
 
 ```bash
@@ -306,9 +330,10 @@ interleaves comment-only lines into the generated assembly:
 - `; end for` / `; end while` / `; end repeat` markers right after the
   corresponding loop's end label.
 
-These are pure comments and never affect instructions, labels, or layout:
-with `--annotate` omitted, output is byte-for-byte identical to before this
-flag existed. It composes with `--strip-unused-procs` and `--cpu 68020`.
+These are pure comments and never affect generated instructions or labels.
+File-level metadata comments (preamble and optional stats block) are controlled
+independently by `--asm-stats` / `--no-asm-stats`. It composes with
+`--strip-unused-procs` and `--cpu 68020`.
 
 **Known limitation**: for sources using `#include`, the printed line number
 and quoted source text are taken from the original, un-expanded file, while
