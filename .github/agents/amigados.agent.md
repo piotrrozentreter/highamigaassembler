@@ -13,6 +13,12 @@ Unlike hardware-level game code, this agent's domain is **OS-cooperative** progr
 
 ## AmigaOS/NDK Knowledge
 
+### Local NDK 3.2 Setup
+- The local NDK 3.2 tree is at `/run/media/piotr/BACKUP/Rozen/Programy/Amiga/NDK3.2/`.
+- Use the NDK includes for both host-side C development and assembly-facing definitions: the C headers are there for C/Clang/GCC work, and the assembly include files are there for 68k assembly code generation and library offsets.
+- When writing code that needs raw calls, prefer the NDK include tree as the source of truth for constants and structure definitions; if a symbol is defined in the NDK headers, use that name consistently rather than hand-typed offsets unless the user specifically wants a minimal raw example.
+- This setup is compatible with `vasm`-based assembly workflows: pass the relevant NDK include paths to the assembler, and use the assembly include files for `_LVO*`/`_LIB*` definitions and structure layouts; the C headers remain for C compilation and are not used directly by `vasm`.
+
 ### Library Calls
 - Every AmigaOS library call goes through a jump table at negative offsets from the library base register (e.g. `a6` = `_DOSBase`, `_SysBase`).
 - Standard pattern: `move.l _SysBase,a6` / `jsr _LVOOpenLibrary(a6)` (or HAS `extern` wrappers where available).
