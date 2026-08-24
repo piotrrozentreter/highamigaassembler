@@ -165,12 +165,24 @@ takes to run (every declared slot, including any blitter `WAITBLIT` busy-waits)
 before `keyb_interrupt` resumes - extending the `KDAT` hold time well past
 the protocol's expected window. This can desync or drop keyboard input,
 and is more likely to matter the longer your `interrupt` slot bodies run
-(e.g. a full-screen blitter clear plus many `SetPixel` calls, like
-`examples/games/interrupt_16slots_demo.has`) than for a trivial slot body.
+(e.g. a full-screen blitter clear, or many `SetPixel` calls accumulated
+across all active slots) than for a trivial slot body.
 This is an inherent consequence of the fixed 68000 hardware priority order
 (VERTB=IPL3 > PORTS=IPL2) - it cannot be fixed from the `interrupt` feature
 side. Keep slot bodies as short as practical if you also rely on
 `GetKey()`/`InitKeyboard()` for input.
+
+**Timing budget rule**: at 7.09 MHz (PAL) each SetPixel call (lores 5-plane)
+costs roughly 2,000 cycles from inside an `interrupt` slot (~3 `mulu.w` per
+plane × 5 planes plus call-site argument setup). The keyboard ACK window is
+638 cycles (90 µs). **The critical figure is the cumulative duration of all
+active slots combined** - not each slot individually. 14 slots each doing 32
+SetPixels = 448 calls × ~2,000 cycles ≈ 133 ms per VBlank ISR, which delays
+every keyboard ACK by ~1,500× the allowed window. The correct fix is the
+**VBL-sync flag pattern**: keep slot bodies to pure state updates
+(arithmetic, pointer swaps, flag sets) and do all rendering in the main loop
+where CPU priority is 0 and keyboard interrupts can fire freely. See
+`examples/games/interrupt_16slots_demo.has` for the reference implementation.
 
 ## Blitter/graphics operations inside `interrupt` slots
 
@@ -187,10 +199,11 @@ and `interrupt_16slots_demo.has` originally: `ClearScreen()` (lores path)
 spins in `WAITBLIT` for a full 320x256 clear - on the order of a few
 milliseconds. Doing that every single VBlank, forever, means the CPU spends
 a large fraction of every 20ms frame at priority 3, which reliably collides
-with the keyboard's ~90us handshake window sooner or later. The fix used in
-both examples: don't clear the whole screen - erase only the pixels you're
-about to redraw (e.g. `SetPixel(...,0)` over the old sprite position) before
-drawing the new ones. No blitter, no wait, negligible slot duration.
+with the keyboard's ~90us handshake window sooner or later. The fix for `interrupt_bounce_demo.has` (one slot): erase only the ball's
+own pixels before redrawing - no blitter, no wait. For
+`interrupt_16slots_demo.has` (14 ball slots), even 32 SetPixels per slot is
+too much in aggregate: the correct fix is the VBL-sync flag pattern - slot
+bodies do physics only (~150 cycles each), rendering happens in the main loop.
 
 If you genuinely need a full-frame blitter operation every VBlank (real
 games often do, for double-buffered background redraws), the standard
@@ -201,8 +214,13 @@ slot instead - this keeps any single `interrupt` slot's own execution time
 short, even though the blit itself takes a while in the background.
 
 Practical checklist for `interrupt` slot bodies:
-- Prefer many small, targeted `SetPixel`/pointer-swap style updates over one
-  large clear/fill.
+- For programs that combine rendering with `GetKey()`/`InitKeyboard()` input,
+  prefer the VBL-sync flag pattern: one trivial slot sets a flag/counter;
+  all SetPixel and blitter work runs in the main loop after a VBL wait at
+  IPL 0. See `examples/games/interrupt_16slots_demo.has`.
+- Prefer many small, targeted SetPixel/pointer-swap style updates inside slots
+  only when the **total** duration across all active slots stays well under
+  one frame. One slot doing 32 SetPixels ≈ 9.5 ms; 14 slots ≈ 133 ms.
 - Avoid any `WAITBLIT`-style busy-wait loop inside a slot if the program
   also needs reliable keyboard/joystick/serial (level 1-2) interrupt input.
 - If a slot must kick a large blit, don't block on its completion in the
