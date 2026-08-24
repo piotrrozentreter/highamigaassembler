@@ -1,0 +1,311 @@
+// 16-slot VBL-driven demo: every one of the 16 `interrupt` dispatch slots
+// (0-15) is used, showing that the master VBlank ISR always dispatches them
+// in ascending index order (see docs/INTERRUPT_KEYWORD.md) - this lets us
+// split one video frame into an ordered pipeline instead of one monolithic
+// render routine:
+//
+//   slot 0        -> begin frame  (SwapScreen + ClearScreen, blitter clear)
+//   slots 1..14   -> one bouncing ball each (14 independent balls)
+//   slot 15       -> end frame    (Show, commits the frame to the copper)
+//
+// The main loop never touches graphics hardware - it only starts/stops the
+// 16 slots and polls for the quit key, so there is no risk of it racing the
+// blitter against any of the slots.
+
+#pragma lockreg(a5);
+
+const KEY_ESC = 69;   // $45
+const NUM_BALLS = 14;
+
+extern func SetGraphicsMode(mode: int)  -> int;
+extern func ClearScreen()               -> int;
+extern func SwapScreen()                -> int;
+extern func Show()                      -> void;
+extern func SetColor(id: int, col: int) -> int;
+extern func SetPixel(x: int, y: int, color: int) -> int;
+extern func InitKeyboard()              -> void;
+extern func GetKey()                    -> byte;
+extern func TakeSystem()                -> void;
+extern func ReleaseSystem()             -> void;
+
+bss balls_bss:
+    struct balls[14] { x.w, y.w, dx.w, dy.w, pal.w }
+
+code main:
+    public main;
+
+    // Entry: take the Amiga hardware, run the game, restore the OS on exit.
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    // Slot 0: begin frame - the ONLY place that swaps/clears the screen.
+    interrupt frame_begin(0) -> void {
+        call SwapScreen();
+        call ClearScreen();
+    }
+
+    // Slots 1-14: one independent bouncing ball each (balls[0..13]).
+    interrupt ball_slot1(1) -> void {
+        var px: int;
+        var py: int;
+        balls[0].x = balls[0].x + balls[0].dx;
+        balls[0].y = balls[0].y + balls[0].dy;
+        if (balls[0].x <= 0 || balls[0].x >= 312) { balls[0].dx = -balls[0].dx; }
+        if (balls[0].y <= 0 || balls[0].y >= 248) { balls[0].dy = -balls[0].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[0].x + px, balls[0].y + py, balls[0].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot2(2) -> void {
+        var px: int;
+        var py: int;
+        balls[1].x = balls[1].x + balls[1].dx;
+        balls[1].y = balls[1].y + balls[1].dy;
+        if (balls[1].x <= 0 || balls[1].x >= 312) { balls[1].dx = -balls[1].dx; }
+        if (balls[1].y <= 0 || balls[1].y >= 248) { balls[1].dy = -balls[1].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[1].x + px, balls[1].y + py, balls[1].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot3(3) -> void {
+        var px: int;
+        var py: int;
+        balls[2].x = balls[2].x + balls[2].dx;
+        balls[2].y = balls[2].y + balls[2].dy;
+        if (balls[2].x <= 0 || balls[2].x >= 312) { balls[2].dx = -balls[2].dx; }
+        if (balls[2].y <= 0 || balls[2].y >= 248) { balls[2].dy = -balls[2].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[2].x + px, balls[2].y + py, balls[2].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot4(4) -> void {
+        var px: int;
+        var py: int;
+        balls[3].x = balls[3].x + balls[3].dx;
+        balls[3].y = balls[3].y + balls[3].dy;
+        if (balls[3].x <= 0 || balls[3].x >= 312) { balls[3].dx = -balls[3].dx; }
+        if (balls[3].y <= 0 || balls[3].y >= 248) { balls[3].dy = -balls[3].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[3].x + px, balls[3].y + py, balls[3].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot5(5) -> void {
+        var px: int;
+        var py: int;
+        balls[4].x = balls[4].x + balls[4].dx;
+        balls[4].y = balls[4].y + balls[4].dy;
+        if (balls[4].x <= 0 || balls[4].x >= 312) { balls[4].dx = -balls[4].dx; }
+        if (balls[4].y <= 0 || balls[4].y >= 248) { balls[4].dy = -balls[4].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[4].x + px, balls[4].y + py, balls[4].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot6(6) -> void {
+        var px: int;
+        var py: int;
+        balls[5].x = balls[5].x + balls[5].dx;
+        balls[5].y = balls[5].y + balls[5].dy;
+        if (balls[5].x <= 0 || balls[5].x >= 312) { balls[5].dx = -balls[5].dx; }
+        if (balls[5].y <= 0 || balls[5].y >= 248) { balls[5].dy = -balls[5].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[5].x + px, balls[5].y + py, balls[5].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot7(7) -> void {
+        var px: int;
+        var py: int;
+        balls[6].x = balls[6].x + balls[6].dx;
+        balls[6].y = balls[6].y + balls[6].dy;
+        if (balls[6].x <= 0 || balls[6].x >= 312) { balls[6].dx = -balls[6].dx; }
+        if (balls[6].y <= 0 || balls[6].y >= 248) { balls[6].dy = -balls[6].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[6].x + px, balls[6].y + py, balls[6].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot8(8) -> void {
+        var px: int;
+        var py: int;
+        balls[7].x = balls[7].x + balls[7].dx;
+        balls[7].y = balls[7].y + balls[7].dy;
+        if (balls[7].x <= 0 || balls[7].x >= 312) { balls[7].dx = -balls[7].dx; }
+        if (balls[7].y <= 0 || balls[7].y >= 248) { balls[7].dy = -balls[7].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[7].x + px, balls[7].y + py, balls[7].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot9(9) -> void {
+        var px: int;
+        var py: int;
+        balls[8].x = balls[8].x + balls[8].dx;
+        balls[8].y = balls[8].y + balls[8].dy;
+        if (balls[8].x <= 0 || balls[8].x >= 312) { balls[8].dx = -balls[8].dx; }
+        if (balls[8].y <= 0 || balls[8].y >= 248) { balls[8].dy = -balls[8].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[8].x + px, balls[8].y + py, balls[8].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot10(10) -> void {
+        var px: int;
+        var py: int;
+        balls[9].x = balls[9].x + balls[9].dx;
+        balls[9].y = balls[9].y + balls[9].dy;
+        if (balls[9].x <= 0 || balls[9].x >= 312) { balls[9].dx = -balls[9].dx; }
+        if (balls[9].y <= 0 || balls[9].y >= 248) { balls[9].dy = -balls[9].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[9].x + px, balls[9].y + py, balls[9].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot11(11) -> void {
+        var px: int;
+        var py: int;
+        balls[10].x = balls[10].x + balls[10].dx;
+        balls[10].y = balls[10].y + balls[10].dy;
+        if (balls[10].x <= 0 || balls[10].x >= 312) { balls[10].dx = -balls[10].dx; }
+        if (balls[10].y <= 0 || balls[10].y >= 248) { balls[10].dy = -balls[10].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[10].x + px, balls[10].y + py, balls[10].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot12(12) -> void {
+        var px: int;
+        var py: int;
+        balls[11].x = balls[11].x + balls[11].dx;
+        balls[11].y = balls[11].y + balls[11].dy;
+        if (balls[11].x <= 0 || balls[11].x >= 312) { balls[11].dx = -balls[11].dx; }
+        if (balls[11].y <= 0 || balls[11].y >= 248) { balls[11].dy = -balls[11].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[11].x + px, balls[11].y + py, balls[11].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot13(13) -> void {
+        var px: int;
+        var py: int;
+        balls[12].x = balls[12].x + balls[12].dx;
+        balls[12].y = balls[12].y + balls[12].dy;
+        if (balls[12].x <= 0 || balls[12].x >= 312) { balls[12].dx = -balls[12].dx; }
+        if (balls[12].y <= 0 || balls[12].y >= 248) { balls[12].dy = -balls[12].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[12].x + px, balls[12].y + py, balls[12].pal);
+            }
+        }
+    }
+
+    interrupt ball_slot14(14) -> void {
+        var px: int;
+        var py: int;
+        balls[13].x = balls[13].x + balls[13].dx;
+        balls[13].y = balls[13].y + balls[13].dy;
+        if (balls[13].x <= 0 || balls[13].x >= 312) { balls[13].dx = -balls[13].dx; }
+        if (balls[13].y <= 0 || balls[13].y >= 248) { balls[13].dy = -balls[13].dy; }
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(balls[13].x + px, balls[13].y + py, balls[13].pal);
+            }
+        }
+    }
+
+    // Slot 15: end frame - runs last, after all 14 balls have been drawn.
+    interrupt frame_end(15) -> void {
+        call Show();
+    }
+
+    proc main() -> void {
+        var i:   int;
+        var key: byte = 0;
+
+        call SetGraphicsMode(0);
+        call SetColor(0, $000);   // background: black
+        call SetColor(1, $F00);   // ball palette 1: red
+        call SetColor(2, $0F0);   // ball palette 2: green
+        call SetColor(3, $00F);   // ball palette 3: blue
+        call SetColor(4, $FF0);   // ball palette 4: yellow
+        call InitKeyboard();
+
+        for i = 0 to NUM_BALLS - 1 {
+            balls[i].x   = 8 + i * 20;
+            balls[i].y   = 8 + i * 16;
+            balls[i].dx  = 1 + (i % 3);
+            balls[i].dy  = 1 + ((i + 2) % 3);
+            balls[i].pal = 1 + (i % 4);
+        }
+
+        starti(0);
+        starti(1);
+        starti(2);
+        starti(3);
+        starti(4);
+        starti(5);
+        starti(6);
+        starti(7);
+        starti(8);
+        starti(9);
+        starti(10);
+        starti(11);
+        starti(12);
+        starti(13);
+        starti(14);
+        starti(15);
+
+        while (key != KEY_ESC) {
+            key = GetKey();
+        }
+
+        endi(0);
+        endi(1);
+        endi(2);
+        endi(3);
+        endi(4);
+        endi(5);
+        endi(6);
+        endi(7);
+        endi(8);
+        endi(9);
+        endi(10);
+        endi(11);
+        endi(12);
+        endi(13);
+        endi(14);
+        endi(15);
+
+        return;
+    }
