@@ -23,6 +23,21 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   See [INTERRUPT_KEYWORD.md](INTERRUPT_KEYWORD.md) and
   `examples/interrupt_vbl_demo.has`.
 
+### Fixed
+
+- **`starti(X)` now always explicitly re-enables the master `INTENA` bit
+  (bit 14/INTEN)**, instead of relying on some other, unrelated library call
+  (e.g. `InitKeyboard()`, which happens to also set it) having already turned
+  interrupts back on after `lib/takeover.s`'s `TakeSystem()` blanket-disables
+  `INTENA`. A program that called `TakeSystem()` then `starti()` with no
+  other library call touching `INTENA` in between (e.g.
+  `examples/interrupt_vbl_demo.has`) would leave the master interrupt switch
+  off forever - the declared slot would never (reliably) run, and could
+  produce a Guru Meditation depending on when/how `ReleaseSystem()` later
+  unmasked a stale pending interrupt request.
+
+### Added
+
 - **AmigaDOS CLI output library (`lib/dos.s`)** for non-bare-metal AmigaDOS
   CLI tools written in HAS:
   - `InitDOS() -> int` - opens `dos.library` and caches its base plus the
