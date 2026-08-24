@@ -200,7 +200,6 @@ code main:
         var rx:     int;
         var ry:     int;
         var key:    byte = 0;
-        var prevfc: int;
 
         call SetGraphicsMode(0);
         call SetColor(0, $000);
@@ -237,10 +236,6 @@ code main:
         starti(14);
 
         while (key != KEY_ESC) {
-            // Wait for the next VBL pulse; spin at IPL 0 so keyboard can fire.
-            prevfc = frame_counter;
-            while (frame_counter == prevfc) {}
-
             call SwapScreen();  // Switch to back buffer
             call ClearScreen();
 
