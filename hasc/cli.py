@@ -10,7 +10,7 @@ from .target import CpuTarget, TargetSpec
 import os
 from lark.exceptions import LarkError, UnexpectedInput, UnexpectedToken, UnexpectedCharacters
 
-_internal_version = "0.9.5"
+_internal_version = "0.9.6"
 
 # Read version from VERSION file
 def _get_version():
