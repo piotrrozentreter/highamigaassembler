@@ -17,6 +17,11 @@ bss player_state:
     moved_left.l: 1 // 1 if the last update moved the player left, else 0
 
 code main:
+
+    asm {
+        jmp main
+    }
+    
     // Applies one frame of horizontal movement using the signed velocity.
     proc update_position() -> int
     {

@@ -26,10 +26,17 @@ extern func InitKeyboard()              -> void;
 extern func GetKey()                    -> byte;
 extern func TakeSystem()                -> void;
 extern func ReleaseSystem()             -> void;
+extern func SwapScreen()                -> void;
+extern func WaitVBlank()                -> void;
+extern func ClearScreen()                -> void;
+
 
 bss balls_bss:
     struct balls[14] { x.w, y.w, dx.w, dy.w, pal.w, prev_x.w, prev_y.w }
     frame_counter.l: 1
+
+data d:
+    lock.l = 0
 
 code main:
     public main;
@@ -49,6 +56,7 @@ code main:
     // Slots 1-14: physics only - save prev pos, move, bounce (~150 cycles each).
     // No SetPixel here; rendering happens in the main loop at IPL 0.
     interrupt ball_slot1(1) -> void {
+        if(lock == 1){return;}
         balls[0].prev_x = balls[0].x;
         balls[0].prev_y = balls[0].y;
         balls[0].x = balls[0].x + balls[0].dx;
@@ -58,6 +66,7 @@ code main:
     }
 
     interrupt ball_slot2(2) -> void {
+        if(lock == 1){return;}
         balls[1].prev_x = balls[1].x;
         balls[1].prev_y = balls[1].y;
         balls[1].x = balls[1].x + balls[1].dx;
@@ -67,6 +76,7 @@ code main:
     }
 
     interrupt ball_slot3(3) -> void {
+        if(lock == 1){return;}
         balls[2].prev_x = balls[2].x;
         balls[2].prev_y = balls[2].y;
         balls[2].x = balls[2].x + balls[2].dx;
@@ -76,6 +86,7 @@ code main:
     }
 
     interrupt ball_slot4(4) -> void {
+        if(lock == 1){return;}
         balls[3].prev_x = balls[3].x;
         balls[3].prev_y = balls[3].y;
         balls[3].x = balls[3].x + balls[3].dx;
@@ -85,6 +96,7 @@ code main:
     }
 
     interrupt ball_slot5(5) -> void {
+        if(lock == 1){return;}
         balls[4].prev_x = balls[4].x;
         balls[4].prev_y = balls[4].y;
         balls[4].x = balls[4].x + balls[4].dx;
@@ -94,6 +106,7 @@ code main:
     }
 
     interrupt ball_slot6(6) -> void {
+        if(lock == 1){return;}
         balls[5].prev_x = balls[5].x;
         balls[5].prev_y = balls[5].y;
         balls[5].x = balls[5].x + balls[5].dx;
@@ -103,6 +116,7 @@ code main:
     }
 
     interrupt ball_slot7(7) -> void {
+        if(lock == 1){return;}
         balls[6].prev_x = balls[6].x;
         balls[6].prev_y = balls[6].y;
         balls[6].x = balls[6].x + balls[6].dx;
@@ -112,6 +126,7 @@ code main:
     }
 
     interrupt ball_slot8(8) -> void {
+        if(lock == 1){return;}
         balls[7].prev_x = balls[7].x;
         balls[7].prev_y = balls[7].y;
         balls[7].x = balls[7].x + balls[7].dx;
@@ -121,6 +136,7 @@ code main:
     }
 
     interrupt ball_slot9(9) -> void {
+        if(lock == 1){return;}
         balls[8].prev_x = balls[8].x;
         balls[8].prev_y = balls[8].y;
         balls[8].x = balls[8].x + balls[8].dx;
@@ -130,6 +146,7 @@ code main:
     }
 
     interrupt ball_slot10(10) -> void {
+        if(lock == 1){return;}
         balls[9].prev_x = balls[9].x;
         balls[9].prev_y = balls[9].y;
         balls[9].x = balls[9].x + balls[9].dx;
@@ -139,6 +156,7 @@ code main:
     }
 
     interrupt ball_slot11(11) -> void {
+        if(lock == 1){return;}
         balls[10].prev_x = balls[10].x;
         balls[10].prev_y = balls[10].y;
         balls[10].x = balls[10].x + balls[10].dx;
@@ -148,6 +166,7 @@ code main:
     }
 
     interrupt ball_slot12(12) -> void {
+        if(lock == 1){return;}
         balls[11].prev_x = balls[11].x;
         balls[11].prev_y = balls[11].y;
         balls[11].x = balls[11].x + balls[11].dx;
@@ -157,6 +176,7 @@ code main:
     }
 
     interrupt ball_slot13(13) -> void {
+        if(lock == 1){return;}
         balls[12].prev_x = balls[12].x;
         balls[12].prev_y = balls[12].y;
         balls[12].x = balls[12].x + balls[12].dx;
@@ -166,18 +186,13 @@ code main:
     }
 
     interrupt ball_slot14(14) -> void {
+        if(lock == 1){return;}
         balls[13].prev_x = balls[13].x;
         balls[13].prev_y = balls[13].y;
         balls[13].x = balls[13].x + balls[13].dx;
         balls[13].y = balls[13].y + balls[13].dy;
         if (balls[13].x <= 0 || balls[13].x >= 312) { balls[13].dx = -balls[13].dx; }
         if (balls[13].y <= 0 || balls[13].y >= 248) { balls[13].dy = -balls[13].dy; }
-    }
-
-    // Slot 15: commit the frame rendered by the main loop during the previous
-    // interval. Show() only updates the copper pointer (~50 cycles).
-    interrupt frame_end(15) -> void {
-        call Show();
     }
 
     proc main() -> void {
@@ -220,20 +235,18 @@ code main:
         starti(12);
         starti(13);
         starti(14);
-        starti(15);
 
         while (key != KEY_ESC) {
             // Wait for the next VBL pulse; spin at IPL 0 so keyboard can fire.
             prevfc = frame_counter;
             while (frame_counter == prevfc) {}
 
-            // Render at IPL 0: erase prev 4x4 block, draw new 4x4 block.
+            call SwapScreen();  // Switch to back buffer
+            call ClearScreen();
+
+            // Render
+            lock = 1;
             for i = 0 to NUM_BALLS - 1 {
-                for ry = 0 to 3 {
-                    for rx = 0 to 3 {
-                        call SetPixel(balls[i].prev_x + rx, balls[i].prev_y + ry, 0);
-                    }
-                }
                 for ry = 0 to 3 {
                     for rx = 0 to 3 {
                         call SetPixel(balls[i].x + rx, balls[i].y + ry, balls[i].pal);
@@ -241,6 +254,9 @@ code main:
                 }
             }
 
+            lock = 0;
+            call WaitVBlank();  // Wait for vertical blanking interval
+            call Show();        // Display the back buffer
             key = GetKey();
         }
 
@@ -259,7 +275,6 @@ code main:
         endi(12);
         endi(13);
         endi(14);
-        endi(15);
 
         return;
     }
