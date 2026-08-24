@@ -1,16 +1,20 @@
-// Small VBL-driven bouncing-ball demo: the `interrupt` slot owns the blitter
-// and all rendering (ClearScreen/SetPixel/Show), exactly the pattern
-// described in docs/INTERRUPT_KEYWORD.md - the main loop only polls for the
-// quit key and never touches graphics hardware, so there's no risk of the
-// main loop and the interrupt racing on the blitter registers.
-
-#pragma lockreg(a5);
+// Small VBL-driven bouncing-ball demo: the `interrupt` slot owns all
+// rendering (SetPixel/Show), exactly the pattern described in
+// docs/INTERRUPT_KEYWORD.md - the main loop only polls for the quit key and
+// never touches graphics hardware.
+//
+// Note: this deliberately avoids ClearScreen()/SwapScreen() every frame.
+// ClearScreen() busy-waits on the blitter (WAITBLIT) for the whole screen -
+// on a lores 320x256 buffer that's on the order of milliseconds, spent at
+// CPU interrupt priority 3 (VERTB). The keyboard's IRQ (lib/keyboard.s) is
+// priority 2 and needs a hard ~90us handshake window every keystroke -
+// holding priority 3 for that long, every single frame, starves it almost
+// completely (ESC would never register). Erasing/drawing only the ball's
+// own pixels keeps the slot body's duration negligible.
 
 const KEY_ESC = 69;   // $45
 
 extern func SetGraphicsMode(mode: int)  -> int;
-extern func ClearScreen()               -> int;
-extern func SwapScreen()                -> int;
 extern func Show()                      -> void;
 extern func SetColor(id: int, col: int) -> int;
 extern func SetPixel(x: int, y: int, color: int) -> int;
@@ -35,12 +39,19 @@ code main:
         jmp ReleaseSystem
     }
 
-    // Slot 0: the ONLY place that touches the blitter/copper - runs once per
-    // real vertical blank (50Hz PAL / 60Hz NTSC), so bouncing + redrawing is
+    // Slot 0: the ONLY place that touches the screen - runs once per real
+    // vertical blank (50Hz PAL / 60Hz NTSC), so bouncing + redrawing is
     // always frame-synced and never overlaps with itself.
     interrupt vbl_render(0) -> void {
         var px: int;
         var py: int;
+
+        // erase the ball's previous position first (cheap: 16 pixel writes)
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(ball_x + px, ball_y + py, 0);
+            }
+        }
 
         ball_x = ball_x + ball_dx;
         ball_y = ball_y + ball_dy;
@@ -51,9 +62,6 @@ code main:
         if (ball_y <= 0 || ball_y >= 248) {
             ball_dy = -ball_dy;
         }
-
-        call SwapScreen();
-        call ClearScreen();
 
         for py = 0 to 3 {
             for px = 0 to 3 {
