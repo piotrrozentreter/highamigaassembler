@@ -1,0 +1,34 @@
+// Demonstrates the `interrupt`/`starti`/`endi` VBlank dispatch-slot feature.
+// See docs/INTERRUPT_KEYWORD.md for the hardware model this maps to.
+
+extern func TakeSystem() -> void;
+extern func ReleaseSystem() -> void;
+
+bss counters:
+    frame_count.l: 1
+
+code main:
+    asm {
+        jmp main
+    }
+
+    // Slot 0: increments a counter every vertical blank (50Hz PAL / 60Hz NTSC).
+    interrupt vbl_counter(0) -> void {
+        frame_count = frame_count + 1;
+    }
+
+    proc main() -> void {
+        var i: int;
+        call TakeSystem();
+
+        starti(0);
+
+        for i = 0 to 1000 {
+            // busy loop standing in for real per-frame game logic
+        }
+
+        endi(0);
+
+        call ReleaseSystem();
+        return;
+    }

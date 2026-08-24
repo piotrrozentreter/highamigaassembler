@@ -149,6 +149,7 @@ optimizations are not enabled.
 
 - **[docs/PROC_VS_FUNC_SUMMARY.md](docs/PROC_VS_FUNC_SUMMARY.md)** - Understanding `proc` vs `func` vs `extern func`
 - **[docs/NATIVE_KEYWORD.md](docs/NATIVE_KEYWORD.md)** - Zero-overhead native functions for performance-critical code
+- **[docs/INTERRUPT_KEYWORD.md](docs/INTERRUPT_KEYWORD.md)** - `interrupt`/`starti`/`endi`: software VBlank dispatch slots (AMOS AMAL/`EVERY`-style)
 - **[docs/OPERATORS.md](docs/OPERATORS.md)** - Complete operator reference
 - **[docs/BITWISE.md](docs/BITWISE.md)** - Bitwise and shift operations
 - **[docs/SHIFT_OPERATORS.md](docs/SHIFT_OPERATORS.md)** - Shift operation details

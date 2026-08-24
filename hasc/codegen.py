@@ -39,6 +39,7 @@ class CodeGen:
         self.extern_funcs = self._build_extern_funcs(module)  # Collect external functions
         self.locked_regs = self._build_locked_regs(module)  # Collect locked registers from pragmas
         self.strict_word_arith = self._build_strict_word_arith(module)
+        self.interrupt_procs = self._build_interrupt_procs(module)  # {index: proc_name}, 0-15
         self.label_counter = 0
         self.push_stack = []  # Track PUSH/POP register lists
         self.loop_stack = []  # Stack of (continue_label, end_label) for nested loops
@@ -331,6 +332,18 @@ class CodeGen:
             elif isinstance(item, ast.ExternDecl) and item.kind == 'func':
                 extern_funcs.add(item.name)
         return extern_funcs
+
+    def _build_interrupt_procs(self, module: ast.Module):
+        """Collect declared `interrupt NAME(INDEX) -> void {...}` slots.
+        Returns dict {index (0-15): proc_name}. Validator already guarantees
+        unique/in-range indices, so this is a straightforward collection pass."""
+        slots = {}
+        for item in module.items:
+            if isinstance(item, ast.CodeSection):
+                for code_item in item.items:
+                    if isinstance(code_item, ast.InterruptProc):
+                        slots[code_item.index] = code_item.name
+        return slots
 
     def _build_locked_regs(self, module: ast.Module):
         """Collect locked registers from #pragma lockreg directives.
@@ -2768,6 +2781,8 @@ class CodeGen:
                     localsize = ((offset + 3) & ~3) + 4
                     self.emit(indent + f"move.l -{localsize}(a6),a4  ; restore a4 from frame")
                 self.emit(indent + "unlk a6")
+            if getattr(proc, 'is_interrupt', False):
+                self.emit(indent + "movem.l (sp)+,d0-d7/a0-a6")
             self.emit(indent + "rts")
         elif isinstance(stmt, ast.AsmBlock):
             # Substitute @varname references with addresses/registers
@@ -2810,6 +2825,10 @@ class CodeGen:
                 self._fail("POP() without matching PUSH() - unbalanced register save/restore")
         elif isinstance(stmt, ast.CallStmt):
             self._emit_call_stmt(stmt, params, locals_info, indent, frame_reg=frame_reg)
+        elif isinstance(stmt, ast.StartInterrupt):
+            self._emit_starti(stmt.index, indent)
+        elif isinstance(stmt, ast.EndInterrupt):
+            self._emit_endi(stmt.index, indent)
         elif isinstance(stmt, ast.If):
             # Fast path: branchless boolean assignment (var = <comparison> ? 1 : 0) via Scc.
             if stmt.else_body and self._try_emit_scc_bool_assign(
@@ -3755,7 +3774,120 @@ class CodeGen:
                                     self.emit(indent + f"move.l -{localsize}(a6),a4  ; restore a4 from frame")
                                 self.emit(indent + "unlk a6")
                             self.emit(indent + "rts")
+                    elif isinstance(it, ast.InterruptProc):
+                        # Dispatch slot for the single real VERTB hardware interrupt (see
+                        # docs/INTERRUPT_KEYWORD.md). Always: no params, void, full
+                        # D0-D7/A0-A6 save/restore, ends in RTS (called as a subroutine
+                        # from the compiler-generated master VBlank ISR, not a real
+                        # top-level exception handler - only that master ISR uses RTE).
+                        self.push_stack = []
+                        self.dbra_depth = 0
+                        frame_reg = "a6"
+                        self.emit("")
+                        self.emit(f"{it.name}:  ; interrupt slot {it.index} (VBlank dispatch)")
+                        shim = ast.Proc(name=it.name, params=[], rettype='void', body=it.body, native=False)
+                        shim.is_interrupt = True
+                        params, locals_info, localsize, saved_reg_params = self._analyze_proc(shim)
+                        self.emit(indent + "movem.l d0-d7/a0-a6,-(sp)")
+                        link_param = "#0" if localsize == 0 else f"#-{localsize}"
+                        self.emit(indent + f"link a6,{link_param}")
+                        for param_name, (reg, offset) in saved_reg_params.items():
+                            self.emit(indent + f"move.l {reg},{-offset}(a6)  ; save {param_name} from {reg}")
+                        for stmt in it.body:
+                            self._emit_stmt(stmt, params, locals_info, shim, indent, True, frame_reg=frame_reg)
+                        has_return = any(isinstance(s, ast.Return) for s in it.body)
+                        if not has_return:
+                            self.emit(indent + "unlk a6")
+                            self.emit(indent + "movem.l (sp)+,d0-d7/a0-a6")
+                            self.emit(indent + "rts")
+
+        self._emit_interrupt_support()
 
         optimized_lines = peepholeopt.peephole_optimize(self.lines, self.target)
 
         return "\n".join(optimized_lines)
+
+    def _emit_interrupt_support(self):
+        """Emit the shared VBlank dispatch table + master ISR + starti/endi runtime
+        support, once, if the program declared any `interrupt` slots. Identical on
+        68000/68020 - only plain movem.l/bset/bclr/dbra, no CPU-specific addressing.
+        """
+        if not self.interrupt_procs:
+            return
+        indent = "    "
+        self.emit("")
+        self.emit("; ---- interrupt/starti/endi runtime support (auto-generated) ----")
+        self.emit(indent + "SECTION has_interrupt_data,DATA")
+        self.emit(indent + "cnop 0,4")
+        self.emit(indent + "even")
+        self.emit("_has_int_mask: dc.w 0        ; bitmask of started (starti'd) slots 0-15")
+        self.emit("_has_old_vec3: dc.l 0        ; saved original level-3 (VERTB) autovector")
+        self.emit("_has_int_slots:")
+        for i in range(16):
+            name = self.interrupt_procs.get(i)
+            self.emit(f"    dc.l {name if name else 0}")
+        self.emit("")
+        self.emit(indent + "SECTION has_interrupt_code,CODE")
+        self.emit(indent + "cnop 0,4")
+        self.emit("HAS_CUSTOM      EQU $DFF000")
+        self.emit("HAS_INTENA      EQU $09A")
+        self.emit("HAS_INTREQ      EQU $09C")
+        self.emit("HAS_INTF_VERTB  EQU $0020")
+        self.emit("HAS_INTF_SETCLR EQU $8000")
+        self.emit("")
+        self.emit("_has_vblank_isr:")
+        self.emit(indent + "movem.l d0-d2/a0-a1,-(sp)")
+        self.emit(indent + "lea HAS_CUSTOM,a0")
+        self.emit(indent + "move.w #HAS_INTF_VERTB,HAS_INTREQ(a0)  ; ack VERTB")
+        self.emit(indent + "move.w _has_int_mask,d1")
+        self.emit(indent + "beq.s .has_isr_done")
+        self.emit(indent + "lea _has_int_slots,a1")
+        self.emit(indent + "moveq #15,d2")
+        self.emit(".has_isr_loop:")
+        self.emit(indent + "lsr.w #1,d1")
+        self.emit(indent + "bcc.s .has_isr_skip")
+        self.emit(indent + "move.l (a1),d0  ; slot pointer (0 = unused); MOVE sets Z")
+        self.emit(indent + "beq.s .has_isr_skip")
+        self.emit(indent + "movem.l d1-d2/a1,-(sp)")
+        self.emit(indent + "movea.l d0,a0")
+        self.emit(indent + "jsr (a0)")
+        self.emit(indent + "movem.l (sp)+,d1-d2/a1")
+        self.emit(".has_isr_skip:")
+        self.emit(indent + "addq.l #4,a1")
+        self.emit(indent + "dbra d2,.has_isr_loop")
+        self.emit(".has_isr_done:")
+        self.emit(indent + "movem.l (sp)+,d0-d2/a0-a1")
+        self.emit(indent + "rte")
+        self.emit("")
+        self.emit("; starti(X)/endi(X) entry points - one per declared slot, called by codegen")
+        self.emit("_has_int_ensure_installed:")
+        self.emit(indent + "move.l $6c,d0")
+        self.emit(indent + "cmp.l #_has_vblank_isr,d0")
+        self.emit(indent + "beq.s .has_ensure_done  ; already installed - self-correcting across")
+        self.emit(indent + "                        ; repeated TakeSystem()/ReleaseSystem() cycles")
+        self.emit(indent + "move.l d0,_has_old_vec3")
+        self.emit(indent + "move.l #_has_vblank_isr,$6c")
+        self.emit(".has_ensure_done:")
+        self.emit(indent + "rts")
+
+    def _emit_starti(self, index, indent):
+        """starti(X): lazily install the VERTB vector, set slot bit X, enable VERTB."""
+        self.emit(indent + "jsr _has_int_ensure_installed")
+        self.emit(indent + "move.w _has_int_mask,d0")
+        self.emit(indent + f"bset #{index},d0")
+        self.emit(indent + "move.w d0,_has_int_mask")
+        self.emit(indent + "lea HAS_CUSTOM,a0")
+        self.emit(indent + "move.w #(HAS_INTF_SETCLR|HAS_INTF_VERTB),HAS_INTENA(a0)")
+
+    def _emit_endi(self, index, indent):
+        """endi(X): clear slot bit X; disable VERTB entirely once no slots remain active."""
+        label = self._next_label("endi_keep")
+        self.emit(indent + "move.w _has_int_mask,d0")
+        self.emit(indent + f"bclr #{index},d0")
+        self.emit(indent + "move.w d0,_has_int_mask")
+        self.emit(indent + "tst.w d0")
+        self.emit(indent + f"bne.s {label}")
+        self.emit(indent + "lea HAS_CUSTOM,a0")
+        self.emit(indent + "move.w #HAS_INTF_VERTB,HAS_INTENA(a0)")
+        self.emit(f"{label}:")
+

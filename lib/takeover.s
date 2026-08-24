@@ -29,6 +29,7 @@ old_adkcon    dc.w       0                            ; saved value of ADKCON
 old_ciaa_icr  dc.b       0 
               even
 old_int2      dc.l       0
+old_int3      dc.l       0                    ; saved level-3 autovector (VERTB/COPER/BLIT - see hasc `interrupt` keyword)
 old_int4      dc.l       0
 
     SECTION code,CODE
@@ -66,6 +67,7 @@ TakeSystem:
               move.w     #DMASET,DMACON(a5)           ; sets only dma channels that we will use
 
               move.l     $68,old_int2
+              move.l     $6c,old_int3
               move.l     $70,old_int4
 
               move.w     INTENAR(a5),old_intena       ; save interrupts state
@@ -112,6 +114,7 @@ ReleaseSystem:
               move.b     old_ciaa_icr,CIAAICR
              
               move.l     old_int2,$68
+              move.l     old_int3,$6c
               move.l     old_int4,$70
 
               move.l     ExecBase,a6                  ; base address of Exec

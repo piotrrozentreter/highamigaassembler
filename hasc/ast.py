@@ -95,6 +95,36 @@ class FuncDecl:
 
 
 @dataclass
+class InterruptProc:
+    """A VBlank-dispatched interrupt slot: `interrupt NAME(INDEX) -> void { ... }`.
+
+    Not a real per-vector CPU exception handler - see docs/INTERRUPT_KEYWORD.md.
+    `index` (0-15) is a software dispatch-slot number multiplexed off the single
+    real VERTB (vertical blank) hardware interrupt, mirroring the AMOS AMAL/EVERY
+    model. Duck-types like Proc (params=[], rettype='void', native=False) so it
+    can be reused by validator/codegen helpers that only touch those fields.
+    """
+    name: str
+    index: int
+    body: List[Any]
+    params: List['Param'] = field(default_factory=list)
+    rettype: str = 'void'
+    native: bool = False
+
+
+@dataclass
+class StartInterrupt:
+    """`starti(X);` - enables dispatch slot X and ensures VERTB is unmasked."""
+    index: int
+
+
+@dataclass
+class EndInterrupt:
+    """`endi(X);` - disables dispatch slot X; clears VERTB if no slots remain active."""
+    index: int
+
+
+@dataclass
 class DataSection:
     name: str
     is_chip: bool  # True for data_chip, False for data
