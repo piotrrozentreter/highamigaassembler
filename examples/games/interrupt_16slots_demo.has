@@ -3,7 +3,6 @@
 //
 //   slot 0        -> frame_begin: increment the VBL sync counter (~20 cycles)
 //   slots 1..14   -> one ball each: save prev pos, move, bounce (~150 cycles)
-//   slot 15       -> frame_end: Show() to present the frame just rendered
 //
 // All slot bodies are lightweight (no SetPixel, no blitter waits). Rendering
 // runs in the main loop at CPU priority 0, so the Level-2 keyboard IRQ fires

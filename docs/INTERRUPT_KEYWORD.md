@@ -1,9 +1,7 @@
 # The `interrupt` / `starti` / `endi` keywords
 
 Software VBlank dispatch slots for periodic (50Hz PAL / 60Hz NTSC) background
-work, modeled on the AMOS Professional AMAL/`EVERY` channel system rather than
-on a literal "16 CPU interrupt vectors" feature (the 68000 has no such thing -
-see **Hardware model** below for the corrected facts).
+work, modeled on the AMOS Professional AMAL/`EVERY` channel system
 
 ## Syntax
 
@@ -52,6 +50,7 @@ code main:
 ## Hardware model (and corrections to common assumptions)
 
 The 68000 does **not** have "16 user interrupts". It has:
+
 - 7 CPU priority levels (autovector interrupts 1-7, IPL0-2 lines) - not 16.
 - 16 **software** trap vectors via `TRAP #0`-`TRAP #15` (vectors 32-47) - a
   different, unrelated mechanism (synchronous software traps, not periodic
@@ -214,6 +213,7 @@ slot instead - this keeps any single `interrupt` slot's own execution time
 short, even though the blit itself takes a while in the background.
 
 Practical checklist for `interrupt` slot bodies:
+
 - For programs that combine rendering with `GetKey()`/`InitKeyboard()` input,
   prefer the VBL-sync flag pattern: one trivial slot sets a flag/counter;
   all SetPixel and blitter work runs in the main loop after a VBL wait at

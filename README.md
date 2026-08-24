@@ -191,7 +191,7 @@ The `examples/` directory contains numerous demonstrations:
 - `pointers.has` - Pointer operations and dereferencing
 - `address_of.has` - Address-of operator examples
 
-### Advanced Features
+### Advanced Feature Examples
 
 - `include_test.has` - Include system and reusable definitions (including macros)
 - `python_directive.has` - @python directive examples
@@ -221,10 +221,10 @@ These examples demonstrate game-related concepts and systems, but they are not r
   - Collision detection
   - Full game loop with multiple screens
 - `games/robots/` - **Robot**: A gameplay concept demonstrating:
-    - Game logic and screen flow
-    - Asset handling and rendering patterns
-    - Input-driven interactions
-    - Compiler feature integration in a larger example
+  - Game logic and screen flow
+  - Asset handling and rendering patterns
+  - Input-driven interactions
+  - Compiler feature integration in a larger example
 
 ### Full Games Built with HAS
 
@@ -614,7 +614,7 @@ code main:
 ## 🔍 Type System
 
 | Type | Size | Signed | Description |
-|------|------|--------|-------------|
+| ------ | ------ | -------- | ------------- |
 | byte, i8 | 1 | Yes | 8-bit signed integer |
 | u8, char | 1 | No | 8-bit unsigned integer |
 | word, i16, short | 2 | Yes | 16-bit signed integer |
