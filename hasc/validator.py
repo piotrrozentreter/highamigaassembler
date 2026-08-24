@@ -20,6 +20,7 @@ class Validator:
         self.extern_funcs = {}  # External functions: {name: [params]} where params is list of Param objects
         self.proc_funcs = {}  # Local procedures: {name: [params]}
         self.macros = {}  # Macro definitions: {name: [params]}
+        self.interrupts = {}  # interrupt slot index (0-15) -> ast.InterruptProc
         
     def validate(self):
         """Run all validation checks on the module."""
@@ -162,6 +163,8 @@ class Validator:
                     elif isinstance(code_item, ast.Proc):
                         # Store local procedure signature
                         self.proc_funcs[code_item.name] = code_item.params
+                    elif isinstance(code_item, ast.InterruptProc):
+                        self._collect_interrupt_decl(code_item)
             elif isinstance(item, ast.ExternDecl):
                 # Allow extern declarations at module level (header-style includes)
                 if item.kind == 'var':
@@ -180,6 +183,8 @@ class Validator:
             if isinstance(item, ast.CodeSection):
                 for code_item in item.items:
                     if isinstance(code_item, ast.Proc):
+                        self._validate_proc(code_item)
+                    elif isinstance(code_item, ast.InterruptProc):
                         self._validate_proc(code_item)
         
         if self.errors:
@@ -267,6 +272,31 @@ class Validator:
             else:
                 used_regs.add(reg)
     
+    def _collect_interrupt_decl(self, interrupt_proc):
+        """Pass-1 registration for `interrupt NAME(INDEX) -> void { ... }`.
+
+        Validates the slot index (0-15, unique) and that the name doesn't
+        collide with an existing proc/func/macro identifier.
+        """
+        index = interrupt_proc.index
+        name = interrupt_proc.name
+        if not (0 <= index <= 15):
+            self.errors.append(
+                f"Interrupt '{name}': slot index {index} out of range - must be 0-15 "
+                f"(Amiga VBlank dispatch slots, matching AMOS-style AMAL/EVERY channels)"
+            )
+            return
+        if index in self.interrupts:
+            self.errors.append(
+                f"Interrupt '{name}': slot index {index} already used by interrupt "
+                f"'{self.interrupts[index].name}'"
+            )
+            return
+        if name in self.proc_funcs or name in self.extern_funcs or name in self.macros:
+            self.errors.append(f"Interrupt '{name}': name already used by another proc/func/macro")
+            return
+        self.interrupts[index] = interrupt_proc
+
     def _validate_proc(self, proc):
         """Validate a procedure."""
         # Validate native functions
@@ -511,14 +541,21 @@ class Validator:
                 self._validate_expr(stmt.expr, symbols, proc)
             # Check if return type matches procedure return type
             rettype = self._normalized_rettype(proc)
+            is_interrupt = isinstance(proc, ast.InterruptProc)
             if stmt.expr is None and rettype not in (None, 'void'):
                 self.warnings.append(
                     f"In proc '{proc.name}': Empty return in non-void function"
                 )
             elif stmt.expr is not None and rettype == 'void':
-                self.warnings.append(
-                    f"In proc '{proc.name}': Return with value in void function"
-                )
+                if is_interrupt:
+                    self.errors.append(
+                        f"In interrupt '{proc.name}': interrupt procs must always return void "
+                        f"(found 'return <expr>;')"
+                    )
+                else:
+                    self.warnings.append(
+                        f"In proc '{proc.name}': Return with value in void function"
+                    )
         
         elif isinstance(stmt, ast.If):
             self._validate_expr(stmt.cond, symbols, proc)
@@ -600,6 +637,25 @@ class Validator:
                 if similar:
                     error_msg += f". Did you mean: {', '.join(similar[:3])}?"
                 self.errors.append(error_msg)
+
+        elif isinstance(stmt, ast.StartInterrupt):
+            self._validate_interrupt_index(stmt.index, proc, 'starti')
+
+        elif isinstance(stmt, ast.EndInterrupt):
+            self._validate_interrupt_index(stmt.index, proc, 'endi')
+
+    def _validate_interrupt_index(self, index, proc, keyword):
+        """Shared range/definition check for starti(X)/endi(X)."""
+        if not (0 <= index <= 15):
+            self.errors.append(
+                f"In proc '{proc.name}': {keyword}({index}) - interrupt index must be 0-15"
+            )
+            return
+        if index not in self.interrupts:
+            self.errors.append(
+                f"In proc '{proc.name}': {keyword}({index}) refers to an interrupt slot that "
+                f"was never declared with 'interrupt NAME({index}) -> void {{ ... }}'"
+            )
     
     def _validate_expr(self, expr, symbols, proc):
         """Validate an expression."""

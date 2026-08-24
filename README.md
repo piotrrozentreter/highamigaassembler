@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.9.5
+**Version:** 0.9.6
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -149,6 +149,7 @@ optimizations are not enabled.
 
 - **[docs/PROC_VS_FUNC_SUMMARY.md](docs/PROC_VS_FUNC_SUMMARY.md)** - Understanding `proc` vs `func` vs `extern func`
 - **[docs/NATIVE_KEYWORD.md](docs/NATIVE_KEYWORD.md)** - Zero-overhead native functions for performance-critical code
+- **[docs/INTERRUPT_KEYWORD.md](docs/INTERRUPT_KEYWORD.md)** - `interrupt`/`starti`/`endi`: software VBlank dispatch slots (AMOS AMAL/`EVERY`-style)
 - **[docs/OPERATORS.md](docs/OPERATORS.md)** - Complete operator reference
 - **[docs/BITWISE.md](docs/BITWISE.md)** - Bitwise and shift operations
 - **[docs/SHIFT_OPERATORS.md](docs/SHIFT_OPERATORS.md)** - Shift operation details
@@ -637,7 +638,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.9.5** - Active Development
+**Version 0.9.6** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 

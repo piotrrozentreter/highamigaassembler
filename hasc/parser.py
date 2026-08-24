@@ -49,6 +49,7 @@ proc_decl: "proc" CNAME "(" [params] ")" "->" type "{" stmt* "}"
          | "native" "proc" CNAME "(" [params] ")" "->" type "{" stmt* "}" -> native_proc_decl
 func_decl: "func" CNAME "(" [params] ")" "->" type ";"
          | "native" "func" CNAME "(" [params] ")" "->" type ";" -> native_func_decl
+interrupt_decl: "interrupt" CNAME "(" NUMBER ")" "->" "void" "{" stmt* "}"
 params: param ("," param)*
 param: ["__reg" "(" REG ")"] CNAME ":" type
 type: CNAME STAR?  // Support pointer types like "int*"
@@ -79,7 +80,7 @@ struct_bss_var: "struct" CNAME array_dims? "{" struct_field_list "}"
 
 code_section: "code" CNAME":" code_item* -> code_section
            | "code_chip" CNAME":" code_item* -> code_chip_section
-?code_item: proc_decl | func_decl | asm_stmt | extern_decl | public_decl
+?code_item: proc_decl | func_decl | asm_stmt | extern_decl | public_decl | interrupt_decl
 
 extern_decl: "extern" "func" CNAME "(" [params] ")" "->" type ";" -> extern_func_decl
            | "extern" "var" CNAME ":" type ";" -> extern_var_decl
@@ -91,10 +92,12 @@ asm_stmt: "asm" STRING [";"]
 
 ASMBLOCK: /\{BLOCK_\d+\}/
 
-?stmt: push_stmt | pop_stmt | var_decl | compound_assign_stmt | assign_stmt | return_stmt | if_stmt | while_stmt | do_while_stmt | for_stmt | repeat_stmt | expr_stmt | call_stmt | asm_stmt | break_stmt | continue_stmt | macro_call_stmt | python_stmt
+?stmt: push_stmt | pop_stmt | var_decl | compound_assign_stmt | assign_stmt | return_stmt | if_stmt | while_stmt | do_while_stmt | for_stmt | repeat_stmt | expr_stmt | call_stmt | asm_stmt | break_stmt | continue_stmt | macro_call_stmt | python_stmt | starti_stmt | endi_stmt
 call_stmt: "call" CNAME "(" [arglist] ")" ";"
 macro_call_stmt: CNAME "(" [arglist] ")" ";"
 python_stmt: "@python" STRING ";"
+starti_stmt: "starti" "(" NUMBER ")" ";"
+endi_stmt: "endi" "(" NUMBER ")" ";"
 
 push_stmt: "PUSH" "(" reglist ")" ";"
 pop_stmt: "POP" "(" ")" ";"
@@ -365,7 +368,7 @@ class ASTBuilder(Transformer):
         # Gather body statements (all remaining ast nodes)
         body = []
         for it in items[idx:]:
-            if isinstance(it, (ast.VarDecl, ast.Assign, ast.CompoundAssign, ast.Return, ast.If, ast.While, ast.DoWhile, ast.ForLoop, ast.RepeatLoop, ast.ExprStmt, ast.AsmBlock, ast.CallStmt, ast.PushRegs, ast.PopRegs, ast.Break, ast.Continue, ast.MacroCall, ast.PythonStmt)):
+            if isinstance(it, (ast.VarDecl, ast.Assign, ast.CompoundAssign, ast.Return, ast.If, ast.While, ast.DoWhile, ast.ForLoop, ast.RepeatLoop, ast.ExprStmt, ast.AsmBlock, ast.CallStmt, ast.PushRegs, ast.PopRegs, ast.Break, ast.Continue, ast.MacroCall, ast.PythonStmt, ast.StartInterrupt, ast.EndInterrupt)):
                 body.append(it)
         
         return ast.Proc(name=name, params=params, rettype=rettype, body=body, native=False)
@@ -390,7 +393,7 @@ class ASTBuilder(Transformer):
         # Gather body statements (all remaining ast nodes)
         body = []
         for it in items[idx:]:
-            if isinstance(it, (ast.VarDecl, ast.Assign, ast.CompoundAssign, ast.Return, ast.If, ast.While, ast.DoWhile, ast.ForLoop, ast.RepeatLoop, ast.ExprStmt, ast.AsmBlock, ast.CallStmt, ast.PushRegs, ast.PopRegs, ast.Break, ast.Continue, ast.MacroCall, ast.PythonStmt)):
+            if isinstance(it, (ast.VarDecl, ast.Assign, ast.CompoundAssign, ast.Return, ast.If, ast.While, ast.DoWhile, ast.ForLoop, ast.RepeatLoop, ast.ExprStmt, ast.AsmBlock, ast.CallStmt, ast.PushRegs, ast.PopRegs, ast.Break, ast.Continue, ast.MacroCall, ast.PythonStmt, ast.StartInterrupt, ast.EndInterrupt)):
                 body.append(it)
         
         return ast.Proc(name=name, params=params, rettype=rettype, body=body, native=True)
@@ -430,6 +433,28 @@ class ASTBuilder(Transformer):
             rettype = items[idx]
         
         return ast.FuncDecl(name=name, params=params, rettype=rettype, native=True)
+
+    def interrupt_decl(self, items):
+        """interrupt NAME(INDEX) -> void { stmt* } - VBlank dispatch slot (see ast.InterruptProc)."""
+        name = self._val(items[0])
+        index = self._parse_number(self._val(items[1]))
+        body = []
+        for it in items[2:]:
+            if isinstance(it, (ast.VarDecl, ast.Assign, ast.CompoundAssign, ast.Return, ast.If, ast.While, ast.DoWhile, ast.ForLoop, ast.RepeatLoop, ast.ExprStmt, ast.AsmBlock, ast.CallStmt, ast.PushRegs, ast.PopRegs, ast.Break, ast.Continue, ast.MacroCall, ast.PythonStmt, ast.StartInterrupt, ast.EndInterrupt)):
+                body.append(it)
+        return ast.InterruptProc(name=name, index=index, body=body)
+
+    @v_args(meta=True)
+    def starti_stmt(self, meta, items):
+        """starti(X); - enable interrupt dispatch slot X."""
+        index = self._parse_number(self._val(items[0]))
+        return self._record_line(ast.StartInterrupt(index=index), meta)
+
+    @v_args(meta=True)
+    def endi_stmt(self, meta, items):
+        """endi(X); - disable interrupt dispatch slot X."""
+        index = self._parse_number(self._val(items[0]))
+        return self._record_line(ast.EndInterrupt(index=index), meta)
 
     def params(self, items):
         return items
@@ -790,9 +815,9 @@ class ASTBuilder(Transformer):
         name = self._val(items[0])
         is_chip = False
         code_items = []
-        # Remaining items starting from index 1 are proc_decl, func_decl, asm_stmt, call_stmt, extern_decl, public_decl, or macro_call_stmt nodes
+        # Remaining items starting from index 1 are proc_decl, func_decl, asm_stmt, call_stmt, extern_decl, public_decl, macro_call_stmt, or interrupt_decl nodes
         for item in items[1:]:
-            if isinstance(item, (ast.Proc, ast.FuncDecl, ast.AsmBlock, ast.CallStmt, ast.ExternDecl, ast.PublicDecl, ast.MacroCall)):
+            if isinstance(item, (ast.Proc, ast.FuncDecl, ast.AsmBlock, ast.CallStmt, ast.ExternDecl, ast.PublicDecl, ast.MacroCall, ast.InterruptProc)):
                 code_items.append(item)
         return ast.CodeSection(name=name, is_chip=is_chip, items=code_items)
 
@@ -802,7 +827,7 @@ class ASTBuilder(Transformer):
         is_chip = True
         code_items = []
         for item in items[1:]:
-            if isinstance(item, (ast.Proc, ast.FuncDecl, ast.AsmBlock, ast.CallStmt, ast.ExternDecl, ast.PublicDecl, ast.MacroCall)):
+            if isinstance(item, (ast.Proc, ast.FuncDecl, ast.AsmBlock, ast.CallStmt, ast.ExternDecl, ast.PublicDecl, ast.MacroCall, ast.InterruptProc)):
                 code_items.append(item)
         return ast.CodeSection(name=name, is_chip=is_chip, items=code_items)
 

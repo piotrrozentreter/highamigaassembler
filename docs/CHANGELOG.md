@@ -6,6 +6,23 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`interrupt`/`starti`/`endi` keywords**: 16 software VBlank dispatch slots
+  (0-15) multiplexed off the Amiga's single real VERTB hardware interrupt,
+  modeled on AMOS Professional's AMAL/`EVERY` channel system. `interrupt
+  NAME(INDEX) -> void { ... }` declares a slot (no params, always void, full
+  `movem.l d0-d7/a0-a6` save/restore, ends in `rts`); `starti(X)`/`endi(X)`
+  enable/disable a declared slot (validated against declared indices, 0-15
+  range enforced). One auto-generated master VBlank ISR (ends in `rte`) is
+  lazily installed into the CPU's level-3 autovector on first `starti()`.
+  CPU-target-neutral codegen (plain `movem.l`/`bset`/`bclr`/`dbra`, verified
+  identical in structure on both `--cpu 68000` and `--cpu 68020`).
+  `lib/takeover.s`'s `TakeSystem()`/`ReleaseSystem()` now also save/restore
+  the level-3 autovector (alongside the pre-existing level-2/level-4), so
+  `ReleaseSystem()` always disables VERTB and restores the original vector
+  before returning to DOS, even if a program forgets to `endi()` a slot.
+  See [INTERRUPT_KEYWORD.md](INTERRUPT_KEYWORD.md) and
+  `examples/interrupt_vbl_demo.has`.
+
 - **AmigaDOS CLI output library (`lib/dos.s`)** for non-bare-metal AmigaDOS
   CLI tools written in HAS:
   - `InitDOS() -> int` - opens `dos.library` and caches its base plus the
