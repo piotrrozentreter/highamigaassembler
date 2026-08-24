@@ -8,8 +8,13 @@ bss counters:
     frame_count.l: 1
 
 code main:
+    public main;
+
+    // Entry: take the Amiga hardware, run the demo, restore the OS on exit.
     asm {
-        jmp main
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
     }
 
     // Slot 0: increments a counter every vertical blank (50Hz PAL / 60Hz NTSC).
@@ -19,7 +24,6 @@ code main:
 
     proc main() -> void {
         var i: int;
-        call TakeSystem();
 
         starti(0);
 
@@ -29,6 +33,5 @@ code main:
 
         endi(0);
 
-        call ReleaseSystem();
         return;
     }

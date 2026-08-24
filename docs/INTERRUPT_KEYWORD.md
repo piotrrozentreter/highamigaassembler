@@ -130,6 +130,48 @@ itself (not the real OS vector) into its `old_int3`, and `ReleaseSystem()`
 would "restore" `$6C` right back to the (by-then-freed) interrupt handler
 instead of the OS default - a dangling vector after the program exits.
 
+In practice, always structure the program's entry exactly like this, with
+`TakeSystem()` as the first instruction and `ReleaseSystem()` as the last:
+
+```has
+code main:
+    public main;
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+    ...
+```
+
+## Interaction with `lib/keyboard.s` (and other level-2/level-6 handlers)
+
+`starti(X)`/`endi(X)` never touch `lib/keyboard.s`'s level-2 autovector
+(`$68`) or its `PORTS` `INTENA` bit (bit 3) - only `$6C`/VERTB (bit 5) are
+touched, so there is no vector or bit-level collision with `InitKeyboard()`,
+and none with `lib/ptplayer.s`'s level-6 CIA-B vector (`$78`/`EXTER`,
+bit 13) either.
+
+However, VERTB is CPU autovector **level 3**, strictly higher priority than
+the keyboard's **level 2** (`PORTS`). `lib/keyboard.s`'s `keyb_interrupt`
+handler is timing-critical: after reading a scancode it holds the `KDAT`
+handshake line active for a hard-coded ~90 microsecond busy-wait (4 raster
+lines, polled via `VHPOSR`) before releasing it - this is the real Amiga
+keyboard's serial protocol handshake window, not an arbitrary delay. Because
+level 3 can **preempt** a lower-priority level 2 handler that is already
+running, a VERTB interrupt firing while `keyb_interrupt` is in the middle of
+that 90us wait will suspend it for however long the `interrupt` slot chain
+takes to run (every declared slot, including any blitter `WAITBLIT` busy-waits)
+before `keyb_interrupt` resumes - extending the `KDAT` hold time well past
+the protocol's expected window. This can desync or drop keyboard input,
+and is more likely to matter the longer your `interrupt` slot bodies run
+(e.g. a full-screen blitter clear plus many `SetPixel` calls, like
+`examples/games/interrupt_16slots_demo.has`) than for a trivial slot body.
+This is an inherent consequence of the fixed 68000 hardware priority order
+(VERTB=IPL3 > PORTS=IPL2) - it cannot be fixed from the `interrupt` feature
+side. Keep slot bodies as short as practical if you also rely on
+`GetKey()`/`InitKeyboard()` for input.
+
 ## Restrictions
 
 - No parameters (only the mandatory `(INDEX)` slot number).
