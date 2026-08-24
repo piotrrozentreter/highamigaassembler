@@ -172,6 +172,44 @@ This is an inherent consequence of the fixed 68000 hardware priority order
 side. Keep slot bodies as short as practical if you also rely on
 `GetKey()`/`InitKeyboard()` for input.
 
+## Blitter/graphics operations inside `interrupt` slots
+
+The rule is **not** "never touch the blitter/graphics from an `interrupt`
+slot" - it's **"never block for a long time inside one"**. Cheap, register-
+level operations (`SetPixel`, updating a copper pointer, swapping a sprite
+pointer) take microseconds and are fine. What's dangerous is anything that
+**busy-waits**, because the CPU stays at VERTB's interrupt priority (3) for
+however long the wait takes - and while it's there, it can't service the
+keyboard's level-2 IRQ (or anything else at level 2 or 1).
+
+The concrete example that bit `examples/games/interrupt_bounce_demo.has`
+and `interrupt_16slots_demo.has` originally: `ClearScreen()` (lores path)
+spins in `WAITBLIT` for a full 320x256 clear - on the order of a few
+milliseconds. Doing that every single VBlank, forever, means the CPU spends
+a large fraction of every 20ms frame at priority 3, which reliably collides
+with the keyboard's ~90us handshake window sooner or later. The fix used in
+both examples: don't clear the whole screen - erase only the pixels you're
+about to redraw (e.g. `SetPixel(...,0)` over the old sprite position) before
+drawing the new ones. No blitter, no wait, negligible slot duration.
+
+If you genuinely need a full-frame blitter operation every VBlank (real
+games often do, for double-buffered background redraws), the standard
+Amiga technique is to **kick the blit and return without waiting for it to
+finish** (don't call the blocking `WAITBLIT`-style helper inside the slot),
+then confirm/wait for completion at the very start of the *next* frame's
+slot instead - this keeps any single `interrupt` slot's own execution time
+short, even though the blit itself takes a while in the background.
+
+Practical checklist for `interrupt` slot bodies:
+- Prefer many small, targeted `SetPixel`/pointer-swap style updates over one
+  large clear/fill.
+- Avoid any `WAITBLIT`-style busy-wait loop inside a slot if the program
+  also needs reliable keyboard/joystick/serial (level 1-2) interrupt input.
+- If a slot must kick a large blit, don't block on its completion in the
+  same slot - kick it and check next frame.
+- When in doubt, measure: a slot that takes "a while" every single VBlank,
+  forever, is far riskier than one that occasionally takes a while once.
+
 ## Restrictions
 
 - No parameters (only the mandatory `(INDEX)` slot number).
