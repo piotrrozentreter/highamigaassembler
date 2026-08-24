@@ -1,0 +1,88 @@
+// Small VBL-driven bouncing-ball demo: the `interrupt` slot owns the blitter
+// and all rendering (ClearScreen/SetPixel/Show), exactly the pattern
+// described in docs/INTERRUPT_KEYWORD.md - the main loop only polls for the
+// quit key and never touches graphics hardware, so there's no risk of the
+// main loop and the interrupt racing on the blitter registers.
+
+#pragma lockreg(a5);
+
+const KEY_ESC = 69;   // $45
+
+extern func SetGraphicsMode(mode: int)  -> int;
+extern func ClearScreen()               -> int;
+extern func SwapScreen()                -> int;
+extern func Show()                      -> void;
+extern func SetColor(id: int, col: int) -> int;
+extern func SetPixel(x: int, y: int, color: int) -> int;
+extern func InitKeyboard()              -> void;
+extern func GetKey()                    -> byte;
+extern func TakeSystem()                -> void;
+extern func ReleaseSystem()             -> void;
+
+bss ball_bss:
+    ball_x.w: 1
+    ball_y.w: 1
+    ball_dx.w: 1
+    ball_dy.w: 1
+
+code main:
+    public main;
+
+    // Entry: take the Amiga hardware, run the game, restore the OS on exit.
+    asm {
+        jsr TakeSystem
+        jsr main
+        jmp ReleaseSystem
+    }
+
+    // Slot 0: the ONLY place that touches the blitter/copper - runs once per
+    // real vertical blank (50Hz PAL / 60Hz NTSC), so bouncing + redrawing is
+    // always frame-synced and never overlaps with itself.
+    interrupt vbl_render(0) -> void {
+        var px: int;
+        var py: int;
+
+        ball_x = ball_x + ball_dx;
+        ball_y = ball_y + ball_dy;
+
+        if (ball_x <= 0 || ball_x >= 312) {
+            ball_dx = -ball_dx;
+        }
+        if (ball_y <= 0 || ball_y >= 248) {
+            ball_dy = -ball_dy;
+        }
+
+        call SwapScreen();
+        call ClearScreen();
+
+        for py = 0 to 3 {
+            for px = 0 to 3 {
+                call SetPixel(ball_x + px, ball_y + py, 1);
+            }
+        }
+
+        call Show();
+    }
+
+    proc main() -> void {
+        var key: byte = 0;
+
+        call SetGraphicsMode(0);
+        call SetColor(0, $000);   // background: black
+        call SetColor(1, $0F4);   // ball: lime green
+        call InitKeyboard();
+
+        ball_x = 160;
+        ball_y = 128;
+        ball_dx = 2;
+        ball_dy = 1;
+
+        starti(0);
+
+        while (key != KEY_ESC) {
+            key = GetKey();
+        }
+
+        endi(0);
+        return;
+    }
