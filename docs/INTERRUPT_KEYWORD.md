@@ -79,8 +79,15 @@ how AMOS's AMAL/`EVERY` system works internally), this feature multiplexes
    installs `_has_vblank_isr`. This check is self-correcting across repeated
    `TakeSystem()`/`starti()`/`ReleaseSystem()` cycles within one run.
 2. `starti(X)` sets bit `X` in a 16-bit active-slot mask (`_has_int_mask`)
-   and unmasks VERTB in `INTENA`. `endi(X)` clears bit `X`, and re-masks
-   VERTB only once **no** slots remain active.
+   and unmasks VERTB **and the master INTEN bit (bit 14)** in `INTENA`.
+   This is deliberate: `lib/takeover.s`'s `TakeSystem()` clears the master
+   INTEN bit along with everything else, and nothing else in a program that
+   doesn't happen to call some other library function that also re-enables
+   it (e.g. `InitKeyboard()`) would ever turn interrupts back on globally -
+   `starti()` must not depend on that coincidence, so it always re-asserts
+   INTEN itself. `endi(X)` clears bit `X`, and re-masks VERTB (but leaves
+   INTEN alone - other subsystems may still need it) only once **no** slots
+   remain active.
 3. On every real VERTB interrupt, `_has_vblank_isr` acknowledges the
    interrupt, then walks the 16-slot dispatch table (`_has_int_slots`,
    `dc.l` per index, `0` for unused indices) and `jsr`s into every **active**

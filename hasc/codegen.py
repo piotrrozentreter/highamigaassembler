@@ -3833,6 +3833,7 @@ class CodeGen:
         self.emit("HAS_INTENA      EQU $09A")
         self.emit("HAS_INTREQ      EQU $09C")
         self.emit("HAS_INTF_VERTB  EQU $0020")
+        self.emit("HAS_INTF_INTEN  EQU $4000  ; master interrupt enable bit")
         self.emit("HAS_INTF_SETCLR EQU $8000")
         self.emit("")
         self.emit("_has_vblank_isr:")
@@ -3871,13 +3872,18 @@ class CodeGen:
         self.emit(indent + "rts")
 
     def _emit_starti(self, index, indent):
-        """starti(X): lazily install the VERTB vector, set slot bit X, enable VERTB."""
+        """starti(X): lazily install the VERTB vector, set slot bit X, enable VERTB.
+
+        Always explicitly sets the master INTEN bit too (bit 14) - must not rely
+        on some unrelated library call (e.g. InitKeyboard) having already turned
+        it back on after TakeSystem()'s blanket INTENA disable.
+        """
         self.emit(indent + "jsr _has_int_ensure_installed")
         self.emit(indent + "move.w _has_int_mask,d0")
         self.emit(indent + f"bset #{index},d0")
         self.emit(indent + "move.w d0,_has_int_mask")
         self.emit(indent + "lea HAS_CUSTOM,a0")
-        self.emit(indent + "move.w #(HAS_INTF_SETCLR|HAS_INTF_VERTB),HAS_INTENA(a0)")
+        self.emit(indent + "move.w #(HAS_INTF_SETCLR|HAS_INTF_INTEN|HAS_INTF_VERTB),HAS_INTENA(a0)")
 
     def _emit_endi(self, index, indent):
         """endi(X): clear slot bit X; disable VERTB entirely once no slots remain active."""
