@@ -65,8 +65,24 @@
     "directives": {
       "patterns": [
         {
+          "name": "keyword.directive.if.highamigassembler",
+          "match": "^\\s*#if\\b"
+        },
+        {
+          "name": "keyword.directive.ifdef.highamigassembler",
+          "match": "^\\s*#ifdef\\b"
+        },
+        {
+          "name": "keyword.directive.ifndef.highamigassembler",
+          "match": "^\\s*#ifndef\\b"
+        },
+        {
+          "name": "keyword.directive.endif.highamigassembler",
+          "match": "^\\s*#endif\\b"
+        },
+        {
           "name": "keyword.directive.highamigassembler",
-          "match": "^\\s*(#(?:warning|error|pragma|ifdef|ifndef|else|endif))\\b",
+          "match": "^\\s*(#(?:warning|error|pragma|else))\\b",
           "captures": {
             "1": { "name": "keyword.directive.highamigassembler" }
           }
@@ -107,7 +123,7 @@
       "patterns": [
         {
           "name": "meta.function.highamigassembler",
-          "match": "\\b(?:func|proc)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(?:func|proc|interrupt)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "entity.name.function.highamigassembler" }
           }
@@ -133,12 +149,16 @@
           "match": "\\bfunc\\b"
         },
         {
+          "name": "keyword.declaration.interrupt.highamigassembler",
+          "match": "\\binterrupt\\b"
+        },
+        {
           "name": "keyword.modifier.native.highamigassembler",
           "match": "\\bnative\\b"
         },
         {
           "name": "keyword.control.highamigassembler",
-          "match": "\\b(?:extern|public|macro|const|var|struct|return|if|else|while|for|repeat|to|by|break|continue|call|asm|PUSH|POP)\\b"
+          "match": "\\b(?:extern|public|macro|const|var|struct|return|if|else|while|for|repeat|to|by|break|continue|call|asm|starti|endi|PUSH|POP)\\b"
         },
         {
           "name": "keyword.other.decorator.highamigassembler",

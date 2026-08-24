@@ -25,6 +25,38 @@
     },
     {
       "scope": [
+        "keyword.directive.if.highamigassembler"
+      ],
+      "settings": {
+        "foreground": "#FF8C00"
+      }
+    },
+    {
+      "scope": [
+        "keyword.directive.ifdef.highamigassembler"
+      ],
+      "settings": {
+        "foreground": "#00CED1"
+      }
+    },
+    {
+      "scope": [
+        "keyword.directive.ifndef.highamigassembler"
+      ],
+      "settings": {
+        "foreground": "#FF69B4"
+      }
+    },
+    {
+      "scope": [
+        "keyword.directive.endif.highamigassembler"
+      ],
+      "settings": {
+        "foreground": "#ADFF2F"
+      }
+    },
+    {
+      "scope": [
         "entity.name.function.highamigassembler"
       ],
       "settings": {
