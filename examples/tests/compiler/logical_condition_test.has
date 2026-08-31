@@ -1,0 +1,17 @@
+// Regression coverage for conditions used directly as values and with logical negation.
+
+code logical_condition_test:
+
+    proc condition_is_true_when_nonzero(cond: int) -> int {
+        if (cond) {
+            return 1;  // expect: 1 when cond is nonzero
+        }
+        return 0;  // expect: 0 when cond is zero
+    }
+
+    proc negated_condition_is_true_when_zero(cond: int) -> int {
+        if (!cond) {
+            return 1;  // expect: 1 when cond is zero
+        }
+        return 0;  // expect: 0 when cond is nonzero
+    }

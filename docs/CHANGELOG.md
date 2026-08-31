@@ -25,6 +25,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Fixed
 
+- **Logical `!` now correctly negates values**: `!value` produces `1` when
+  `value` is `0`, and `0` for every nonzero value. This fixes `if (!value)`,
+  which previously used a bitwise complement and could take the true branch
+  for nonzero values. The behavior and generated instruction set are the same
+  for `--cpu 68000` and `--cpu 68020`.
+
 - **`starti(X)` now always explicitly re-enables the master `INTENA` bit
   (bit 14/INTEN)**, instead of relying on some other, unrelated library call
   (e.g. `InitKeyboard()`, which happens to also set it) having already turned

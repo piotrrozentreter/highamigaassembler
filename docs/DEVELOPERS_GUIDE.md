@@ -688,6 +688,10 @@ See [docs/STRUCT_POINTERS.md](STRUCT_POINTERS.md) for detailed documentation and
 
 **Note:** IF conditions must be enclosed in parentheses.
 
+Conditions accept any expression. A value of `0` is false; every nonzero
+value is true. Use `!expr` to invert that test: `!expr` is true only when
+`expr` is `0`.
+
 ```has
 code conditionals:
     proc compare(a: long, b: long) -> long {
@@ -706,6 +710,16 @@ code conditionals:
         } else {
             return 3;
         }
+    }
+
+    proc test_flag(flag: int) -> int {
+        if (flag) {
+            return 1;  // Runs when flag is nonzero
+        }
+        if (!flag) {
+            return 2;  // Runs when flag is zero
+        }
+        return 0;
     }
 ```
 

@@ -1445,7 +1445,10 @@ class CodeGen:
             elif expr.op == '!':
                 # Logical not
                 code += self._emit_expr(expr.operand, params, locals_info, reg_left, frame_reg=frame_reg)
-                code.append(f"    not.l {reg_left}")
+                code.append(f"    tst.l {reg_left}")
+                code.append(f"    seq {reg_left}")
+                code.append(f"    andi.l #$FF,{reg_left}")
+                code.append(f"    neg.b {reg_left}")
             elif expr.op == '~':
                 # Bitwise NOT (one's complement)
                 code += self._emit_expr(expr.operand, params, locals_info, reg_left, frame_reg=frame_reg)

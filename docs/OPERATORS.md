@@ -37,11 +37,14 @@ Comparison results are:
 ## Logical Operators
 - `&&` - Logical AND (both operands must be non-zero)
 - `||` - Logical OR (at least one operand must be non-zero)
-- `!` - Logical NOT (unary prefix)
+- `!` - Logical NOT (unary prefix; zero becomes `1`, nonzero becomes `0`)
 
 Logical results are:
 - 1 (true) if condition holds
 - 0 (false) if condition doesn't hold
+
+Logical `!` is distinct from bitwise `~`: use `!value` when testing whether
+`value` is zero, and `~value` when complementing every bit.
 
 ## Unary Operators
 - `-` - Negation (prefix)
@@ -66,7 +69,7 @@ Use 68000 `cmp` instruction with set conditional byte:
 ```asm
 cmp.l d1,d0
 seq d0      ; set d0 to 0xFF if equal, 0 otherwise
-and.l #0xFF,d0
+andi.l #$FF,d0
 neg.b d0    ; convert 0xFF to 0x01, 0 stays 0
 ```
 
