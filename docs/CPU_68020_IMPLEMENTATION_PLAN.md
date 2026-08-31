@@ -386,12 +386,16 @@ most:
    how narrow values are read:
 
    - **(i) Global array element reads leave the upper register bits
-     undefined.** `emit_1d_array_read` / `emit_2d_array_read` emit a bare
-     `move.b`/`move.w` with no `clr.l`, mask, or extension, so bits above the
-     element width hold whatever was in the register. This is a wrong-code bug
-     for *any* 32-bit use of a global `.b`/`.w` array element - `add.l`,
-     comparisons, argument passing - not just for mul/div. It also means such
-     an element is not provably `0..65535`, or provably anything, as a long.
+     undefined: DONE.** `emit_1d_array_read` / `emit_2d_array_read` used to emit
+     a bare `move.b`/`move.w` with no `clr.l`, mask, or extension, so bits above
+     the element width held whatever was in the register. This was a wrong-code
+     bug for *any* 32-bit use of a global `.b`/`.w` array element - `add.l`,
+     comparisons, argument passing - not just for mul/div. `emit_typed_pointer_read`
+     had the same defect and was fixed in the same pass. Narrow reads now
+     sign-extend (`ext.w`+`ext.l`, or `extb.l` on 68020) or zero-extend
+     (`clr.l` before the load, `andi.l` when the destination aliases the live
+     index register) according to the element type. See
+     [ARRAY_ACCESS_IMPLEMENTATION.md](ARRAY_ACCESS_IMPLEMENTATION.md).
 
    - **(ii) Struct `.w`/`.b` fields are unconditionally zero-extended.** A
      field holding `-1` reads back as `65535`. The root cause is that

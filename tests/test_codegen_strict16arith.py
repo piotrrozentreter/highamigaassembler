@@ -22,6 +22,8 @@ data gamedata:
     scalars.w = 0
     bytes.b[8] = {{1,2,3,4,5,6,7,8}}
     words.w[8] = {{1,2,3,4,5,6,7,8}}
+    sbytes: i8[8] = {{1,2,3,4,5,6,7,8}}
+    swords: i16[8] = {{1,2,3,4,5,6,7,8}}
     struct sprite {{ sb.b, sw.w, sl.l }}
     struct blob[4] {{ bb.b, bw.w, bl.l }}
 
@@ -43,6 +45,9 @@ def _gen(expr, target):
     "blob[1].bb * 3",         # struct-array byte field: same zero-extended read
     "(sprite.sl & 255) * 3",  # andi.l with a non-negative constant bounds to 0..255
     "(sprite.sl & 32767) * 3",
+    "bytes[1] * 3",           # unsigned byte element: clr.l + move.b -> 0..255
+    "sbytes[1] * 3",          # signed byte element: move.b + ext -> -128..127
+    "swords[1] * 3",          # signed word element: move.w + ext.l -> -32768..32767
 ])
 def test_provable_signed_word_operands_compile_under_strict(expr, target):
     _gen(expr, target)
@@ -84,11 +89,31 @@ def test_mask_proof_rests_on_a_full_width_andi():
     assert f"andi.l #255,{dest}" in instrs[:mul_idx]
 
 
+@pytest.mark.parametrize("expr,load,extension", [
+    ("bytes[1] * 3", "move.b", "clr.l"),
+    ("sbytes[1] * 3", "move.b", "ext"),
+    ("swords[1] * 3", "move.w", "ext.l"),
+])
+def test_array_element_proof_rests_on_an_actual_extending_load(expr, load, extension):
+    """Guard the premise: global array elements are only provable because the
+    element load now defines all 32 bits of the register MULS.W reads."""
+    instrs = _instructions(_gen(expr, BASELINE))
+    mul_idx = next(i for i, ins in enumerate(instrs) if ins.startswith("muls.w"))
+    dest = instrs[mul_idx].split(',')[-1].strip()
+    load_idx = next(i for i in range(mul_idx - 1, -1, -1)
+                    if instrs[i].startswith(load) and instrs[i].endswith("," + dest))
+    window = instrs[load_idx - 1:mul_idx]
+    if extension == "clr.l":
+        assert instrs[load_idx - 1] == f"clr.l {dest}", window
+    else:
+        assert instrs[load_idx + 1].startswith(extension), window
+        assert instrs[load_idx + 1].endswith(dest), window
+
+
 @pytest.mark.parametrize("expr", [
     "sprite.sw * 3",     # word field is zero-extended: 0..65535 overflows signed 16-bit
     "sprite.sl * 3",     # long field is unbounded
-    "words[1] * 3",      # global word element carries no signedness metadata
-    "bytes[1] * 3",      # global byte element read leaves bits 8..15 undefined
+    "words[1] * 3",      # legacy .w element is unsigned: 0..65535 overflows signed 16-bit
     "(sprite.sl & 65535) * 3",   # mask still allows 65535 > 32767
     "(sprite.sl | 255) * 3",     # `|` does not bound the result
     "(sprite.sl + 255) * 3",     # `+` can overflow a word

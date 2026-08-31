@@ -114,6 +114,41 @@ shift or arithmetic fallback, while 68020 may use a legal scaled operand such
 as `(a0,d2.l*4)`. Row multiplication remains full-width and does not use
 `mulu.w`.
 
+### Narrow element extension rules
+
+A `move.b`/`move.w` writes only the low 8 or 16 bits of the destination, so a
+byte- or word-sized element read must always be paired with an extension;
+otherwise the upper bits keep whatever the previous computation left there.
+`emit_narrow_element_load()` in `hasc/codegen_indexed_address.py` is the single
+place that decides this, and it is used by `emit_1d_array_read()`,
+`emit_2d_array_read()`, and `emit_typed_pointer_read()` (both the constant- and
+variable-index branches).
+
+| Element / pointee type | `--cpu 68000` | `--cpu 68020` |
+| --- | --- | --- |
+| signed 8-bit (`i8`, `byte`, `char`, `BYTE`) | `move.b` + `ext.w` + `ext.l` | `move.b` + `extb.l` |
+| unsigned 8-bit (`u8`, `bool`, `UBYTE`) | `clr.l` + `move.b` | `clr.l` + `move.b` |
+| signed 16-bit (`i16`, `word`, `short`, `WORD`) | `move.w` + `ext.l` | `move.w` + `ext.l` |
+| unsigned 16-bit (`u16`, `UWORD`) | `clr.l` + `move.w` | `clr.l` + `move.w` |
+| 32-bit and pointer types | `move.l` | `move.l` |
+
+Zero-extension is hoisted to a `clr.l` *before* the load (6 cycles / 2 bytes)
+rather than a trailing `andi.l #$FF`/`#$FFFF` (14 cycles / 6 bytes). The
+`clr.l` must be emitted after the address prelude, because the prelude computes
+the scaled index into the index register. When the destination register aliases
+that still-live index register, hoisting is illegal and the trailing `andi.l`
+form is used instead.
+
+Signedness for global arrays is recorded by `_build_array_dimensions()` in
+`hasc/codegen.py` from `ast.GlobalVarDecl.signed`, which is only set by the
+opt-in typed declaration form (`grid: i8[4] = {...}`). The legacy suffix form
+(`grid.b[4]`) carries no type information and is treated as unsigned, matching
+the existing behavior for scalar globals. Typed pointer reads classify the
+pointee type directly with `ast.is_signed()`.
+
+Regression coverage lives in `tests/test_narrow_element_reads.py` and
+`examples/tests/compiler/narrow_element_read_test.has`.
+
 ### 5. Register Preservation Fixes
 
 #### Problem Areas Fixed:

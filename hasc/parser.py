@@ -69,6 +69,7 @@ data_init_list: NUMBER ("," NUMBER)*
 struct_data_var: "struct" CNAME array_dims? "{" struct_field_list "}" ["=" "{" data_init_list "}"]
 struct_field_list: struct_field ("," struct_field)* [","]
 struct_field: CNAME SIZE_SUFFIX
+            | CNAME ":" CNAME -> struct_field_typed
 
 bss_section: "bss" CNAME ":" bss_item* -> bss_section
           | "bss_chip" CNAME ":" bss_item* -> bss_chip_section
@@ -704,7 +705,19 @@ class ASTBuilder(Transformer):
         suffix = self._val(items[1])
         if suffix.startswith('.'):
             suffix = suffix[1:]
-        return ast.StructField(name=name, size_suffix=suffix)
+        return ast.StructField(name=name, size_suffix=suffix,
+                               line=getattr(items[0], 'line', 0) or 0)
+
+    def struct_field_typed(self, items):
+        # Opt-in "name: type" form (e.g. "x: i16"). Size and signedness come from
+        # the type name; the legacy ".b"/".w"/".l" form is left untouched.
+        name = self._val(items[0])
+        type_name = self._val(items[1])
+        suffix = ast.size_suffix(ast.type_size(type_name))[1:]
+        return ast.StructField(name=name, size_suffix=suffix,
+                               signed=ast.is_signed(type_name),
+                               type_name=type_name,
+                               line=getattr(items[0], 'line', 0) or 0)
 
     def struct_field_list(self, items):
         return items

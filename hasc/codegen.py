@@ -183,18 +183,34 @@ class CodeGen:
 
         suffix = self._struct_field_size_suffix(expr, locals_info, params)
         if suffix is not None:
-            # Struct fields are read zero-extended (clr.l + move.b/.w, or move +
-            # and.l mask), so a byte field is always 0..255 and fits signed 16-bit.
-            # A word field is 0..65535, which MULS.W would reinterpret as negative
-            # above 32767, and a long field is unbounded; neither is provable.
+            # Byte fields always fit signed 16-bit: a legacy `.b` field reads
+            # zero-extended (0..255) and a typed signed 8-bit field reads
+            # sign-extended (-128..127). A word field is 0..65535 unsigned, which
+            # MULS.W would reinterpret as negative above 32767; a signed typed
+            # word would fit, but is left unproven here deliberately.
             return suffix == 'b'
 
-        # Global array elements are deliberately not proven on the signed path.
-        # The read is a bare move.b/move.w with no clr.l and no ext.l, so every bit
-        # above the element width is left undefined: the register does not hold the
-        # element value as a long at all, in ANY range. This is not a missing rule
-        # that a future reader could supply -- it only becomes provable once the
-        # element load itself is fixed to define the whole register.
+        # Global array elements are provable now that every narrow element load
+        # (constant and variable index, 1-D and 2-D) fully defines all 32 bits:
+        # signed byte -> extb.l / ext.w+ext.l, signed word -> ext.l, unsigned ->
+        # clr.l or andi.l. So the register really holds the element value as a long.
+        if isinstance(expr, ast.ArrayAccess):
+            name = expr.name
+            # A local or parameter of the same name shadows the global array, and
+            # local arrays are not lowered to a real element load at all.
+            shadowed = (any(l[0] == name for l in locals_info)
+                        or (params and any(p.name == name for p in params)))
+            info = self.array_dims.get(name)
+            if not shadowed and info and len(expr.indices) in (1, 2):
+                size = info.get('size')
+                if size == 'b':
+                    # 0..255 or -128..127; both fit signed 16-bit.
+                    return True
+                if size == 'w':
+                    # Signed words are ext.l-extended to -32768..32767; unsigned
+                    # words reach 65535, which MULS.W would read as negative.
+                    return bool(info.get('signed'))
+            return False
 
         return self._is_masked_by_constant(expr, 32767)
 
@@ -426,7 +442,13 @@ class CodeGen:
                         if elem_size not in ('b', 'w', 'l'):
                             elem_size = 'l'
                         dims = var.dimensions if var.dimensions else []
-                        array_info[var.name] = {'dims': dims, 'size': elem_size}
+                        array_info[var.name] = {
+                            'dims': dims,
+                            'size': elem_size,
+                            # Only the typed "name: type = value" form carries signedness;
+                            # the legacy ".b"/".w" suffix form stays unsigned.
+                            'signed': getattr(var, 'signed', False),
+                        }
         return array_info
 
     def _build_macros(self, module: ast.Module):
@@ -493,9 +515,13 @@ class CodeGen:
                         fields = {}
                         for field, off in offsets:
                             # Defensive: handle StructField or string spec
+                            fsigned = False
                             if hasattr(field, 'name'):
                                 fname = field.name
                                 fsuf = field.size_suffix if field.size_suffix in ('b', 'w', 'l') else 'l'
+                                # Only the "name: type" form can be signed; the
+                                # legacy suffix form always reports unsigned.
+                                fsigned = bool(getattr(field, 'signed', False))
                             else:
                                 spec = str(field)
                                 if '.' in spec:
@@ -506,7 +532,8 @@ class CodeGen:
                                     fname, fsuf = (spec, 'l')
                             fields[fname] = {
                                 'offset': off,
-                                'size_suffix': fsuf
+                                'size_suffix': fsuf,
+                                'signed': fsigned
                             }
                         info[var.name] = {'size': size, 'fields': fields, 'is_array': bool(var.dimensions)}
         return info
@@ -826,14 +853,17 @@ class CodeGen:
                         fs = sinfo['fields'][field]
                         offset = fs['offset']
                         suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
+                        operand = "(a0)" if offset == 0 else f"{offset}(a0)"
+                        if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
+                            code.extend(codegen_indexed_address.emit_narrow_element_load(
+                                self, operand, reg_left,
+                                1 if suffix == '.b' else 2, True))
+                            return code
                         # Dereference pointer with offset: field at (a0, offset)
                         # Clear register first for byte/word to avoid garbage in upper bits
                         if suffix in ('.b', '.w'):
                             code.append(f"    clr.l {reg_left}")
-                        if offset == 0:
-                            code.append(f"    move{suffix} (a0),{reg_left}")
-                        else:
-                            code.append(f"    move{suffix} {offset}(a0),{reg_left}")
+                        code.append(f"    move{suffix} {operand},{reg_left}")
                         return code
                     else:
                         return [f"    ; unknown field {field} in dereferenced struct", f"    move.l #0,{reg_left}"]
@@ -873,6 +903,11 @@ class CodeGen:
                 fs = sinfo['fields'][field]
                 suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
                 # Direct absolute access using equate emitted: name_field equ name+off
+                if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
+                    code.extend(codegen_indexed_address.emit_narrow_element_load(
+                        self, f"{name}_{field}", reg_left,
+                        1 if suffix == '.b' else 2, True))
+                    return code
                 # Clear register first for byte/word to avoid garbage in upper bits
                 if suffix in ('.b', '.w'):
                     code.append(f"    clr.l {reg_left}")
@@ -902,6 +937,7 @@ class CodeGen:
                     stride,
                     fs['offset'],
                     suffix,
+                    field_signed=bool(fs.get('signed')),
                 ))
                 return code
             else:
@@ -919,13 +955,11 @@ class CodeGen:
 
                 # Check if this is a pointer variable (not an array)
                 if var_type and var_type.endswith('*'):
-                    # Determine element size from pointer type (e.g., "byte*" -> 1 byte)
+                    # Determine element size from pointer type (e.g., "byte*" -> 1 byte).
+                    # Must use the same table as ast.is_signed() below and as the
+                    # store path, or width and signedness disagree (e.g. i16*).
                     base_type = var_type[:-1]  # Remove the '*'
-                    elem_bytes = 1  # default to byte
-                    if base_type == 'word':
-                        elem_bytes = 2
-                    elif base_type in ('long', 'int'):
-                        elem_bytes = 4
+                    elem_bytes = self._pointer_elem_bytes(base_type)
 
                     if len(expr.indices) == 1:
                         code.extend(codegen_indexed_address.emit_typed_pointer_read(
@@ -955,11 +989,7 @@ class CodeGen:
             param_obj = next((p for p in params if p.name == name), None)
             if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
                 base_type = param_obj.ptype[:-1]
-                elem_bytes = 1
-                if base_type == 'word':
-                    elem_bytes = 2
-                elif base_type in ('long', 'int'):
-                    elem_bytes = 4
+                elem_bytes = self._pointer_elem_bytes(base_type)
                 stack_params = [p for p in params if not (p.register and p.register != 'None')]
                 if param_obj.register and param_obj.register != 'None':
                     pointer_name = param_obj.register
@@ -1003,20 +1033,21 @@ class CodeGen:
 
                     # Check if index is a constant
                     if isinstance(expr.indices[0], ast.Number):
-                        # Constant index: generate direct offset
+                        # Constant index: absolute operand, no index register live,
+                        # so the zero-extension can always be hoisted to a clr.l.
                         index_val = expr.indices[0].value
                         offset = index_val * elem_bytes
-                        size_suffix = ast.size_suffix(elem_bytes)
-
-                        if offset == 0:
-                            code.append(f"    move{size_suffix} {name},{reg_left}")
-                        else:
-                            code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
+                        operand = name if offset == 0 else f"{name}+{offset}"
+                        code.extend(codegen_indexed_address.emit_narrow_element_load(
+                            self, operand, reg_left, elem_bytes,
+                            self.array_dims[name].get('signed', False)
+                        ))
                     else:
                         # Variable index: use centralized address lowering helper
                         code.extend(codegen_indexed_address.emit_1d_array_read(
                             self, name, expr.indices[0], params, locals_info,
-                            reg_left, "d1", frame_reg, elem_bytes
+                            reg_left, "d1", frame_reg, elem_bytes,
+                            self.array_dims[name].get('signed', False)
                         ))
                 else:
                     # Non-array globals are treated as byte pointers here.
@@ -1038,11 +1069,13 @@ class CodeGen:
                 elem_size = 'l'
                 elem_bytes = 4
                 col_count = None
+                elem_signed = False
 
                 if name in self.array_dims:
                     array_info = self.array_dims[name]
                     dims = array_info['dims']
                     elem_size = array_info.get('size', 'l')
+                    elem_signed = array_info.get('signed', False)
 
                     if elem_size == 'b':
                         elem_bytes = 1
@@ -1064,12 +1097,10 @@ class CodeGen:
                         self._fail(f"Cannot determine column count for 2D array '{name}' - declare with explicit dimensions like 'int[3][5]'")
 
                     offset = (row_val * col_count + col_val) * elem_bytes
-                    size_suffix = ast.size_suffix(elem_bytes)
-
-                    if offset == 0:
-                        code.append(f"    move{size_suffix} {name},{reg_left}")
-                    else:
-                        code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
+                    operand = name if offset == 0 else f"{name}+{offset}"
+                    code.extend(codegen_indexed_address.emit_narrow_element_load(
+                        self, operand, reg_left, elem_bytes, elem_signed
+                    ))
                 else:
                     if col_count is not None:
                         code.extend(codegen_indexed_address.emit_2d_array_read(
@@ -1084,6 +1115,7 @@ class CodeGen:
                             elem_size,
                             elem_bytes,
                             col_count,
+                            elem_signed,
                         ))
                     else:
                         self._fail(f"Cannot determine column count for 2D array '{name}'; declare with explicit dimensions like 'int[3][5]' or use 1D arrays")
@@ -3549,6 +3581,17 @@ class CodeGen:
     def _frame_offset(self, offset, frame_reg="a6"):
         """Generate frame offset reference: -offset(frame_reg)"""
         return codegen_utils.frame_offset(offset, frame_reg)
+
+    def _pointer_elem_bytes(self, base_type: str) -> int:
+        """Element stride for `base_type*` indexing.
+
+        Must stay consistent with ast.is_signed(), which the element load
+        consults for the extension: a narrower name whitelist would give
+        i16*/i32*/LONG* a byte-wide load with a sign-extension. Unknown
+        pointees (struct types, void) fall back to the long stride that the
+        typed-pointer store path already uses.
+        """
+        return ast.type_size(base_type) or 4
 
     def _expr_to_comment(self, expr):
         """Best-effort string for an expression to emit in comments."""

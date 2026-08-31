@@ -1,0 +1,77 @@
+// Regression coverage for narrow-element array / pointer reads.
+// Every read below must fully define all 32 bits of the destination register.
+
+data narrow_arrays:
+    sb: i8[4] = {1, 2, 3, 4}
+    ub: u8[4] = {1, 2, 3, 4}
+    sw: i16[4] = {1, 2, 3, 4}
+    uw: u16[4] = {1, 2, 3, 4}
+    sl: i32[4] = {1, 2, 3, 4}
+    sb2: i8[2][3] = {1, 2, 3, 4, 5, 6}
+    ub2: u8[2][3] = {1, 2, 3, 4, 5, 6}
+    sw2: i16[2][3] = {1, 2, 3, 4, 5, 6}
+    uw2: u16[2][3] = {1, 2, 3, 4, 5, 6}
+
+code main:
+    asm {
+        jmp read_1d
+    }
+
+    proc read_1d(i: int) -> int {
+        var acc: int;
+        acc = sb[i];
+        acc = acc + sw[i];
+        acc = acc + sl[i];
+        return acc;
+    }
+
+    proc read_1d_unsigned(i: int) -> int {
+        var acc: int;
+        acc = ub[i];
+        acc = acc + uw[i];
+        return acc;
+    }
+
+    proc read_2d(r: int, c: int) -> int {
+        var acc: int;
+        acc = sb2[r][c];
+        acc = acc + sw2[r][c];
+        acc = acc + ub2[r][c];
+        acc = acc + uw2[r][c];
+        return acc;
+    }
+
+    proc read_ptr(pb: byte*, pw: word*, pl: int*, i: int) -> int {
+        var acc: int;
+        acc = pb[i];
+        acc = acc + pw[i];
+        acc = acc + pl[i];
+        acc = acc + pb[0];
+        return acc;
+    }
+
+    // Constant indices must extend exactly like variable indices; the two
+    // spellings of the same access must not produce different values.
+    proc read_const_index() -> int {
+        var acc: int;
+        acc = sb[1];        // expect: move.b sb+1 then sign-extension to long
+        acc = acc + ub[1];  // expect: clr.l before move.b ub+1
+        acc = acc + sw[1];  // expect: move.w sw+2 then ext.l
+        acc = acc + uw[1];  // expect: clr.l before move.w uw+2
+        acc = acc + sl[1];  // expect: plain move.l, no extension
+        acc = acc + sb2[1][2];  // expect: 2D constant index also extends
+        acc = acc + uw2[1][2];
+        return acc;
+    }
+
+    // Element width must come from the same type table as signedness:
+    // i16*/i32*/LONG* previously took a byte-wide load with stride 1.
+    proc read_sized_ptr(p16: i16*, p32: i32*, pl: LONG*, i: int) -> int {
+        var acc: int;
+        acc = p16[i];       // expect: lsl.l #1 stride, move.w, ext.l
+        acc = acc + p32[i]; // expect: lsl.l #2 stride, move.l, no extension
+        acc = acc + pl[i];  // expect: lsl.l #2 stride, move.l
+        acc = acc + p16[3]; // expect: move.w 6(a0) then ext.l
+        acc = acc + p32[3]; // expect: move.l 12(a0)
+        return acc;
+    }

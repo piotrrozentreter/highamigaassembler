@@ -84,6 +84,7 @@ class Validator:
                         
                         self.globals.add(var.name)
                     if isinstance(var, ast.StructVarDecl):
+                        self._validate_struct_fields(var)
                         # Expose struct-derived constants: name__size, name__stride
                         struct_size, _ = self._struct_size_and_offsets(var)
                         self.constants[f"{var.name}__size"] = struct_size
@@ -132,6 +133,7 @@ class Validator:
 
                             self.globals.add(var.name)
                         elif isinstance(var, ast.StructVarDecl):
+                            self._validate_struct_fields(var)
                             self.globals.add(var.name)
                             # Expose struct-derived constants: name__size, name__stride
                             struct_size, _ = self._struct_size_and_offsets(var)
@@ -193,6 +195,24 @@ class Validator:
         
         return self.warnings
     
+    def _validate_struct_fields(self, struct_var):
+        """Reject unusable declared types in the "name: type" struct-field form."""
+        for field in getattr(struct_var, 'fields', []) or []:
+            type_name = getattr(field, 'type_name', None)
+            if not type_name:
+                continue
+            where = f" (line {field.line})" if getattr(field, 'line', 0) else ""
+            if type_name not in ast.ALL_TYPES:
+                self.errors.append(
+                    f"Unknown type '{type_name}' for struct field "
+                    f"'{struct_var.name}.{field.name}'{where}"
+                )
+            elif ast.type_size(type_name) not in (1, 2, 4) or type_name == 'void':
+                self.errors.append(
+                    f"Type '{type_name}' is not a valid struct field type for "
+                    f"'{struct_var.name}.{field.name}'{where}"
+                )
+
     def _struct_size_and_offsets(self, struct_var):
         """Compute size and field offsets with word alignment for w/l fields."""
         size_map = {'b': 1, 'w': 2, 'l': 4}

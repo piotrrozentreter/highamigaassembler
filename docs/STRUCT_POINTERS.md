@@ -28,10 +28,44 @@ var frame = p->frame;   // Cleaner and more readable
 var frame = (*p).frame; // Equivalent to arrow operator
 ```
 
-## Use Case: Performance Optimization
+### Field Declaration: Size Suffix vs Type
 
-### Before (Multiple Address Calculations)
+Struct fields can be declared two ways, and the choice determines how a narrow
+field is **read back**:
+
 ```has
+struct entity[16] {
+    x: i16,        // typed  -> sign-extended on read
+    y: i16,
+    vx: i8,        // typed  -> sign-extended on read
+    flags: u8,     // typed  -> zero-extended on read
+    frame.b,       // suffix -> zero-extended on read (legacy)
+    sprite.l
+}
+```
+
+A size-suffix field (`frame.b`) carries no signedness, so it is always read
+zero-extended: a `.w` field holding `-1` reads back as `65535`, and a guard
+like `if (e.frame_delta <= 0)` can never fire for a negative value. Use the
+typed form for any field that must hold negative values - coordinates that go
+off-screen left/top, velocities, deltas.
+
+Emission per field type, at all three access sites (`s.field`, `p->field`,
+`arr[i].field`):
+
+| Field type | Read emission (68000) | Read emission (68020) |
+| --- | --- | --- |
+| `i8`, `byte`, `char`, `BYTE` | `move.b` + `ext.w` + `ext.l` | `move.b` + `extb.l` |
+| `u8`, `bool`, `UBYTE` | `clr.l` + `move.b` | same |
+| `i16`, `word`, `short`, `WORD` | `move.w` + `ext.l` | same |
+| `u16`, `UWORD` | `clr.l` + `move.w` | same |
+| `int`, `long`, `i32`, pointers | `move.l` | same |
+| `.b` / `.w` suffix (legacy) | zero-extended | zero-extended |
+
+The suffix form remains correct and is not deprecated - it is the right choice
+for flags, frame indices, tile IDs, and other non-negative data, and it stays
+byte-for-byte compatible with existing code.
+
 proc UpdateBullets() -> void {
     var i:int;
     

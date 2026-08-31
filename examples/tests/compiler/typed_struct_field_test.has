@@ -1,0 +1,69 @@
+// Regression coverage for typed struct fields ("name: type").
+//
+// The legacy "name.b" / "name.w" / "name.l" form only carries a width, so its
+// reads stay zero-extended. The typed form also carries signedness, so signed
+// narrow fields must sign-extend at all three read sites: s.field, p->field
+// and arr[i].field.
+
+bss struct_fields:
+    struct sprite {
+        legacy_b.b,         // legacy form: unsigned, unchanged
+        legacy_w.w,         // legacy form: unsigned, unchanged
+        sb: i8,             // typed signed byte
+        sw: i16,            // typed signed word
+        ub: u8,             // typed unsigned byte
+        uw: u16,            // typed unsigned word
+        sl: i32             // typed long: no extension needed
+    }
+    struct blob[4] {
+        sb: i8,
+        sw: i16,
+        ub: u8,
+        uw: u16,
+        legacy_w.w
+    }
+
+code main:
+    asm {
+        jmp read_direct
+    }
+
+    // Direct access: absolute `sprite_field` operand.
+    proc read_direct() -> int {
+        var acc: int;
+        acc = sprite.legacy_b;      // expect: clr.l then move.b (unsigned)
+        acc = acc + sprite.legacy_w;// expect: clr.l then move.w (unsigned)
+        acc = acc + sprite.sb;      // expect: move.b then ext.w+ext.l (extb.l on 68020)
+        acc = acc + sprite.sw;      // expect: move.w then ext.l
+        acc = acc + sprite.ub;      // expect: clr.l then move.b
+        acc = acc + sprite.uw;      // expect: clr.l then move.w
+        acc = acc + sprite.sl;      // expect: plain move.l, no extension
+        return acc;
+    }
+
+    // Pointer access: displacement operand off (a0).
+    proc read_pointer(p: sprite*) -> int {
+        var acc: int;
+        acc = p->legacy_w;          // expect: clr.l then move.w
+        acc = acc + p->sb;          // expect: move.b then sign-extension
+        acc = acc + p->sw;          // expect: move.w then ext.l
+        acc = acc + p->uw;          // expect: clr.l then move.w
+        return acc;
+    }
+
+    // Struct-array access: indexed operand (a0,d1.l), index still live.
+    proc read_array(i: int) -> int {
+        var acc: int;
+        acc = blob[i].legacy_w;     // expect: clr.l then move.w
+        acc = acc + blob[i].sb;     // expect: move.b then sign-extension
+        acc = acc + blob[i].sw;     // expect: move.w then ext.l
+        acc = acc + blob[i].uw;     // expect: zero-extended
+        return acc;
+    }
+
+    // Aliasing edge case: the destination register is also the live index
+    // register (d1), so an unsigned field cannot hoist the zero-extension to a
+    // pre-move clr.l and must mask after the load instead.
+    proc read_array_aliased(i: int, acc: int) -> int {
+        return acc + blob[i].uw;    // expect: move.w (a0,d1.l),d1 then and.l #$FFFF,d1
+    }

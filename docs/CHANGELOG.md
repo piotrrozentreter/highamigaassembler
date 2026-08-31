@@ -99,9 +99,65 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   See [INTERRUPT_KEYWORD.md](INTERRUPT_KEYWORD.md) and
   `examples/interrupt_vbl_demo.has`.
 
+### Added
+
+- **Typed struct fields (`name: type`) make field signedness expressible.**
+  Struct fields could previously only be declared with a size suffix
+  (`x.w`, `flag.b`), which carries no signedness - so every narrow field was
+  read zero-extended and a field holding `-1` read back as `65535`. A guard
+  such as `if (entity.x <= 0)` could never fire for a negative coordinate.
+
+  Fields may now be declared with a type instead, mirroring the existing typed
+  global form:
+
+  ```has
+  struct entity[16] { x: i16, y: i16, vx: i8, flags: u8, sprite.l }
+  ```
+
+  Typed fields are read with the correct extension at all three access sites
+  (`s.field`, `p->field`, `arr[i].field`): signed 8-bit uses `ext.w`+`ext.l`
+  (a single `extb.l` on `--cpu 68020`), signed 16-bit uses `ext.l`, and
+  unsigned 8/16-bit zero-extends with `clr.l`. An unknown type name is rejected
+  at validation with the field name and line number.
+
+  **Legacy `.b`/`.w`/`.l` fields are unchanged and still zero-extend**, so this
+  is purely additive: no existing program changes by a single instruction. Use
+  the typed form when a field must hold negative values; the suffix form
+  remains correct for flags, indices, and other non-negative data. See
+  [STRUCT_POINTERS.md](STRUCT_POINTERS.md).
+
 ### Fixed
 
-- **Logical `!` now correctly negates values**: `!value` produces `1` when
+- **Narrow (`.b`/`.w`) array and typed-pointer element reads no longer leave
+  the upper register bits undefined.** `arr[i]`, `matrix[r][c]` and `ptr[i]`
+  reads of byte- or word-sized elements emitted a bare `move.b`/`move.w` with
+  no extension, so bits 8-31 (or 16-31) of the destination register kept
+  whatever the previous computation had left there. Any 32-bit use of such an
+  element - assignment to an `int` local, `add.l`, comparisons, argument
+  passing - could therefore read garbage. This was wrong for both signed and
+  unsigned element types and affected `--cpu 68000` and `--cpu 68020`
+  identically.
+
+  Narrow reads are now fully defined per element/pointee type: signed 8-bit
+  sign-extends with `ext.w`+`ext.l` (a single `extb.l` on `--cpu 68020`),
+  signed 16-bit with `ext.l`, and unsigned 8/16-bit zero-extends via a `clr.l`
+  ahead of the load - falling back to a post-load `andi.l #$FF`/`#$FFFF` when
+  the destination register is also the still-live index register. 32-bit and
+  pointer elements are unchanged.
+
+  Signedness for global arrays comes from the opt-in typed declaration form
+  (`name: i8[4] = {...}`); the legacy `name.b[4]` suffix form remains unsigned,
+  as it already did for scalar globals. Typed pointer reads classify the
+  pointee type with `ast.is_signed()`, which treats `byte`, `word`, `char`,
+  `BYTE` and `WORD` as signed.
+
+  **Generated output changes.** Four of the shipped examples gained extension
+  instructions (`games/robots/level.has`, `tests/compiler/array_comprehensive_test.has`,
+  `tests/compiler/byte_array_index_copy_test.has`, `trackio_print_asset_demo.has`);
+  no example changed compile status on either target. Any tooling that pins
+  exact generated assembly must be refreshed.
+
+
   `value` is `0`, and `0` for every nonzero value. This fixes `if (!value)`,
   which previously used a bitwise complement and could take the true branch
   for nonzero values. The behavior and generated instruction set are the same
