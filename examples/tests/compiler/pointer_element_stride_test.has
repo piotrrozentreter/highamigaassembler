@@ -1,0 +1,97 @@
+// Pointer element stride regression test.
+//
+// Indexing through a typed pointer must scale the index by the pointee's own
+// size - the same stride the equivalent array indexing uses. A mismatch reads
+// or writes a neighbouring object with no compile-time or run-time diagnostic,
+// so every check below compares a pointer access against the array access it
+// has to agree with.
+//
+// Ent is 6 bytes, so its stride cannot hide in a shift or in a 68020 scale
+// factor. Small is 2 bytes, where a wrong long stride would still look
+// plausible.
+
+const ENT_COUNT = 4;
+
+data stride_data:
+    sbytes: i8[4] = {10, 20, 30, 40}
+    swords: i16[4] = {1000, 2000, 3000, 4000}
+    slongs: i32[4] = {100000, 200000, 300000, 400000}
+
+bss stride_bss:
+    struct Ent[ENT_COUNT] { x: i16, y: i16, z: i16 }
+    struct Small[ENT_COUNT] { a: i16 }
+
+code stride_code:
+
+    asm {
+        jsr run_stride_tests
+        rts
+    }
+
+    proc set_ent(p: Ent*, i: int, vx: int, vy: int, vz: int) -> void {
+        p[i].x = vx;
+        p[i].y = vy;
+        p[i].z = vz;
+    }
+
+    proc get_ent_y(p: Ent*, i: int) -> int {
+        return p[i].y;
+    }
+
+    proc set_small(p: Small*, i: int, v: int) -> void {
+        p[i].a = v;
+    }
+
+    proc get_small(p: Small*, i: int) -> int {
+        return p[i].a;
+    }
+
+    proc run_stride_tests() -> long {
+        var i: int;
+        var pe: Ent*;
+        var ps: Small*;
+        var pb: i8*;
+        var pw: i16*;
+        var pl: i32*;
+
+        pe = &Ent[0];
+        ps = &Small[0];
+
+        // Fill both arrays entirely through pointers.
+        for i = 0 to ENT_COUNT {
+            set_ent(pe, i, i * 10, i * 100, i * 1000);
+            set_small(ps, i, i * 3);
+        }
+
+        // Writes through the pointer must land where array indexing reads.
+        if (Ent[2].y != 200) { return -1; }          // expect: not taken
+        if (Ent[3].x != 30) { return -2; }           // expect: not taken
+        if (Ent[1].z != 1000) { return -3; }         // expect: not taken
+        if (Small[3].a != 9) { return -4; }          // expect: not taken
+
+        // ...and reads through the pointer must return what the array holds.
+        if (get_ent_y(pe, 2) != 200) { return -5; }  // expect: not taken
+        if (get_ent_y(pe, 0) != 0) { return -6; }    // expect: not taken
+        if (get_small(ps, 3) != 9) { return -7; }    // expect: not taken
+
+        // Element 0 must survive every later write: a too-small stride would
+        // alias it, a too-large one would run past the end of the array.
+        if (Ent[0].x != 0) { return -8; }            // expect: not taken
+
+        // Scalar pointees: one byte, one word and one long of stride.
+        pb = &sbytes[0];
+        pw = &swords[0];
+        pl = &slongs[0];
+
+        if (pb[1] != 20) { return -9; }              // expect: not taken
+        if (pb[3] != 40) { return -10; }             // expect: not taken
+        if (pw[1] != 2000) { return -11; }           // expect: not taken
+        if (pw[3] != 4000) { return -12; }           // expect: not taken
+        if (pl[1] != 200000) { return -13; }         // expect: not taken
+        if (pl[3] != 400000) { return -14; }         // expect: not taken
+
+        // A pointer element read must match the array element read.
+        if (pw[2] != swords[2]) { return -15; }      // expect: not taken
+
+        return 0;                                    // expect: 0 - every stride matched its element size
+    }

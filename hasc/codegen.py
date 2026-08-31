@@ -918,6 +918,16 @@ class CodeGen:
             elif isinstance(base, ast.ArrayAccess):
                 name = base.name
                 sinfo = self.struct_info.get(name)
+                struct_name = name
+                base_is_pointer = False
+                if sinfo is None:
+                    # p[i].field where p is a typed pointer to a struct.
+                    ptr_operand, pointee = self._resolve_pointer_operand(
+                        name, params, locals_info, frame_reg)
+                    if ptr_operand is not None and self._pointer_elem_info(pointee)['struct']:
+                        sinfo = self.struct_info[pointee]
+                        struct_name = ptr_operand
+                        base_is_pointer = True
                 if not sinfo or field not in sinfo['fields']:
                     return [f"    ; unknown struct array/member {name}.{field}", f"    move.l #0,{reg_left}"]
                 fs = sinfo['fields'][field]
@@ -928,7 +938,7 @@ class CodeGen:
                     self._fail(f"Only 1D array indexing supported for structs; '{name}' has {len(base.indices)} dimensions")
                 code.extend(codegen_indexed_address.emit_struct_array_read(
                     self,
-                    name,
+                    struct_name,
                     base.indices[0],
                     params,
                     locals_info,
@@ -938,6 +948,7 @@ class CodeGen:
                     fs['offset'],
                     suffix,
                     field_signed=bool(fs.get('signed')),
+                    base_is_pointer=base_is_pointer,
                 ))
                 return code
             else:
@@ -955,13 +966,15 @@ class CodeGen:
 
                 # Check if this is a pointer variable (not an array)
                 if var_type and var_type.endswith('*'):
-                    # Determine element size from pointer type (e.g., "byte*" -> 1 byte).
-                    # Must use the same table as ast.is_signed() below and as the
-                    # store path, or width and signedness disagree (e.g. i16*).
-                    base_type = var_type[:-1]  # Remove the '*'
-                    elem_bytes = self._pointer_elem_bytes(base_type)
+                    base_type = var_type[:-1].strip()  # Remove the '*'
+                    elem = self._pointer_elem_info(base_type)
 
                     if len(expr.indices) == 1:
+                        if elem['struct']:
+                            self._fail(
+                                f"Cannot load whole struct '{elem['struct']}' through '{name}[i]'; "
+                                f"index a field instead, e.g. '{name}[i].field'"
+                            )
                         code.extend(codegen_indexed_address.emit_typed_pointer_read(
                             self,
                             self._frame_offset(var_offset, frame_reg),
@@ -971,8 +984,8 @@ class CodeGen:
                             reg_left,
                             "d1",
                             frame_reg,
-                            elem_bytes,
-                            base_type,
+                            elem['bytes'],
+                            elem['signed'],
                         ))
                     else:
                         # Multi-dimensional indexing through pointer (not common, but handle it)
@@ -988,8 +1001,8 @@ class CodeGen:
 
             param_obj = next((p for p in params if p.name == name), None)
             if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
-                base_type = param_obj.ptype[:-1]
-                elem_bytes = self._pointer_elem_bytes(base_type)
+                base_type = param_obj.ptype[:-1].strip()
+                elem = self._pointer_elem_info(base_type)
                 stack_params = [p for p in params if not (p.register and p.register != 'None')]
                 if param_obj.register and param_obj.register != 'None':
                     pointer_name = param_obj.register
@@ -998,6 +1011,11 @@ class CodeGen:
                 else:
                     pointer_name = name
                 if len(expr.indices) == 1:
+                    if elem['struct']:
+                        self._fail(
+                            f"Cannot load whole struct '{elem['struct']}' through '{name}[i]'; "
+                            f"index a field instead, e.g. '{name}[i].field'"
+                        )
                     return codegen_indexed_address.emit_typed_pointer_read(
                         self,
                         pointer_name,
@@ -1007,8 +1025,8 @@ class CodeGen:
                         reg_left,
                         "d1",
                         frame_reg,
-                        elem_bytes,
-                        base_type,
+                        elem['bytes'],
+                        elem['signed'],
                     )
 
             # Global array or pointer access
@@ -1615,6 +1633,8 @@ class CodeGen:
                     # 1D array case
                     if len(expr.operand.indices) == 1:
                         elem_bytes = 4
+                        base_is_pointer = False
+                        base_name = name
                         if name in self.struct_info:
                             elem_bytes = self.struct_info[name]['size']
                         elif name in self.array_dims:
@@ -1625,9 +1645,17 @@ class CodeGen:
                                 elem_bytes = 2
                             else:
                                 elem_bytes = 4
+                        else:
+                            # &p[i] on a typed pointer: same stride as the p[i] read.
+                            ptr_operand, pointee = self._resolve_pointer_operand(
+                                name, params, locals_info, frame_reg)
+                            if ptr_operand is not None:
+                                elem_bytes = self._pointer_elem_info(pointee)['bytes']
+                                base_name = ptr_operand
+                                base_is_pointer = True
                         code.extend(codegen_indexed_address.emit_array_address_of(
                             self,
-                            name,
+                            base_name,
                             expr.operand.indices[0],
                             params,
                             locals_info,
@@ -1635,6 +1663,7 @@ class CodeGen:
                             "d1",
                             frame_reg,
                             elem_bytes,
+                            base_is_pointer=base_is_pointer,
                         ))
                         return code
 
@@ -2850,6 +2879,16 @@ class CodeGen:
                     elif isinstance(base, ast.ArrayAccess):
                         name = base.name
                         sinfo = self.struct_info.get(name)
+                        struct_name = name
+                        base_is_pointer = False
+                        if sinfo is None:
+                            # p[i].field = ... where p is a typed pointer to a struct.
+                            ptr_operand, pointee = self._resolve_pointer_operand(
+                                name, params, locals_info, frame_reg)
+                            if ptr_operand is not None and self._pointer_elem_info(pointee)['struct']:
+                                sinfo = self.struct_info[pointee]
+                                struct_name = ptr_operand
+                                base_is_pointer = True
                         if not sinfo or field not in sinfo['fields']:
                             self.emit(indent + f"; unknown struct array/member {name}.{field}")
                         else:
@@ -2863,7 +2902,7 @@ class CodeGen:
                                     self.emit(sub if sub.startswith(indent) else indent + sub)
                             store_code = codegen_indexed_address.emit_struct_array_store(
                                 self,
-                                name,
+                                struct_name,
                                 base.indices[0],
                                 params,
                                 locals_info,
@@ -2873,6 +2912,7 @@ class CodeGen:
                                 stride,
                                 fs['offset'],
                                 suffix,
+                                base_is_pointer=base_is_pointer,
                             )
                             for line in store_code:
                                 self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
@@ -2906,27 +2946,18 @@ class CodeGen:
                     size_suffix = {1: '.b', 2: '.w', 4: '.l'}.get(elem_bytes, '.l')
 
                     if len(target.indices) == 1:
-                        pointer_info = next((item for item in locals_info if item[0] == name), None)
-                        pointer_param = next((item for item in params if item.name == name), None)
-                        if pointer_info and pointer_info[1] and pointer_info[1].endswith('*'):
-                            pointer_type = pointer_info[1][:-1]
-                            pointer_bytes = ast.type_size(pointer_type)
-                            pointer_name = self._frame_offset(pointer_info[2], frame_reg)
+                        pointer_operand, pointee = self._resolve_pointer_operand(
+                            name, params, locals_info, frame_reg)
+                        if pointer_operand is not None:
+                            elem = self._pointer_elem_info(pointee)
+                            if elem['struct']:
+                                self._fail(
+                                    f"Cannot assign a whole struct '{elem['struct']}' through "
+                                    f"'{name}[i]'; assign a field instead, e.g. '{name}[i].field = ...'"
+                                )
                             store_code = codegen_indexed_address.emit_typed_pointer_store(
-                                self, pointer_name, target.indices[0], params,
-                                locals_info, "d0", frame_reg, pointer_bytes
-                            )
-                        elif pointer_param and pointer_param.ptype and pointer_param.ptype.endswith('*'):
-                            pointer_type = pointer_param.ptype[:-1]
-                            pointer_bytes = ast.type_size(pointer_type)
-                            stack_params = [item for item in params if not (item.register and item.register != 'None')]
-                            if pointer_param.register and pointer_param.register != 'None':
-                                pointer_name = pointer_param.register
-                            else:
-                                pointer_name = f"{8 + 4 * stack_params.index(pointer_param)}(a6)"
-                            store_code = codegen_indexed_address.emit_typed_pointer_store(
-                                self, pointer_name, target.indices[0], params,
-                                locals_info, "d0", frame_reg, pointer_bytes
+                                self, pointer_operand, target.indices[0], params,
+                                locals_info, "d0", frame_reg, elem['bytes']
                             )
                         elif name not in self.array_dims:
                             store_code = codegen_indexed_address.emit_typed_pointer_store(
@@ -3582,16 +3613,46 @@ class CodeGen:
         """Generate frame offset reference: -offset(frame_reg)"""
         return codegen_utils.frame_offset(offset, frame_reg)
 
-    def _pointer_elem_bytes(self, base_type: str) -> int:
-        """Element stride for `base_type*` indexing.
+    def _pointer_elem_info(self, base_type: str, line: int = 0):
+        """Single source of truth for `base_type*` element stride/width/signedness.
 
-        Must stay consistent with ast.is_signed(), which the element load
-        consults for the extension: a narrower name whitelist would give
-        i16*/i32*/LONG* a byte-wide load with a sign-extension. Unknown
-        pointees (struct types, void) fall back to the long stride that the
-        typed-pointer store path already uses.
+        Stride, load width and sign-extension must all come from here; deriving
+        them separately lets a struct pointee take a scalar's size or a
+        sign-extension path it has no meaning for.
+
+        Returns {'bytes', 'signed', 'struct'} where 'struct' names the pointee
+        struct layout (None for scalar pointees).
         """
-        return ast.type_size(base_type) or 4
+        name = (base_type or '').strip()
+        if name in self.struct_info:
+            # Same size the struct-array path strides by, so p[i] and arr[i] agree.
+            return {'bytes': self.struct_info[name]['size'], 'signed': False, 'struct': name}
+        if name == 'void':
+            self._fail(
+                "Cannot index through 'void*': the element size is undefined. "
+                "Declare the pointer with a concrete element type (e.g. 'byte*', 'int*')."
+            )
+        return {'bytes': ast.type_size(name), 'signed': ast.is_signed(name), 'struct': None}
+
+    def _pointer_elem_bytes(self, base_type: str) -> int:
+        """Element stride in bytes for `base_type*` indexing."""
+        return self._pointer_elem_info(base_type)['bytes']
+
+    def _resolve_pointer_operand(self, name, params, locals_info, frame_reg):
+        """Return (operand, pointee_type) when `name` is a typed-pointer local or
+        parameter, else (None, None). The operand holds the pointer *value*, so
+        callers must load it with move.l, not lea."""
+        local_info = next((l for l in locals_info if l[0] == name), None)
+        if local_info and len(local_info) > 2 and local_info[1] and local_info[1].endswith('*'):
+            return self._frame_offset(local_info[2], frame_reg), local_info[1][:-1].strip()
+        param_obj = next((p for p in params if p.name == name), None)
+        if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
+            pointee = param_obj.ptype[:-1].strip()
+            if param_obj.register and param_obj.register != 'None':
+                return param_obj.register, pointee
+            stack_params = [p for p in params if not (p.register and p.register != 'None')]
+            return f"{8 + 4 * stack_params.index(param_obj)}(a6)", pointee
+        return None, None
 
     def _expr_to_comment(self, expr):
         """Best-effort string for an expression to emit in comments."""
@@ -4009,15 +4070,22 @@ class CodeGen:
                         # Never let a diagnostic inherit a line from a previous procedure.
                         self.current_stmt_line = None
 
-                        # Choose frame register (for frame pointer preservation across calls)
-                        frame_reg = self._choose_frame_register()
                         self.emit("")
                         self.emit(f"{it.name}:")
                         params, locals_info, localsize, saved_reg_params = self._analyze_proc(it)
 
+                        # Choose frame register (for frame pointer preservation across calls).
+                        # a4 may only be used when the prologue below actually initialises it;
+                        # otherwise every frame reference would go through an undefined a4.
+                        uses_a4_frame = (not it.native) and len(it.body) > 0 and len(locals_info) > 0
+                        frame_reg = self._choose_frame_register() if uses_a4_frame else "a6"
+                        if frame_reg != "a4":
+                            # Only a4 has save/restore support in the prologue/epilogue below;
+                            # any other candidate would be clobbered without being preserved.
+                            frame_reg = "a6"
+
                         # If using a4 as frame register, we need extra space in the frame for saved a4
-                        frame_reg = self._choose_frame_register()
-                        if len(locals_info) > 0 and frame_reg == "a4":
+                        if frame_reg == "a4":
                             localsize += 4  # Extra space for saved a4
 
                         # Add comments showing parameter locations

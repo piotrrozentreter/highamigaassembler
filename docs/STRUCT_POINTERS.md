@@ -28,6 +28,29 @@ var frame = p->frame;   // Cleaner and more readable
 var frame = (*p).frame; // Equivalent to arrow operator
 ```
 
+### Indexing Through a Pointer
+
+A struct pointer can be indexed directly, and it strides by the **struct size** -
+identical to indexing the struct array itself:
+
+```has
+proc get_x(p: Ent*, i: int) -> int { return p[i].x; }   // strides by sizeof(Ent)
+proc arr_x(i: int) -> int { return Ent[i].x; }          // same stride
+```
+
+For `struct Ent { x: i16, y: i16, z: i16 }` (6 bytes) both emit `mulu.w #6`.
+Scalar pointees stride by their element size: `i8*` needs no scaling, `i16*`
+uses `lsl.l #1`, `i32*` uses `lsl.l #2`. Reads and writes always use the same
+stride.
+
+Indexing a `void*` is rejected at validation, because the element size is
+undefined and any stride would be a guess:
+
+```
+Cannot index through 'void*' variable 'p': the element size is undefined.
+Declare it with a concrete element type (e.g. 'byte*', 'int*').
+```
+
 ### Field Declaration: Size Suffix vs Type
 
 Struct fields can be declared two ways, and the choice determines how a narrow

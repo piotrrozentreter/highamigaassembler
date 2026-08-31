@@ -122,7 +122,7 @@ def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
 
 
 def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
-                            reg_left, reg_right, frame_reg, elem_bytes, elem_type):
+                            reg_left, reg_right, frame_reg, elem_bytes, signed):
     """Emit code for typed pointer dereference with centralized address lowering.
 
     Args:
@@ -135,7 +135,8 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index
         frame_reg: Frame pointer register
         elem_bytes: Element size (1, 2, 4)
-        elem_type: Element type string (e.g., 'byte', 'word', 'int')
+        signed: True when the element type is signed. Must come from the same
+            CodeGen._pointer_elem_info() lookup as elem_bytes.
 
     Returns:
         List of assembly instruction strings.
@@ -143,8 +144,6 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
     code = []
 
     from . import ast
-
-    signed = ast.is_signed(elem_type) if elem_type else False
 
     if isinstance(index_expr, ast.Number):
         code.append(f"    move.l {name},a0")
@@ -211,9 +210,15 @@ def emit_untyped_global_pointer_read(codegen, name, index_expr, params,
 
 def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
                            reg_left, frame_reg, stride, field_offset,
-                           field_suffix, field_signed=False):
-    """Emit a 1D struct-array member read after centralized stride lowering."""
+                           field_suffix, field_signed=False, base_is_pointer=False):
+    """Emit a 1D struct-array member read after centralized stride lowering.
+
+    ``base_is_pointer`` selects ``move.l name,a0`` (name holds a pointer value)
+    over ``lea name,a0`` (name is a struct-array label). Both forms stride by
+    the same struct size.
+    """
     code = []
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
     if len(getattr(index_expr, "indices", [])) != 0:
         raise ValueError("struct-array read expects a single index expression")
     index_code = codegen._emit_expr(
@@ -228,9 +233,9 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
     from .indexed_address import index_may_clobber_address_register
     if index_may_clobber_address_register(index_expr):
         code.extend(index_code)
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
     else:
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
         code.extend(index_code)
 
     use_scaled = (
@@ -283,12 +288,14 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
 
 
 def emit_array_address_of(codegen, name, index_expr, params, locals_info,
-                          reg_left, reg_right, frame_reg, elem_bytes):
+                          reg_left, reg_right, frame_reg, elem_bytes,
+                          base_is_pointer=False):
     """Emit code for &array[index] with centralized address lowering.
 
     Args:
         codegen: CodeGen instance
-        name: Array variable name
+        name: Array variable name, or the operand holding a pointer value when
+            base_is_pointer is set
         index_expr: AST expression for array index
         params: Procedure parameters
         locals_info: Local variable info
@@ -296,6 +303,7 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index
         frame_reg: Frame pointer register
         elem_bytes: Element size in bytes
+        base_is_pointer: Load the base with move.l instead of lea
 
     Returns:
         List of assembly instruction strings.
@@ -306,8 +314,10 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
 
     from . import ast
 
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
+
     if isinstance(index_expr, ast.Number):
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
         # Constant index: compute offset at compile time
         index_val = index_expr.value
         offset = index_val * elem_bytes
@@ -331,9 +341,9 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         from .indexed_address import index_may_clobber_address_register
         if index_may_clobber_address_register(index_expr):
             code.extend(index_code)
-            code.append(f"    lea {name},a0")
+            code.append(base_load)
         else:
-            code.append(f"    lea {name},a0")
+            code.append(base_load)
             code.extend(index_code)
 
         # Get prelude and operand from centralized helper
@@ -417,9 +427,14 @@ def emit_typed_pointer_store(codegen, pointer_name, index_expr, params,
 
 def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
                             reg_value, reg_right, frame_reg, stride,
-                            field_offset, field_suffix):
-    """Emit a struct-array member store after the RHS has been evaluated."""
+                            field_offset, field_suffix, base_is_pointer=False):
+    """Emit a struct-array member store after the RHS has been evaluated.
+
+    ``base_is_pointer`` mirrors emit_struct_array_read(): the store must use the
+    same base form and the same stride as the matching read.
+    """
     code = []
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
     index_code = codegen._emit_expr(
         index_expr,
         params,
@@ -432,9 +447,9 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
     from .indexed_address import index_may_clobber_address_register
     if index_may_clobber_address_register(index_expr):
         code.extend(index_code)
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
     else:
-        code = [f"    lea {name},a0"]
+        code = [base_load]
         code.extend(index_code)
 
     use_scaled = (

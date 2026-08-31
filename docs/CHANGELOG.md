@@ -128,7 +128,40 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Fixed
 
-- **Narrow (`.b`/`.w`) array and typed-pointer element reads no longer leave
+- **Silent memory corruption: procedures with parameters but no locals
+  addressed their frame through an uninitialised `a4`.** The frame register was
+  selected independently of the prologue that initialises it: `a4` was chosen
+  for every non-native procedure, but the `move.l a6,a4` setup (and the
+  matching epilogue restore) was only emitted when the procedure had at least
+  one local variable. A procedure of the shape "has parameters, has no locals"
+  therefore emitted frame references such as `move.l 8(a4),a0` against a
+  register that was never loaded, so a store through a pointer parameter
+  (`p->x = 7;`, `p[i] = v;`, `move.l d3,@x` in an `asm` block) wrote to an
+  arbitrary address determined by whatever the caller happened to leave in
+  `a4`. There was no diagnostic and no crash at compile or assemble time - the
+  generated code assembled cleanly and corrupted memory at run time.
+
+  The bug was masked in two ways, which is why it survived this long. When a
+  procedure *does* have locals, `a4` is correctly set to `a6`, so `8(a4)` and
+  `8(a6)` denote the same address and both spellings are correct. And the
+  struct-pointer *read* path happened to hardcode `a6`, so reads through a
+  pointer parameter were always correct - only stores were wrong, and only in
+  the no-locals shape, which made the symptom look like data corruption from
+  unrelated code.
+
+  The frame register is now derived from the same condition that governs the
+  prologue: `a4` is used only for a non-native procedure with a non-empty body
+  and at least one local, and `a6` is used otherwise. As part of the same fix,
+  the fallback candidates `a3`/`a5` (selected when `a4` is locked) are no
+  longer used as frame registers at all: the prologue had no save/restore for
+  them, so they would have been clobbered without being preserved.
+
+  Affects `--cpu 68000` and `--cpu 68020` identically. **Generated assembly
+  changes** for the affected shape (`8(a4)` becomes `8(a6)`); of the shipped
+  examples only `examples/asm_user_example.has` was hitting it, where four
+  lines change per target. No other example output changes.
+
+
   the upper register bits undefined.** `arr[i]`, `matrix[r][c]` and `ptr[i]`
   reads of byte- or word-sized elements emitted a bare `move.b`/`move.w` with
   no extension, so bits 8-31 (or 16-31) of the destination register kept

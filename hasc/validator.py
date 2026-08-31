@@ -523,6 +523,7 @@ class Validator:
                     self.errors.append(
                         f"In proc '{proc.name}': Undefined array '{arr_name}'"
                     )
+                self._check_indexable(arr_name, symbols, proc)
                 # Validate index expressions
                 for idx_expr in stmt.target.indices:
                     self._validate_expr(idx_expr, symbols, proc)
@@ -540,6 +541,7 @@ class Validator:
                         self.errors.append(
                             f"In proc '{proc.name}': Undefined struct array '{arr_name}'"
                         )
+                    self._check_indexable(arr_name, symbols, proc)
                     for idx_expr in base.indices:
                         self._validate_expr(idx_expr, symbols, proc)
                 elif isinstance(base, ast.UnaryOp) and base.op == '*':
@@ -677,6 +679,17 @@ class Validator:
                 f"was never declared with 'interrupt NAME({index}) -> void {{ ... }}'"
             )
     
+    def _check_indexable(self, name, symbols, proc):
+        """Reject p[i] on a 'void*': the element size is undefined, so any stride
+        the code generator picked would be an arbitrary guess."""
+        declared = symbols.get(name)
+        if declared and declared.replace(' ', '') == 'void*':
+            self.errors.append(
+                f"In proc '{proc.name}': Cannot index through 'void*' variable '{name}': "
+                "the element size is undefined. Declare it with a concrete element "
+                "type (e.g. 'byte*', 'int*')."
+            )
+
     def _validate_expr(self, expr, symbols, proc):
         """Validate an expression."""
         if isinstance(expr, ast.Number):
@@ -692,6 +705,7 @@ class Validator:
         elif isinstance(expr, ast.ArrayAccess):
             # Validate array name exists (as global or local)
             # Note: For now we only support global arrays
+            self._check_indexable(expr.name, symbols, proc)
             # Validate all index expressions
             for idx_expr in expr.indices:
                 self._validate_expr(idx_expr, symbols, proc)
@@ -708,6 +722,7 @@ class Validator:
                     self.errors.append(
                         f"In proc '{proc.name}': Undefined struct array '{arr_name}'"
                     )
+                self._check_indexable(arr_name, symbols, proc)
                 for idx_expr in base.indices:
                     self._validate_expr(idx_expr, symbols, proc)
             elif isinstance(base, ast.UnaryOp) and base.op == '*':
