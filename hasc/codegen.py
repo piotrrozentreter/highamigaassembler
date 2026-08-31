@@ -47,6 +47,7 @@ class CodeGen:
         self.strict_word_arith = self._build_strict_word_arith(module)
         self.interrupt_procs = self._build_interrupt_procs(module)  # {index: proc_name}, 0-15
         self.label_counter = 0
+        self.current_stmt_line = None  # source line of the statement being emitted, for diagnostics
         self.push_stack = []  # Track PUSH/POP register lists
         self.loop_stack = []  # Stack of (continue_label, end_label) for nested loops
         self.dbra_depth = 0  # Nesting depth of active dbra-counter loops (RepeatLoop / fast-path ForLoop); they share d7
@@ -66,6 +67,70 @@ class CodeGen:
                 f"is outside signed 16-bit range (-32768..32767)."
             )
 
+    def _static_symbol_word_size(self, name: str):
+        """Return ('b'|'w'|'l', signed) for a global/extern scalar, else None."""
+        info = self.globals.get(name) or self.extern_vars.get(name)
+        if not isinstance(info, dict):
+            return None
+        size = info.get('size')
+        if size not in ('b', 'w', 'l'):
+            return None
+        return size, bool(info.get('signed'))
+
+    def _const_int_value(self, expr):
+        """Return expr's compile-time integer value, else None.
+
+        Named constants are resolved here in the same order _emit_expr() resolves
+        a VarRef (constants before locals), so a proof can never be based on a
+        declaration that codegen does not actually read.
+        """
+        if isinstance(expr, ast.Number) and isinstance(expr.value, int):
+            return expr.value
+        if isinstance(expr, ast.VarRef):
+            value = self.constants.get(expr.name)
+            if isinstance(value, int):
+                return value
+        return None
+
+    def _struct_field_size_suffix(self, expr, locals_info, params=None):
+        """Return 'b'|'w'|'l' for a struct-field read whose layout is known, else None.
+
+        Covers `s.field`, `arr[i].field` and `(*p).field` / `p->field`. The pointer
+        form is only resolved through an explicitly declared pointer type; codegen's
+        name-similarity fallback guess is not a sound basis for a width proof.
+        """
+        if not isinstance(expr, ast.MemberAccess):
+            return None
+        base = expr.base
+        if isinstance(base, (ast.VarRef, ast.ArrayAccess)):
+            sinfo = self.struct_info.get(base.name)
+        elif isinstance(base, ast.UnaryOp) and base.op == '*' and isinstance(base.operand, ast.VarRef):
+            vtype = self._declared_var_type(base.operand, locals_info, params)
+            if not (vtype and vtype.endswith('*')):
+                return None
+            sinfo = self.struct_info.get(vtype.rstrip('*').strip())
+        else:
+            return None
+        if not sinfo:
+            return None
+        field = sinfo['fields'].get(expr.field)
+        return field['size_suffix'] if field else None
+
+    def _is_masked_by_constant(self, expr, upper_bound: int) -> bool:
+        """True for `x & C` with a non-negative constant C <= upper_bound.
+
+        `&` always lowers to a full-width andi.l/and.l, so every bit above the
+        highest set bit of C is cleared in all 32 bits: the result is in [0, C]
+        no matter what the other operand holds. Sound for either operand order.
+        """
+        if not (isinstance(expr, ast.BinOp) and expr.op == '&'):
+            return False
+        for side in (expr.left, expr.right):
+            value = self._const_int_value(side)
+            if value is not None and 0 <= value <= upper_bound:
+                return True
+        return False
+
     def _is_word_arith_operand_safe(self, expr, locals_info, params=None) -> bool:
         """Best-effort proof that expr is always representable as signed 16-bit."""
         if isinstance(expr, ast.Number):
@@ -73,6 +138,10 @@ class CodeGen:
 
         if isinstance(expr, ast.VarRef):
             name = expr.name
+            const_value = self._const_int_value(expr)
+            if const_value is not None:
+                return self._fits_signed_word(const_value)
+
             local_info = next((l for l in locals_info if l[0] == name), None)
             if local_info:
                 _, vtype, _ = local_info
@@ -86,27 +155,92 @@ class CodeGen:
                     return ast.is_signed(vtype)
                 return False
 
-            if params:
-                param_info = next((p for p in params if p.name == name), None)
-                if param_info and param_info.ptype:
-                    ptype = param_info.ptype
-                    size = ast.type_size(ptype)
-                    if size == 1:
-                        return True
-                    if size == 2:
-                        return ast.is_signed(ptype)
+            param_info = next((p for p in params if p.name == name), None) if params else None
+            if param_info:
+                # A parameter shadows any same-named global/extern, so never fall
+                # through to the static table once the name resolves as a param.
+                ptype = param_info.ptype
+                if not ptype:
+                    return False
+                size = ast.type_size(ptype)
+                if size == 1:
+                    return True
+                if size == 2:
+                    return ast.is_signed(ptype)
+                return False
+
+            # Reached only when the name is neither a local nor a parameter.
+            static = self._static_symbol_word_size(name)
+            if static:
+                size, signed = static
+                # Any byte value (-128..127 or 0..255) fits signed 16-bit; a word only
+                # fits when it is signed, since 0..65535 overflows 32767.
+                if size == 'b':
+                    return True
+                if size == 'w':
+                    return signed
             return False
 
-        return False
+        suffix = self._struct_field_size_suffix(expr, locals_info, params)
+        if suffix is not None:
+            # Struct fields are read zero-extended (clr.l + move.b/.w, or move +
+            # and.l mask), so a byte field is always 0..255 and fits signed 16-bit.
+            # A word field is 0..65535, which MULS.W would reinterpret as negative
+            # above 32767, and a long field is unbounded; neither is provable.
+            return suffix == 'b'
+
+        # Global array elements are deliberately not proven on the signed path.
+        # The read is a bare move.b/move.w with no clr.l and no ext.l, so every bit
+        # above the element width is left undefined: the register does not hold the
+        # element value as a long at all, in ANY range. This is not a missing rule
+        # that a future reader could supply -- it only becomes provable once the
+        # element load itself is fixed to define the whole register.
+
+        return self._is_masked_by_constant(expr, 32767)
+
+    def _operand_text(self, expr) -> str:
+        """Short, user-recognisable rendering of an operand for diagnostics."""
+        if isinstance(expr, ast.Number):
+            return str(expr.value)
+        if isinstance(expr, ast.VarRef):
+            return expr.name
+        if isinstance(expr, ast.ArrayAccess):
+            return f"{expr.name}[...]"
+        if isinstance(expr, ast.MemberAccess):
+            return f"{self._operand_text(expr.base)}.{expr.field}"
+        if isinstance(expr, ast.BinOp):
+            return f"({self._operand_text(expr.left)} {expr.op} {self._operand_text(expr.right)})"
+        if isinstance(expr, ast.UnaryOp):
+            return f"{expr.op}{self._operand_text(expr.operand)}"
+        return self._expr_to_comment(expr)
+
+    def _word_arith_diagnostic(self, expr, op_name: str, side: str, domain: str, declared: str) -> str:
+        """Build the strict16arith failure message (operand, operator, line, remedies)."""
+        # Prefer the operand's own recorded line; the statement line is only a
+        # fallback, and is reset per procedure so it cannot leak in from an earlier one.
+        line = self.node_lines.get(id(expr)) or self.current_stmt_line
+        where = f" at line {line}" if line else ""
+        return (
+            f"68000 {op_name}{where}: {side} operand '{self._operand_text(expr)}'{declared} "
+            f"cannot be proven to fit the {domain} 16-bit range, but the 68000 lowering "
+            f"({'MULU.W/DIVU.W' if domain == 'unsigned' else 'MULS.W/DIVS.W'}) only uses "
+            f"16-bit operands, so the value would be silently truncated. "
+            f"Either compile with --cpu 68020 (native 32-bit multiply/divide), narrow the "
+            f"operand to a 16-bit type, or change this module's '#pragma strict16arith' "
+            f"to (off) to accept the truncation."
+        )
+
+    def _declared_type_note(self, expr, locals_info, params) -> str:
+        vtype = self._declared_var_type(expr, locals_info, params)
+        return f" (declared '{vtype}')" if vtype else ""
 
     def _require_word_arith_operand(self, expr, op_name: str, side: str, locals_info, params=None):
         """Validate operand width assumptions for MULS.W / DIVS.W operations."""
         self._require_signed_word_const(expr, op_name, side)
         if self.strict_word_arith and not self._is_word_arith_operand_safe(expr, locals_info, params):
-            self._fail(
-                f"{op_name} with strict16arith(on) requires provably signed 16-bit operands; "
-                f"{side} operand cannot be proven safe at compile time."
-            )
+            self._fail(self._word_arith_diagnostic(
+                expr, op_name, side, 'signed',
+                self._declared_type_note(expr, locals_info, params)))
 
     def _fits_unsigned_word(self, value: int) -> bool:
         return 0 <= value <= 65535
@@ -120,15 +254,26 @@ class CodeGen:
             )
 
     def _is_unsigned_word_arith_operand_safe(self, expr, locals_info, params=None) -> bool:
-        """Best-effort proof that expr is always representable as unsigned 16-bit."""
+        """Best-effort proof that expr is always representable as unsigned 16-bit.
+
+        Limitation: _is_unsigned_arith_pair() only selects the unsigned lowering when
+        every operand is a non-negative literal or an unsigned-typed local/parameter,
+        so those are the only forms that can reach here. Struct fields, array
+        elements, globals/externs and masked expressions always take the signed
+        lowering instead, and deliberately have no rule here -- adding one would be
+        unreachable, unvalidated code.
+        """
         if isinstance(expr, ast.Number):
             return self._fits_unsigned_word(expr.value)
 
         if isinstance(expr, ast.VarRef):
+            const_value = self._const_int_value(expr)
+            if const_value is not None:
+                return self._fits_unsigned_word(const_value)
+
             vtype = self._declared_var_type(expr, locals_info, params)
-            if vtype is None:
-                return False
-            return ast.type_size(vtype) <= 2 and vtype in UNSIGNED_ARITH_TYPES
+            if vtype is not None:
+                return ast.type_size(vtype) <= 2 and vtype in UNSIGNED_ARITH_TYPES
 
         return False
 
@@ -136,10 +281,9 @@ class CodeGen:
         """Validate operand width assumptions for MULU.W / DIVU.W operations."""
         self._require_unsigned_word_const(expr, op_name, side)
         if self.strict_word_arith and not self._is_unsigned_word_arith_operand_safe(expr, locals_info, params):
-            self._fail(
-                f"{op_name} with strict16arith(on) requires provably unsigned 16-bit operands; "
-                f"{side} operand cannot be proven safe at compile time."
-            )
+            self._fail(self._word_arith_diagnostic(
+                expr, op_name, side, 'unsigned',
+                self._declared_type_note(expr, locals_info, params)))
 
     def _is_unsigned_arith_pair(self, left, right, locals_info, params=None) -> bool:
         """Decide whether `*`, `/`, `%` may use the unsigned MULU/DIVU lowering.
@@ -440,7 +584,11 @@ class CodeGen:
         return locked
 
     def _build_strict_word_arith(self, module: ast.Module) -> bool:
-        """Collect strict16arith pragma mode. Default is permissive (off)."""
+        """Collect strict16arith pragma mode. Default is permissive (off).
+
+        Flipping this default to True is a one-line change; see the blast-radius
+        analysis under Phase 5 in docs/CPU_68020_IMPLEMENTATION_PLAN.md.
+        """
         strict = False
         for item in module.items:
             if isinstance(item, ast.PragmaDirective) and item.name == 'strict16arith':
@@ -1307,8 +1455,8 @@ class CodeGen:
                     # Assumes operands fit in 16 bits; result in reg_left (32-bit)
                     self._require_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
                     self._require_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_left}  ; normalize to signed 16-bit source semantics")
-                    code.append(f"    ext.l {reg_right}  ; normalize to signed 16-bit source semantics")
+                    # muls.w reads only the low word of both operands and overwrites all
+                    # 32 bits of the destination, so pre-normalizing with ext.l is inert.
                     code.append(f"    muls.w {reg_right},{reg_left}")
             elif expr.op == '/':
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
@@ -1331,7 +1479,7 @@ class CodeGen:
                     # Use DIVS.W for signed division. Do not rewrite to ASR for powers
                     # of two because ASR rounds negative values differently than DIVS.
                     self._require_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    # divs.w reads only the low word of the divisor, so normalizing it is inert.
                     code.append(f"    divs.w {reg_right},{reg_left}")
                     code.append(f"    ext.l {reg_left}  ; isolate quotient and clear remainder word")
             elif expr.op == '%':
@@ -1356,7 +1504,7 @@ class CodeGen:
                 else:
                     # Modulo - after divs.w, remainder is in upper word
                     self._require_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    # divs.w reads only the low word of the divisor, so normalizing it is inert.
                     code.append(f"    divs.w {reg_right},{reg_left}")
                     code.append(f"    swap {reg_left}  ; get remainder")
                     code.append(f"    ext.l {reg_left}  ; sign-extend")
@@ -2446,6 +2594,7 @@ class CodeGen:
 
     def _emit_stmt(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
         """Emit a single statement within a procedure."""
+        self.current_stmt_line = self.node_lines.get(id(stmt), self.current_stmt_line)
         if self.annotate:
             self._emit_source_line_comment(stmt, indent)
         if isinstance(stmt, ast.VarDecl):
@@ -3814,6 +3963,8 @@ class CodeGen:
                         # Reset push stack for each procedure
                         self.push_stack = []
                         self.dbra_depth = 0
+                        # Never let a diagnostic inherit a line from a previous procedure.
+                        self.current_stmt_line = None
 
                         # Choose frame register (for frame pointer preservation across calls)
                         frame_reg = self._choose_frame_register()

@@ -4,6 +4,42 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Changed
+
+- **Inert `ext.l` sign-normalization removed from 68000 `*`, `/` and `%`.**
+  `muls.w`/`mulu.w` read only the low word of both operands and then overwrite
+  all 32 bits of the destination, and `divs.w`/`divu.w` read only the low word
+  of the divisor - so the `ext.l` instructions emitted ahead of them could
+  never affect the result. Two instructions per multiply and one per
+  divide/modulo are now gone. The `ext.l` *after* `divs.w` (which isolates the
+  quotient from the remainder in the high word) and the one after `swap` in the
+  modulo path are load-bearing and are retained.
+
+  Program behavior is unchanged; this is a pure instruction-count reduction on
+  the default target. It does change generated `--cpu 68000` assembly text (26
+  of the 114 examples that compile for that target), so any test or tooling
+  that pins exact 68000 output must be refreshed. `--cpu 68020` output is
+  unchanged apart from the generated timestamp header, since that target uses
+  the native `muls.l`/`divsl.l`/`mulu.l`/`divul.l` paths.
+
+  Note this removal does **not** change the long-standing 16-bit restriction of
+  68000 `*`/`/`/`%` - the `ext.l` never widened anything, so operands wider
+  than 16 bits were, and still are, truncated. See `#pragma strict16arith(on)`
+  below to turn that truncation into a compile-time error.
+
+- **`#pragma strict16arith(on)` proves more operands and reports far better
+  errors.** The width prover now additionally recognises named constants,
+  global and extern scalars, byte-sized struct fields (`s.f`, `arr[i].f`,
+  `p->f`), and `x & C` masks with a constant `C` inside the target range. The
+  diagnostic now names the operand, its declared type, the operator, and the
+  source line, and states all three remedies (narrow the operand to a 16-bit
+  type, compile with `--cpu 68020`, or switch the pragma to `(off)`).
+
+  The default remains **`off` (permissive)** - this pragma is still opt-in, and
+  no existing program changes behavior. Turning it on by default is blocked on
+  two latent codegen bugs; see "Higher-value work" in
+  [CPU_68020_IMPLEMENTATION_PLAN.md](CPU_68020_IMPLEMENTATION_PLAN.md).
+
 ### Breaking Changes
 
 - **Unsigned `*`, `/` and `%` now use unsigned instruction lowering**

@@ -178,7 +178,7 @@ def test_68000_modulo_with_large_constant_still_fails():
         assert "outside signed 16-bit range" in str(exc)
 
 
-def test_68000_small_operand_multiply_output_unchanged():
+def test_68000_small_operand_multiply_has_no_inert_ext():
     src = """
 code main:
     proc mul_small(a: int, b: int) -> int {
@@ -191,10 +191,13 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("muls.w")
-    assert mnemonics[idx - 2:idx + 1] == ["ext.l", "ext.l", "muls.w"]
+    # muls.w reads only the low word of both operands and overwrites all 32 bits
+    # of the destination, so no sign normalization is needed before or after it.
+    assert mnemonics[idx] == "muls.w"
+    assert "ext.l" not in mnemonics
 
 
-def test_68000_small_operand_divide_output_unchanged():
+def test_68000_small_operand_divide_keeps_only_quotient_ext():
     src = """
 code main:
     proc div_small(a: int, b: int) -> int {
@@ -207,10 +210,14 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("divs.w")
-    assert mnemonics[idx - 1:idx + 2] == ["ext.l", "divs.w", "ext.l"]
+    # Divisor normalization is inert (divs.w reads its low word only); the trailing
+    # ext.l is load-bearing because it isolates the quotient from the remainder word.
+    assert mnemonics[idx - 1] != "ext.l"
+    assert mnemonics[idx:idx + 2] == ["divs.w", "ext.l"]
+    assert mnemonics.count("ext.l") == 1
 
 
-def test_68000_small_operand_modulo_output_unchanged():
+def test_68000_small_operand_modulo_keeps_only_remainder_ext():
     src = """
 code main:
     proc mod_small(a: int, b: int) -> int {
@@ -223,7 +230,69 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("divs.w")
-    assert mnemonics[idx - 1:idx + 3] == ["ext.l", "divs.w", "swap", "ext.l"]
+    # The post-swap ext.l is load-bearing: it sign-extends the remainder.
+    assert mnemonics[idx - 1] != "ext.l"
+    assert mnemonics[idx:idx + 3] == ["divs.w", "swap", "ext.l"]
+    assert mnemonics.count("ext.l") == 1
+
+
+COMPLEX_RIGHT_MUL_SRC = """
+code main:
+    proc mul_complex(a: int, b: int, c: int) -> int {
+        return a * (b - c);
+    }
+"""
+
+
+def test_68000_multiply_with_complex_right_keeps_stack_save_restore():
+    """The removed ext.l sat between the left-operand save/restore pair; pin the
+    surrounding sequence so the pair itself cannot silently disappear."""
+    module = parser.parse(COMPLEX_RIGHT_MUL_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    lines = asm.splitlines()
+
+    mnemonics, indices = _instruction_mnemonics(lines)
+    idx = mnemonics.index("muls.w")
+    assert mnemonics[idx - 1] == "move.l"
+    assert "(a7)+" in lines[indices[idx - 1]]
+    save = next(i for i in range(idx - 1, -1, -1) if "-(a7)" in lines[indices[i]])
+    assert mnemonics[save] == "move.l"
+    assert "ext.l" not in mnemonics
+
+
+COMPOUND_ASSIGN_SRC = """
+code main:
+    proc compound(a: int, b: int) -> int {
+        var x: int = a;
+        x *= b;
+        x /= b;
+        x %= b;
+        return x;
+    }
+"""
+
+
+def test_68000_compound_muldiv_assignment_matches_the_binop_lowering():
+    """`*=` / `/=` / `%=` desugar through the same _emit_expr path, so they must
+    lose the same inert ext.l and keep the load-bearing post-divide ones."""
+    module = parser.parse(COMPOUND_ASSIGN_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    mul = mnemonics.index("muls.w")
+    assert mnemonics[mul - 1] != "ext.l"
+    assert mnemonics[mul + 1] != "ext.l"
+
+    div = mnemonics.index("divs.w")
+    assert mnemonics[div - 1] != "ext.l"
+    assert mnemonics[div:div + 2] == ["divs.w", "ext.l"]
+
+    mod = mnemonics.index("divs.w", div + 1)
+    assert mnemonics[mod - 1] != "ext.l"
+    assert mnemonics[mod:mod + 3] == ["divs.w", "swap", "ext.l"]
+
+    # Exactly the two load-bearing post-divide extensions remain.
+    assert mnemonics.count("ext.l") == 2
 
 
 def test_division_by_zero_constant_still_rejected_on_both_targets():

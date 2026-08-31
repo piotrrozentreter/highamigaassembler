@@ -367,10 +367,44 @@ Measured against one `UpdateMissiles` loop iteration at `--cpu 68020`, each of
 these outranks everything remaining in Phase 5, and each benefits stock 68000
 most:
 
-1. **68000 `ext.l` truncation in 32-bit multiply lowering** - the `ext.l`/`ext.l`
-   pair before `muls.w` silently destroys the upper 16 bits of operands loaded
-   as longs. Unlike the items below this is a correctness issue on the *default*
-   target, currently masked only because affected values happen to fit a word.
+1. **68000 `ext.l` handling in 32-bit multiply lowering.**
+
+   *Inert `ext.l` removal: DONE.* The `ext.l` pair before `muls.w` and the
+   divisor `ext.l` before `divs.w` could never affect the result (those
+   instructions read only the low word of their source and overwrite the whole
+   destination), so they were removed - two instructions per multiply, one per
+   divide/modulo. Verified: `--cpu 68020` output unchanged apart from the
+   generated timestamp, `--cpu 68000` differs in 26 of the 114 examples that
+   compile for that target with every changed line an `ext.l` removal (105
+   removals, zero additions), and no example changed compile status.
+
+   *Making `strict16arith(on)` the default: BLOCKED.* With the default forced
+   on, 28 of 120 examples fail to compile on `--cpu 68000` (6 of those by
+   design: 5 negative-test fixtures plus the intentionally 68020-only
+   `cpu68020_32bit_arithmetic.has`). Strengthening the width prover was tried
+   first and is not sufficient, because the blocker is not the prover - it is
+   how narrow values are read:
+
+   - **(i) Global array element reads leave the upper register bits
+     undefined.** `emit_1d_array_read` / `emit_2d_array_read` emit a bare
+     `move.b`/`move.w` with no `clr.l`, mask, or extension, so bits above the
+     element width hold whatever was in the register. This is a wrong-code bug
+     for *any* 32-bit use of a global `.b`/`.w` array element - `add.l`,
+     comparisons, argument passing - not just for mul/div. It also means such
+     an element is not provably `0..65535`, or provably anything, as a long.
+
+   - **(ii) Struct `.w`/`.b` fields are unconditionally zero-extended.** A
+     field holding `-1` reads back as `65535`. The root cause is that
+     `_build_struct_info` records only a size suffix and never signedness, so
+     HAS currently cannot express a signed word field at all. This affects
+     comparisons and `add.l` today, independently of strict mode. It is also
+     precisely why a word field such as `snake_body[i].x` cannot be proven to
+     fit signed 16-bit: the read genuinely yields `0..65535`, which `muls.w`
+     would reinterpret as negative above `32767`.
+
+   Fix (i) and (ii) first - both are real correctness bugs worth doing on their
+   own merits - then re-measure the blast radius and revisit the default.
+
 2. **`dbra` + register-allocated loop counters.** Bounded `for` counters live in
    the stack frame and are reloaded and stored back every iteration - 6
    instructions and 4 memory accesses for what `dbra` does in one. The compiler

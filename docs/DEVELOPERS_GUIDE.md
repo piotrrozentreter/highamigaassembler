@@ -1037,6 +1037,17 @@ code math_safe:
 #pragma strict16arith(off);
 ```
 
+`strict16arith` defaults to `off`. On `--cpu 68000`, `*`, `/` and `%` use only
+the low word of each operand, so wider values are silently truncated at
+runtime; turning the pragma `on` makes that a compile-time error instead. The
+prover accepts literals in range, byte- and signed-word-typed locals and
+parameters, named constants, global and extern scalars, byte-sized struct
+fields, and `x & C` masks with a constant `C` in range. It deliberately rejects
+word-sized struct fields and global array elements, because those are read
+without sign extension and so cannot be proven to fit a signed word. The pragma
+has no effect under `--cpu 68020`, where `muls.l`/`divsl.l` handle full 32-bit
+operands natively.
+
 Conditional compilation directives are resolved at compile time:
 
 ```has

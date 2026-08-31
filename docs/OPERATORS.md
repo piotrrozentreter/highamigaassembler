@@ -13,8 +13,22 @@
   (`muls.w` / `divs.w`).
 - Constant operands used in these paths must fit signed 16-bit range: `-32768..32767`.
 - Division/modulo by constant zero is a compile-time error.
-- `#pragma strict16arith(on)` enables stricter checks for dynamic (non-constant) operands:
-	- operands must be provably safe signed 16-bit values based on declared types.
+- Only the low word of each operand is used, so a value wider than 16 bits is
+  **silently truncated** at runtime. No `ext.l` is emitted ahead of the
+  multiply or divide: because `muls.w`/`divs.w` read only the low word of their
+  source and the multiply overwrites the whole destination, such an `ext.l`
+  could never change the result. (The `ext.l` *after* `divs.w` is kept - it
+  isolates the quotient from the remainder in the high word.)
+- `#pragma strict16arith(on)` turns that truncation into a compile-time error
+  for dynamic (non-constant) operands:
+	- operands must be provably safe signed 16-bit values based on declared types;
+	- named constants, global/extern scalars, byte-sized struct fields (`s.f`,
+	  `arr[i].f`, `p->f`), and `x & C` masks with a constant `C` in range are
+	  recognised as provably safe;
+	- word-sized struct fields and global array elements are **not** provable,
+	  because they are read without sign extension;
+	- the error names the operand, the operator, and the line, and states both
+	  remedies.
 - `#pragma strict16arith(off)` (default) keeps permissive behavior for dynamic operands.
 - **This signed 16-bit restriction is 68000-specific and is lifted under
   `--cpu 68020`**: `*`, `/`, `%` on `int`/`long` instead emit native
@@ -36,7 +50,7 @@ fixed-point format and always uses the signed lowering.
 
 | Target | Signed operands | Unsigned operands |
 | --- | --- | --- |
-| `--cpu 68000` | `muls.w` / `divs.w` (with `ext.l` sign normalization) | `mulu.w` / `divu.w` (no `ext.l`; quotient/remainder masked with `andi.l #$FFFF`) |
+| `--cpu 68000` | `muls.w` / `divs.w` (quotient isolated with a trailing `ext.l`) | `mulu.w` / `divu.w` (quotient/remainder masked with `andi.l #$FFFF`) |
 | `--cpu 68020` | `muls.l` / `divsl.l` | `mulu.l` / `divul.l` |
 
 - On `--cpu 68000` the constant operand-range check for the unsigned path is
