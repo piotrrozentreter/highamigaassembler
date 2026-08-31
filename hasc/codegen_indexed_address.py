@@ -16,8 +16,50 @@ wrappers below.
 """
 
 
+def emit_narrow_element_load(codegen, operand, reg_left, elem_bytes, signed,
+                             live_index_reg=None):
+    """Emit a sized element load that fully defines all 32 bits of ``reg_left``.
+
+    A bare ``move.b``/``move.w`` only writes the low 8/16 bits, leaving the upper
+    bits of the destination holding stale data. Every narrow read must therefore
+    be paired with a sign- or zero-extension.
+
+    ``live_index_reg`` names a register that is still live inside ``operand``
+    (the scaled index). When it aliases ``reg_left`` the zero-extension cannot be
+    hoisted to a pre-move ``clr.l`` and falls back to a post-move mask.
+    """
+    from . import ast
+
+    size_suffix = ast.size_suffix(elem_bytes)
+    if elem_bytes not in (1, 2) or not reg_left.startswith('d'):
+        return [f"    move{size_suffix} {operand},{reg_left}"]
+
+    if signed:
+        code = [f"    move{size_suffix} {operand},{reg_left}"]
+        if elem_bytes == 1:
+            if codegen.target.supports_extb_l:
+                code.append(f"    extb.l {reg_left}")
+            else:
+                code.append(f"    ext.w {reg_left}")
+                code.append(f"    ext.l {reg_left}")
+        else:
+            code.append(f"    ext.l {reg_left}")
+        return code
+
+    mask = "#$FF" if elem_bytes == 1 else "#$FFFF"
+    if live_index_reg is not None and live_index_reg == reg_left:
+        return [
+            f"    move{size_suffix} {operand},{reg_left}",
+            f"    andi.l {mask},{reg_left}",
+        ]
+    return [
+        f"    clr.l {reg_left}",
+        f"    move{size_suffix} {operand},{reg_left}",
+    ]
+
+
 def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
-                       reg_left, reg_right, frame_reg, elem_bytes):
+                       reg_left, reg_right, frame_reg, elem_bytes, signed=False):
     """Emit code for global 1D array read with centralized address lowering.
 
     Args:
@@ -30,6 +72,7 @@ def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index (e.g., 'd1')
         frame_reg: Frame pointer register ('a6' or 'a4')
         elem_bytes: Element size in bytes (stride: 1, 2, 4, or higher)
+        signed: True when the element type is signed (sign-extend narrow loads)
 
     Returns:
         List of assembly instruction strings.
@@ -69,15 +112,17 @@ def emit_1d_array_read(codegen, name, index_expr, params, locals_info,
     )
     code.extend(prelude)
 
-    # Load element with correct size suffix
-    size_suffix = ast.size_suffix(elem_bytes)
-    code.append(f"    move{size_suffix} {operand},{reg_left}")
+    # Load element, fully defining reg_left (reg_right is still live in operand)
+    code.extend(emit_narrow_element_load(
+        codegen, operand, reg_left, elem_bytes, signed,
+        live_index_reg=reg_right,
+    ))
 
     return code
 
 
 def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
-                            reg_left, reg_right, frame_reg, elem_bytes, elem_type):
+                            reg_left, reg_right, frame_reg, elem_bytes, signed):
     """Emit code for typed pointer dereference with centralized address lowering.
 
     Args:
@@ -90,7 +135,8 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index
         frame_reg: Frame pointer register
         elem_bytes: Element size (1, 2, 4)
-        elem_type: Element type string (e.g., 'byte', 'word', 'int')
+        signed: True when the element type is signed. Must come from the same
+            CodeGen._pointer_elem_info() lookup as elem_bytes.
 
     Returns:
         List of assembly instruction strings.
@@ -104,12 +150,11 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         # Constant index
         index_val = index_expr.value
         offset = index_val * elem_bytes
-        size_suffix = ast.size_suffix(elem_bytes)
 
-        if offset == 0:
-            code.append(f"    move{size_suffix} (a0),{reg_left}")
-        else:
-            code.append(f"    move{size_suffix} {offset}(a0),{reg_left}")
+        operand = "(a0)" if offset == 0 else f"{offset}(a0)"
+        code.extend(emit_narrow_element_load(
+            codegen, operand, reg_left, elem_bytes, signed,
+        ))
     else:
         # Variable index: use centralized address lowering
         # Evaluate index into reg_right (d1)
@@ -129,9 +174,11 @@ def emit_typed_pointer_read(codegen, name, index_expr, params, locals_info,
         )
         code.extend(prelude)
 
-        # Load element with correct size
-        size_suffix = ast.size_suffix(elem_bytes)
-        code.append(f"    move{size_suffix} {operand},{reg_left}")
+        # Load element, fully defining reg_left (reg_right is still live in operand)
+        code.extend(emit_narrow_element_load(
+            codegen, operand, reg_left, elem_bytes, signed,
+            live_index_reg=reg_right,
+        ))
 
     return code
 
@@ -163,9 +210,15 @@ def emit_untyped_global_pointer_read(codegen, name, index_expr, params,
 
 def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
                            reg_left, frame_reg, stride, field_offset,
-                           field_suffix):
-    """Emit a 1D struct-array member read after centralized stride lowering."""
+                           field_suffix, field_signed=False, base_is_pointer=False):
+    """Emit a 1D struct-array member read after centralized stride lowering.
+
+    ``base_is_pointer`` selects ``move.l name,a0`` (name holds a pointer value)
+    over ``lea name,a0`` (name is a struct-array label). Both forms stride by
+    the same struct size.
+    """
     code = []
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
     if len(getattr(index_expr, "indices", [])) != 0:
         raise ValueError("struct-array read expects a single index expression")
     index_code = codegen._emit_expr(
@@ -180,9 +233,9 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
     from .indexed_address import index_may_clobber_address_register
     if index_may_clobber_address_register(index_expr):
         code.extend(index_code)
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
     else:
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
         code.extend(index_code)
 
     use_scaled = (
@@ -215,7 +268,15 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
     if field_offset and not can_fold_displacement:
         code.append(codegen._emit_add_immediate("    ", "d1", field_offset))
 
-    if field_suffix in (".b", ".w") and reg_left == "d1":
+    if field_signed and field_suffix in (".b", ".w") and reg_left.startswith("d"):
+        # d1 still holds the scaled index inside operand; the helper's signed
+        # path extends after the move, so the aliasing case is safe as-is.
+        code.extend(emit_narrow_element_load(
+            codegen, operand, reg_left,
+            1 if field_suffix == ".b" else 2, True,
+            live_index_reg="d1",
+        ))
+    elif field_suffix in (".b", ".w") and reg_left == "d1":
         code.append(f"    move{field_suffix} {operand},d1")
         mask = "#$FF" if field_suffix == ".b" else "#$FFFF"
         code.append(f"    and.l {mask},d1")
@@ -227,12 +288,14 @@ def emit_struct_array_read(codegen, name, index_expr, params, locals_info,
 
 
 def emit_array_address_of(codegen, name, index_expr, params, locals_info,
-                          reg_left, reg_right, frame_reg, elem_bytes):
+                          reg_left, reg_right, frame_reg, elem_bytes,
+                          base_is_pointer=False):
     """Emit code for &array[index] with centralized address lowering.
 
     Args:
         codegen: CodeGen instance
-        name: Array variable name
+        name: Array variable name, or the operand holding a pointer value when
+            base_is_pointer is set
         index_expr: AST expression for array index
         params: Procedure parameters
         locals_info: Local variable info
@@ -240,6 +303,7 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         reg_right: Temporary register for index
         frame_reg: Frame pointer register
         elem_bytes: Element size in bytes
+        base_is_pointer: Load the base with move.l instead of lea
 
     Returns:
         List of assembly instruction strings.
@@ -250,8 +314,10 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
 
     from . import ast
 
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
+
     if isinstance(index_expr, ast.Number):
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
         # Constant index: compute offset at compile time
         index_val = index_expr.value
         offset = index_val * elem_bytes
@@ -275,9 +341,9 @@ def emit_array_address_of(codegen, name, index_expr, params, locals_info,
         from .indexed_address import index_may_clobber_address_register
         if index_may_clobber_address_register(index_expr):
             code.extend(index_code)
-            code.append(f"    lea {name},a0")
+            code.append(base_load)
         else:
-            code.append(f"    lea {name},a0")
+            code.append(base_load)
             code.extend(index_code)
 
         # Get prelude and operand from centralized helper
@@ -361,9 +427,14 @@ def emit_typed_pointer_store(codegen, pointer_name, index_expr, params,
 
 def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
                             reg_value, reg_right, frame_reg, stride,
-                            field_offset, field_suffix):
-    """Emit a struct-array member store after the RHS has been evaluated."""
+                            field_offset, field_suffix, base_is_pointer=False):
+    """Emit a struct-array member store after the RHS has been evaluated.
+
+    ``base_is_pointer`` mirrors emit_struct_array_read(): the store must use the
+    same base form and the same stride as the matching read.
+    """
     code = []
+    base_load = f"    move.l {name},a0" if base_is_pointer else f"    lea {name},a0"
     index_code = codegen._emit_expr(
         index_expr,
         params,
@@ -376,9 +447,9 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
     from .indexed_address import index_may_clobber_address_register
     if index_may_clobber_address_register(index_expr):
         code.extend(index_code)
-        code.append(f"    lea {name},a0")
+        code.append(base_load)
     else:
-        code = [f"    lea {name},a0"]
+        code = [base_load]
         code.extend(index_code)
 
     use_scaled = (
@@ -415,7 +486,8 @@ def emit_struct_array_store(codegen, name, index_expr, params, locals_info,
 
 
 def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
-                       reg_left, frame_reg, elem_size, elem_bytes, col_count):
+                       reg_left, frame_reg, elem_size, elem_bytes, col_count,
+                       signed=False):
     """Emit a dynamic 2D read while centralizing final element scaling."""
     code = [f"    ; 2D array access: {name}"]
     row_code = codegen._emit_expr(
@@ -440,7 +512,9 @@ def emit_2d_array_read(codegen, name, row_expr, col_expr, params, locals_info,
         "a0", "d2", elem_bytes, use_scaled=True
     )
     code.extend(prelude)
-    code.append(f"    move{'.' + elem_size} {operand},{reg_left}")
+    code.extend(emit_narrow_element_load(
+        codegen, operand, reg_left, elem_bytes, signed, live_index_reg="d2",
+    ))
     return code
 
 

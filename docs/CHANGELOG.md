@@ -4,6 +4,82 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Changed
+
+- **Inert `ext.l` sign-normalization removed from 68000 `*`, `/` and `%`.**
+  `muls.w`/`mulu.w` read only the low word of both operands and then overwrite
+  all 32 bits of the destination, and `divs.w`/`divu.w` read only the low word
+  of the divisor - so the `ext.l` instructions emitted ahead of them could
+  never affect the result. Two instructions per multiply and one per
+  divide/modulo are now gone. The `ext.l` *after* `divs.w` (which isolates the
+  quotient from the remainder in the high word) and the one after `swap` in the
+  modulo path are load-bearing and are retained.
+
+  Program behavior is unchanged; this is a pure instruction-count reduction on
+  the default target. It does change generated `--cpu 68000` assembly text (26
+  of the 114 examples that compile for that target), so any test or tooling
+  that pins exact 68000 output must be refreshed. `--cpu 68020` output is
+  unchanged apart from the generated timestamp header, since that target uses
+  the native `muls.l`/`divsl.l`/`mulu.l`/`divul.l` paths.
+
+  Note this removal does **not** change the long-standing 16-bit restriction of
+  68000 `*`/`/`/`%` - the `ext.l` never widened anything, so operands wider
+  than 16 bits were, and still are, truncated. See `#pragma strict16arith(on)`
+  below to turn that truncation into a compile-time error.
+
+- **`#pragma strict16arith(on)` proves more operands and reports far better
+  errors.** The width prover now additionally recognises named constants,
+  global and extern scalars, byte-sized struct fields (`s.f`, `arr[i].f`,
+  `p->f`), and `x & C` masks with a constant `C` inside the target range. The
+  diagnostic now names the operand, its declared type, the operator, and the
+  source line, and states all three remedies (narrow the operand to a 16-bit
+  type, compile with `--cpu 68020`, or switch the pragma to `(off)`).
+
+  The default remains **`off` (permissive)** - this pragma is still opt-in, and
+  no existing program changes behavior. Turning it on by default is blocked on
+  two latent codegen bugs; see "Higher-value work" in
+  [CPU_68020_IMPLEMENTATION_PLAN.md](CPU_68020_IMPLEMENTATION_PLAN.md).
+
+### Breaking Changes
+
+- **Unsigned `*`, `/` and `%` now use unsigned instruction lowering**
+  (Phase 5.1 of [CPU_68020_IMPLEMENTATION_PLAN.md](CPU_68020_IMPLEMENTATION_PLAN.md)).
+  The unsigned path is selected only when every non-literal operand of `*`, `/`
+  or `%` is a local or parameter whose declared type is one of
+  `u8`/`u16`/`u32`/`UBYTE`/`UWORD`/`ULONG`, and at least one operand is such a
+  value. A non-negative integer literal is signedness-neutral: it is
+  representable in both domains, so it neither forces nor blocks the unsigned
+  path (`a * 10` with `a: u32` is unsigned; `a * -3` stays signed). Every other
+  type - including `q16`, `float`, `ptr`/`APTR`, `bool`, pointer types such as
+  `int*`, struct types, and globals, which carry no signedness metadata - is
+  treated as signed. HAS then emits:
+  - `--cpu 68020`: `divul.l` instead of `divsl.l`, so `u32` dividends above
+    `$7FFFFFFF` now compute correctly, and `mulu.l` instead of `muls.l`. Note
+    that the 32x32 -> 32 single-destination forms `MULS.L <ea>,Dn` and
+    `MULU.L <ea>,Dn` produce bit-identical products and differ only in the V
+    flag (which HAS does not consume), so the multiply change is a
+    documentation-of-intent change rather than a numeric fix on this target.
+  - `--cpu 68000`: `mulu.w` / `divu.w` instead of `muls.w` / `divs.w`, with the
+    `ext.l` sign-normalization removed (zero-extension semantics apply) and the
+    quotient/remainder masked with `andi.l #$FFFF` instead of sign-extended.
+    This *is* a numeric fix on this target: `muls.w` sign-extends a word
+    operand such as `50000` to `-15536`, while `mulu.w` treats it as `50000`.
+    The compile-time operand-range restriction for that case is now the
+    unsigned `0..65535` range instead of the signed `-32768..32767` range, so a
+    constant such as `40000` is accepted where it was previously rejected.
+
+  This is a **behavior change without opt-in**: programs that relied on the
+  previous (incorrect) signed lowering of unsigned operands will produce
+  different - now correct - results on both CPU targets. There is no source
+  change required; review any code that intentionally exploited the old
+  wrap-around behavior.
+
+  Mixed signed/unsigned operands deliberately keep the signed lowering so a
+  negative value is never reinterpreted as a large unsigned number. Signed-only
+  code is unaffected: `--cpu 68000` and `--cpu 68020` output for all existing
+  examples is byte-identical to before this change.
+  See `examples/cpu68020_unsigned_muldiv.has`.
+
 ### Added
 
 - **`interrupt`/`starti`/`endi` keywords**: 16 software VBlank dispatch slots
@@ -23,7 +99,102 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   See [INTERRUPT_KEYWORD.md](INTERRUPT_KEYWORD.md) and
   `examples/interrupt_vbl_demo.has`.
 
+### Added
+
+- **Typed struct fields (`name: type`) make field signedness expressible.**
+  Struct fields could previously only be declared with a size suffix
+  (`x.w`, `flag.b`), which carries no signedness - so every narrow field was
+  read zero-extended and a field holding `-1` read back as `65535`. A guard
+  such as `if (entity.x <= 0)` could never fire for a negative coordinate.
+
+  Fields may now be declared with a type instead, mirroring the existing typed
+  global form:
+
+  ```has
+  struct entity[16] { x: i16, y: i16, vx: i8, flags: u8, sprite.l }
+  ```
+
+  Typed fields are read with the correct extension at all three access sites
+  (`s.field`, `p->field`, `arr[i].field`): signed 8-bit uses `ext.w`+`ext.l`
+  (a single `extb.l` on `--cpu 68020`), signed 16-bit uses `ext.l`, and
+  unsigned 8/16-bit zero-extends with `clr.l`. An unknown type name is rejected
+  at validation with the field name and line number.
+
+  **Legacy `.b`/`.w`/`.l` fields are unchanged and still zero-extend**, so this
+  is purely additive: no existing program changes by a single instruction. Use
+  the typed form when a field must hold negative values; the suffix form
+  remains correct for flags, indices, and other non-negative data. See
+  [STRUCT_POINTERS.md](STRUCT_POINTERS.md).
+
 ### Fixed
+
+- **Silent memory corruption: procedures with parameters but no locals
+  addressed their frame through an uninitialised `a4`.** The frame register was
+  selected independently of the prologue that initialises it: `a4` was chosen
+  for every non-native procedure, but the `move.l a6,a4` setup (and the
+  matching epilogue restore) was only emitted when the procedure had at least
+  one local variable. A procedure of the shape "has parameters, has no locals"
+  therefore emitted frame references such as `move.l 8(a4),a0` against a
+  register that was never loaded, so a store through a pointer parameter
+  (`p->x = 7;`, `p[i] = v;`, `move.l d3,@x` in an `asm` block) wrote to an
+  arbitrary address determined by whatever the caller happened to leave in
+  `a4`. There was no diagnostic and no crash at compile or assemble time - the
+  generated code assembled cleanly and corrupted memory at run time.
+
+  The bug was masked in two ways, which is why it survived this long. When a
+  procedure *does* have locals, `a4` is correctly set to `a6`, so `8(a4)` and
+  `8(a6)` denote the same address and both spellings are correct. And the
+  struct-pointer *read* path happened to hardcode `a6`, so reads through a
+  pointer parameter were always correct - only stores were wrong, and only in
+  the no-locals shape, which made the symptom look like data corruption from
+  unrelated code.
+
+  The frame register is now derived from the same condition that governs the
+  prologue: `a4` is used only for a non-native procedure with a non-empty body
+  and at least one local, and `a6` is used otherwise. As part of the same fix,
+  the fallback candidates `a3`/`a5` (selected when `a4` is locked) are no
+  longer used as frame registers at all: the prologue had no save/restore for
+  them, so they would have been clobbered without being preserved.
+
+  Affects `--cpu 68000` and `--cpu 68020` identically. **Generated assembly
+  changes** for the affected shape (`8(a4)` becomes `8(a6)`); of the shipped
+  examples only `examples/asm_user_example.has` was hitting it, where four
+  lines change per target. No other example output changes.
+
+
+  the upper register bits undefined.** `arr[i]`, `matrix[r][c]` and `ptr[i]`
+  reads of byte- or word-sized elements emitted a bare `move.b`/`move.w` with
+  no extension, so bits 8-31 (or 16-31) of the destination register kept
+  whatever the previous computation had left there. Any 32-bit use of such an
+  element - assignment to an `int` local, `add.l`, comparisons, argument
+  passing - could therefore read garbage. This was wrong for both signed and
+  unsigned element types and affected `--cpu 68000` and `--cpu 68020`
+  identically.
+
+  Narrow reads are now fully defined per element/pointee type: signed 8-bit
+  sign-extends with `ext.w`+`ext.l` (a single `extb.l` on `--cpu 68020`),
+  signed 16-bit with `ext.l`, and unsigned 8/16-bit zero-extends via a `clr.l`
+  ahead of the load - falling back to a post-load `andi.l #$FF`/`#$FFFF` when
+  the destination register is also the still-live index register. 32-bit and
+  pointer elements are unchanged.
+
+  Signedness for global arrays comes from the opt-in typed declaration form
+  (`name: i8[4] = {...}`); the legacy `name.b[4]` suffix form remains unsigned,
+  as it already did for scalar globals. Typed pointer reads classify the
+  pointee type with `ast.is_signed()`, which treats `byte`, `word`, `char`,
+  `BYTE` and `WORD` as signed.
+
+  **Generated output changes.** Four of the shipped examples gained extension
+  instructions (`games/robots/level.has`, `tests/compiler/array_comprehensive_test.has`,
+  `tests/compiler/byte_array_index_copy_test.has`, `trackio_print_asset_demo.has`);
+  no example changed compile status on either target. Any tooling that pins
+  exact generated assembly must be refreshed.
+
+
+  `value` is `0`, and `0` for every nonzero value. This fixes `if (!value)`,
+  which previously used a bitwise complement and could take the true branch
+  for nonzero values. The behavior and generated instruction set are the same
+  for `--cpu 68000` and `--cpu 68020`.
 
 - **`starti(X)` now always explicitly re-enables the master `INTENA` bit
   (bit 14/INTEN)**, instead of relying on some other, unrelated library call

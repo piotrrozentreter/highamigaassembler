@@ -688,6 +688,10 @@ See [docs/STRUCT_POINTERS.md](STRUCT_POINTERS.md) for detailed documentation and
 
 **Note:** IF conditions must be enclosed in parentheses.
 
+Conditions accept any expression. A value of `0` is false; every nonzero
+value is true. Use `!expr` to invert that test: `!expr` is true only when
+`expr` is `0`.
+
 ```has
 code conditionals:
     proc compare(a: long, b: long) -> long {
@@ -706,6 +710,16 @@ code conditionals:
         } else {
             return 3;
         }
+    }
+
+    proc test_flag(flag: int) -> int {
+        if (flag) {
+            return 1;  // Runs when flag is nonzero
+        }
+        if (!flag) {
+            return 2;  // Runs when flag is zero
+        }
+        return 0;
     }
 ```
 
@@ -1022,6 +1036,17 @@ code math_safe:
 
 #pragma strict16arith(off);
 ```
+
+`strict16arith` defaults to `off`. On `--cpu 68000`, `*`, `/` and `%` use only
+the low word of each operand, so wider values are silently truncated at
+runtime; turning the pragma `on` makes that a compile-time error instead. The
+prover accepts literals in range, byte- and signed-word-typed locals and
+parameters, named constants, global and extern scalars, byte-sized struct
+fields, and `x & C` masks with a constant `C` in range. It deliberately rejects
+word-sized struct fields and global array elements, because those are read
+without sign extension and so cannot be proven to fit a signed word. The pragma
+has no effect under `--cpu 68020`, where `muls.l`/`divsl.l` handle full 32-bit
+operands natively.
 
 Conditional compilation directives are resolved at compile time:
 
@@ -1677,6 +1702,53 @@ code math:
 - **68020:** Full 32-bit constants and runtime operands supported natively
 
 This is a genuine capability upgrade, not just a speed optimization.
+
+##### Unsigned Multiply/Divide/Modulo (Phase 5.1)
+
+The unsigned instruction forms are emitted when every non-literal operand is a
+local or parameter declared `u8`/`u16`/`u32`/`UBYTE`/`UWORD`/`ULONG`, and at
+least one operand is such a value. A non-negative integer literal is
+signedness-neutral and does not block the unsigned path. Every other type -
+including `q16` (a *signed* fixed-point format), `float`, `ptr`/`APTR`, `bool`,
+pointer types like `int*`, struct types, and globals - stays on the signed
+lowering.
+
+```has
+code math:
+    proc scale(a: u32, b: u32) -> u32 {
+        return a * b;      ; 68020: mulu.l   68000: mulu.w (no ext.l)
+    }
+
+    proc split(a: u32, b: u32) -> u32 {
+        return a / b;      ; 68020: divul.l  68000: divu.w + andi.l #$FFFF
+    }
+```
+
+What actually changes numerically differs per target:
+
+- **`--cpu 68020`:** `divul.l` is a real fix - it removes the signed-32-bit
+  ceiling, so `u32` dividends above `$7FFFFFFF` compute correctly. `mulu.l` is
+  **not** a numeric fix: the 32x32 -> 32 single-destination forms
+  `MULS.L <ea>,Dn` and `MULU.L <ea>,Dn` produce bit-identical products and
+  differ only in the V flag, which HAS does not consume.
+- **`--cpu 68000`:** both are real fixes at word width - `muls.w` sign-extends
+  a word operand such as `50000` to `-15536`, whereas `mulu.w` treats it as
+  `50000`. The constant operand-range check for that path becomes the unsigned
+  `0..65535` range instead of the signed `-32768..32767` range.
+
+> **68000 16-bit ceiling warning:** `divu.w` on the 68000 is a 32/16 -> 16:16
+> divide, so the `split` example above is only correct while the quotient fits
+> 16 bits (`a / b <= 65535`). On quotient overflow the 68000 does **not** trap:
+> `DIVU.W`/`DIVS.W` raise an exception only on divide-by-zero. Overflow simply
+> sets the V flag and leaves the destination register **unchanged**, so the
+> following `andi.l #$FFFF` masks the untouched dividend and the procedure
+> silently returns a wrong value. Use `--cpu 68020` (`divul.l`, full 32-bit
+> quotient) when the quotient can exceed 65535.
+
+Mixed signed/unsigned operands deliberately keep the signed lowering, so a
+negative value is never reinterpreted as a large unsigned number. See
+`examples/cpu68020_unsigned_muldiv.has` and
+[OPERATORS.md](OPERATORS.md#unsigned-multiplydividemodulo).
 
 ##### Sign Extension Optimization (Phase 4)
 

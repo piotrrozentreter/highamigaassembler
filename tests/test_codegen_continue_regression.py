@@ -134,6 +134,25 @@ code test:
     _assert_continue_branch_skips_tail(body, "forcont", r"\bmove\.b\s+#1,\$dff180")
 
 
+def test_inline_asm_labels_are_emitted_in_column_zero():
+    src = """
+code test:
+    proc inline_asm_labels() -> void {
+        asm {
+            test:
+                nop
+            tete:
+                rts
+        }
+    }
+    """
+    asm = compile_src(src)
+    assert "\ntest:" in asm
+    assert "\ntete:" in asm
+    assert "    test:" not in asm
+    assert "    tete:" not in asm
+
+
 def test_continue_array_loop_with_subsequent_writes():
     src = """
 bss vars:

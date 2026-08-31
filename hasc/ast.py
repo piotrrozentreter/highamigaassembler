@@ -160,6 +160,11 @@ class GlobalVarDecl:
 class StructField:
     name: str
     size_suffix: str  # 'b', 'w', or 'l'
+    # signed is True only for the opt-in "name: type" form; legacy ".b"/".w"/".l"
+    # fields stay unsigned so their zero-extending reads are unchanged.
+    signed: bool = False
+    type_name: Optional[str] = None  # declared type for the typed form, else None
+    line: int = 0
 
 
 @dataclass

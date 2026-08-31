@@ -462,6 +462,28 @@ code main:
         # Should have conditional branches
         assert_contains(body, r"ble|bgt|beq|bne")
 
+    def test_if_with_value_and_logical_not(self):
+        """Bare conditions test nonzero, and ! produces a logical boolean."""
+        src = """
+code main:
+    proc condition_forms(cond: int) -> int {
+        var result: int = 0;
+        if (cond) {
+            result = 1;
+        }
+        if (!cond) {
+            result = 2;
+        }
+        return result;
+    }
+        """
+        asm = compile_src(src)
+        body = proc_body(asm, "condition_forms")
+
+        assert_contains(body, r"move\.l 8\(a6\),d0\s+beq endif")
+        assert_contains(body, r"move\.l 8\(a6\),d0\s+seq d0\s+andi\.l #\$FF,d0\s+neg\.b d0")
+        assert "not.l d0" not in body
+
 
 # ---------------------------------------------------------------------------
 # Test Runner

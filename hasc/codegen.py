@@ -11,6 +11,12 @@ from .asm_substitution import substitute_asm_vars
 from .target import DEFAULT_TARGET, TargetSpec
 
 
+# Types that may be lowered onto the unsigned MULU/DIVU arithmetic path. This is an
+# explicit allowlist, not the complement of ast.is_signed(): every unrecognised type
+# (q16, float, ptr, bool, struct names, `int*`, ...) must stay on the signed path.
+UNSIGNED_ARITH_TYPES = frozenset({'u8', 'u16', 'u32', 'UBYTE', 'UWORD', 'ULONG'})
+
+
 class CodeGenError(Exception):
     """Raised when codegen encounters irrecoverable semantic issues (e.g., unknown symbols)."""
     pass
@@ -41,6 +47,7 @@ class CodeGen:
         self.strict_word_arith = self._build_strict_word_arith(module)
         self.interrupt_procs = self._build_interrupt_procs(module)  # {index: proc_name}, 0-15
         self.label_counter = 0
+        self.current_stmt_line = None  # source line of the statement being emitted, for diagnostics
         self.push_stack = []  # Track PUSH/POP register lists
         self.loop_stack = []  # Stack of (continue_label, end_label) for nested loops
         self.dbra_depth = 0  # Nesting depth of active dbra-counter loops (RepeatLoop / fast-path ForLoop); they share d7
@@ -60,6 +67,70 @@ class CodeGen:
                 f"is outside signed 16-bit range (-32768..32767)."
             )
 
+    def _static_symbol_word_size(self, name: str):
+        """Return ('b'|'w'|'l', signed) for a global/extern scalar, else None."""
+        info = self.globals.get(name) or self.extern_vars.get(name)
+        if not isinstance(info, dict):
+            return None
+        size = info.get('size')
+        if size not in ('b', 'w', 'l'):
+            return None
+        return size, bool(info.get('signed'))
+
+    def _const_int_value(self, expr):
+        """Return expr's compile-time integer value, else None.
+
+        Named constants are resolved here in the same order _emit_expr() resolves
+        a VarRef (constants before locals), so a proof can never be based on a
+        declaration that codegen does not actually read.
+        """
+        if isinstance(expr, ast.Number) and isinstance(expr.value, int):
+            return expr.value
+        if isinstance(expr, ast.VarRef):
+            value = self.constants.get(expr.name)
+            if isinstance(value, int):
+                return value
+        return None
+
+    def _struct_field_size_suffix(self, expr, locals_info, params=None):
+        """Return 'b'|'w'|'l' for a struct-field read whose layout is known, else None.
+
+        Covers `s.field`, `arr[i].field` and `(*p).field` / `p->field`. The pointer
+        form is only resolved through an explicitly declared pointer type; codegen's
+        name-similarity fallback guess is not a sound basis for a width proof.
+        """
+        if not isinstance(expr, ast.MemberAccess):
+            return None
+        base = expr.base
+        if isinstance(base, (ast.VarRef, ast.ArrayAccess)):
+            sinfo = self.struct_info.get(base.name)
+        elif isinstance(base, ast.UnaryOp) and base.op == '*' and isinstance(base.operand, ast.VarRef):
+            vtype = self._declared_var_type(base.operand, locals_info, params)
+            if not (vtype and vtype.endswith('*')):
+                return None
+            sinfo = self.struct_info.get(vtype.rstrip('*').strip())
+        else:
+            return None
+        if not sinfo:
+            return None
+        field = sinfo['fields'].get(expr.field)
+        return field['size_suffix'] if field else None
+
+    def _is_masked_by_constant(self, expr, upper_bound: int) -> bool:
+        """True for `x & C` with a non-negative constant C <= upper_bound.
+
+        `&` always lowers to a full-width andi.l/and.l, so every bit above the
+        highest set bit of C is cleared in all 32 bits: the result is in [0, C]
+        no matter what the other operand holds. Sound for either operand order.
+        """
+        if not (isinstance(expr, ast.BinOp) and expr.op == '&'):
+            return False
+        for side in (expr.left, expr.right):
+            value = self._const_int_value(side)
+            if value is not None and 0 <= value <= upper_bound:
+                return True
+        return False
+
     def _is_word_arith_operand_safe(self, expr, locals_info, params=None) -> bool:
         """Best-effort proof that expr is always representable as signed 16-bit."""
         if isinstance(expr, ast.Number):
@@ -67,6 +138,10 @@ class CodeGen:
 
         if isinstance(expr, ast.VarRef):
             name = expr.name
+            const_value = self._const_int_value(expr)
+            if const_value is not None:
+                return self._fits_signed_word(const_value)
+
             local_info = next((l for l in locals_info if l[0] == name), None)
             if local_info:
                 _, vtype, _ = local_info
@@ -80,30 +155,198 @@ class CodeGen:
                     return ast.is_signed(vtype)
                 return False
 
-            if params:
-                param_info = next((p for p in params if p.name == name), None)
-                if param_info and param_info.ptype:
-                    ptype = param_info.ptype
-                    size = ast.type_size(ptype)
-                    if size == 1:
-                        return True
-                    if size == 2:
-                        return ast.is_signed(ptype)
+            param_info = next((p for p in params if p.name == name), None) if params else None
+            if param_info:
+                # A parameter shadows any same-named global/extern, so never fall
+                # through to the static table once the name resolves as a param.
+                ptype = param_info.ptype
+                if not ptype:
+                    return False
+                size = ast.type_size(ptype)
+                if size == 1:
+                    return True
+                if size == 2:
+                    return ast.is_signed(ptype)
+                return False
+
+            # Reached only when the name is neither a local nor a parameter.
+            static = self._static_symbol_word_size(name)
+            if static:
+                size, signed = static
+                # Any byte value (-128..127 or 0..255) fits signed 16-bit; a word only
+                # fits when it is signed, since 0..65535 overflows 32767.
+                if size == 'b':
+                    return True
+                if size == 'w':
+                    return signed
             return False
 
-        return False
+        suffix = self._struct_field_size_suffix(expr, locals_info, params)
+        if suffix is not None:
+            # Byte fields always fit signed 16-bit: a legacy `.b` field reads
+            # zero-extended (0..255) and a typed signed 8-bit field reads
+            # sign-extended (-128..127). A word field is 0..65535 unsigned, which
+            # MULS.W would reinterpret as negative above 32767; a signed typed
+            # word would fit, but is left unproven here deliberately.
+            return suffix == 'b'
+
+        # Global array elements are provable now that every narrow element load
+        # (constant and variable index, 1-D and 2-D) fully defines all 32 bits:
+        # signed byte -> extb.l / ext.w+ext.l, signed word -> ext.l, unsigned ->
+        # clr.l or andi.l. So the register really holds the element value as a long.
+        if isinstance(expr, ast.ArrayAccess):
+            name = expr.name
+            # A local or parameter of the same name shadows the global array, and
+            # local arrays are not lowered to a real element load at all.
+            shadowed = (any(l[0] == name for l in locals_info)
+                        or (params and any(p.name == name for p in params)))
+            info = self.array_dims.get(name)
+            if not shadowed and info and len(expr.indices) in (1, 2):
+                size = info.get('size')
+                if size == 'b':
+                    # 0..255 or -128..127; both fit signed 16-bit.
+                    return True
+                if size == 'w':
+                    # Signed words are ext.l-extended to -32768..32767; unsigned
+                    # words reach 65535, which MULS.W would read as negative.
+                    return bool(info.get('signed'))
+            return False
+
+        return self._is_masked_by_constant(expr, 32767)
+
+    def _operand_text(self, expr) -> str:
+        """Short, user-recognisable rendering of an operand for diagnostics."""
+        if isinstance(expr, ast.Number):
+            return str(expr.value)
+        if isinstance(expr, ast.VarRef):
+            return expr.name
+        if isinstance(expr, ast.ArrayAccess):
+            return f"{expr.name}[...]"
+        if isinstance(expr, ast.MemberAccess):
+            return f"{self._operand_text(expr.base)}.{expr.field}"
+        if isinstance(expr, ast.BinOp):
+            return f"({self._operand_text(expr.left)} {expr.op} {self._operand_text(expr.right)})"
+        if isinstance(expr, ast.UnaryOp):
+            return f"{expr.op}{self._operand_text(expr.operand)}"
+        return self._expr_to_comment(expr)
+
+    def _word_arith_diagnostic(self, expr, op_name: str, side: str, domain: str, declared: str) -> str:
+        """Build the strict16arith failure message (operand, operator, line, remedies)."""
+        # Prefer the operand's own recorded line; the statement line is only a
+        # fallback, and is reset per procedure so it cannot leak in from an earlier one.
+        line = self.node_lines.get(id(expr)) or self.current_stmt_line
+        where = f" at line {line}" if line else ""
+        return (
+            f"68000 {op_name}{where}: {side} operand '{self._operand_text(expr)}'{declared} "
+            f"cannot be proven to fit the {domain} 16-bit range, but the 68000 lowering "
+            f"({'MULU.W/DIVU.W' if domain == 'unsigned' else 'MULS.W/DIVS.W'}) only uses "
+            f"16-bit operands, so the value would be silently truncated. "
+            f"Either compile with --cpu 68020 (native 32-bit multiply/divide), narrow the "
+            f"operand to a 16-bit type, or change this module's '#pragma strict16arith' "
+            f"to (off) to accept the truncation."
+        )
+
+    def _declared_type_note(self, expr, locals_info, params) -> str:
+        vtype = self._declared_var_type(expr, locals_info, params)
+        return f" (declared '{vtype}')" if vtype else ""
 
     def _require_word_arith_operand(self, expr, op_name: str, side: str, locals_info, params=None):
         """Validate operand width assumptions for MULS.W / DIVS.W operations."""
         self._require_signed_word_const(expr, op_name, side)
         if self.strict_word_arith and not self._is_word_arith_operand_safe(expr, locals_info, params):
+            self._fail(self._word_arith_diagnostic(
+                expr, op_name, side, 'signed',
+                self._declared_type_note(expr, locals_info, params)))
+
+    def _fits_unsigned_word(self, value: int) -> bool:
+        return 0 <= value <= 65535
+
+    def _require_unsigned_word_const(self, expr, op_name: str, side: str):
+        """Ensure constant operands of unsigned arithmetic fit 68000 MULU/DIVU word range."""
+        if isinstance(expr, ast.Number) and not self._fits_unsigned_word(expr.value):
             self._fail(
-                f"{op_name} with strict16arith(on) requires provably signed 16-bit operands; "
-                f"{side} operand cannot be proven safe at compile time."
+                f"{op_name} uses 68000 word arithmetic; {side} constant {expr.value} "
+                f"is outside unsigned 16-bit range (0..65535)."
             )
 
+    def _is_unsigned_word_arith_operand_safe(self, expr, locals_info, params=None) -> bool:
+        """Best-effort proof that expr is always representable as unsigned 16-bit.
+
+        Limitation: _is_unsigned_arith_pair() only selects the unsigned lowering when
+        every operand is a non-negative literal or an unsigned-typed local/parameter,
+        so those are the only forms that can reach here. Struct fields, array
+        elements, globals/externs and masked expressions always take the signed
+        lowering instead, and deliberately have no rule here -- adding one would be
+        unreachable, unvalidated code.
+        """
+        if isinstance(expr, ast.Number):
+            return self._fits_unsigned_word(expr.value)
+
+        if isinstance(expr, ast.VarRef):
+            const_value = self._const_int_value(expr)
+            if const_value is not None:
+                return self._fits_unsigned_word(const_value)
+
+            vtype = self._declared_var_type(expr, locals_info, params)
+            if vtype is not None:
+                return ast.type_size(vtype) <= 2 and vtype in UNSIGNED_ARITH_TYPES
+
+        return False
+
+    def _require_unsigned_word_arith_operand(self, expr, op_name: str, side: str, locals_info, params=None):
+        """Validate operand width assumptions for MULU.W / DIVU.W operations."""
+        self._require_unsigned_word_const(expr, op_name, side)
+        if self.strict_word_arith and not self._is_unsigned_word_arith_operand_safe(expr, locals_info, params):
+            self._fail(self._word_arith_diagnostic(
+                expr, op_name, side, 'unsigned',
+                self._declared_type_note(expr, locals_info, params)))
+
+    def _is_unsigned_arith_pair(self, left, right, locals_info, params=None) -> bool:
+        """Decide whether `*`, `/`, `%` may use the unsigned MULU/DIVU lowering.
+
+        Mixed signed/unsigned operands deliberately keep the signed lowering: a
+        negative signed operand must never be reinterpreted as a large unsigned
+        value just because the other side happens to be unsigned.
+        A non-negative integer literal is signedness-neutral (it is representable
+        in both domains), so it does not force the signed path, but at least one
+        operand must be declared with a type in UNSIGNED_ARITH_TYPES for the
+        unsigned path to apply.
+        """
+        def classify(expr):
+            if isinstance(expr, ast.Number) and isinstance(expr.value, int):
+                return 'either' if expr.value >= 0 else 'signed'
+            return 'unsigned' if self._is_declared_unsigned_arith_expr(expr, locals_info, params) else 'signed'
+
+        left_kind = classify(left)
+        right_kind = classify(right)
+        if 'signed' in (left_kind, right_kind):
+            return False
+        return 'unsigned' in (left_kind, right_kind)
+
+    def _declared_var_type(self, expr, locals_info, params=None):
+        """Return the declared type name of a VarRef local/parameter, else None."""
+        if not isinstance(expr, ast.VarRef):
+            return None
+        local_info = next((l for l in locals_info if l[0] == expr.name), None)
+        if local_info:
+            return local_info[1]
+        if params:
+            param_info = next((p for p in params if p.name == expr.name), None)
+            if param_info and param_info.ptype:
+                return param_info.ptype
+        return None
+
+    def _is_declared_unsigned_arith_expr(self, expr, locals_info, params=None) -> bool:
+        """Explicit unsigned test for the `*` / `/` / `%` lowering.
+
+        Only types in UNSIGNED_ARITH_TYPES qualify. Anything else -- including q16,
+        float, pointers, bool, struct types and globals without signedness metadata --
+        is treated as signed, which is the answer-preserving default.
+        """
+        return self._declared_var_type(expr, locals_info, params) in UNSIGNED_ARITH_TYPES
+
     def _muldiv_remainder_reg(self, reg_left: str, reg_right: str) -> str:
-        """Pick a scratch data register for DIVSL.L remainder capture, distinct from the operand registers."""
+        """Pick a scratch data register for DIVUL.L / DIVSL.L remainder capture, distinct from the operand registers."""
         for candidate in ("d2", "d3", "d4", "d5", "d6"):
             if candidate != reg_left and candidate != reg_right:
                 return candidate
@@ -199,7 +442,13 @@ class CodeGen:
                         if elem_size not in ('b', 'w', 'l'):
                             elem_size = 'l'
                         dims = var.dimensions if var.dimensions else []
-                        array_info[var.name] = {'dims': dims, 'size': elem_size}
+                        array_info[var.name] = {
+                            'dims': dims,
+                            'size': elem_size,
+                            # Only the typed "name: type = value" form carries signedness;
+                            # the legacy ".b"/".w" suffix form stays unsigned.
+                            'signed': getattr(var, 'signed', False),
+                        }
         return array_info
 
     def _build_macros(self, module: ast.Module):
@@ -266,9 +515,13 @@ class CodeGen:
                         fields = {}
                         for field, off in offsets:
                             # Defensive: handle StructField or string spec
+                            fsigned = False
                             if hasattr(field, 'name'):
                                 fname = field.name
                                 fsuf = field.size_suffix if field.size_suffix in ('b', 'w', 'l') else 'l'
+                                # Only the "name: type" form can be signed; the
+                                # legacy suffix form always reports unsigned.
+                                fsigned = bool(getattr(field, 'signed', False))
                             else:
                                 spec = str(field)
                                 if '.' in spec:
@@ -279,7 +532,8 @@ class CodeGen:
                                     fname, fsuf = (spec, 'l')
                             fields[fname] = {
                                 'offset': off,
-                                'size_suffix': fsuf
+                                'size_suffix': fsuf,
+                                'signed': fsigned
                             }
                         info[var.name] = {'size': size, 'fields': fields, 'is_array': bool(var.dimensions)}
         return info
@@ -357,7 +611,11 @@ class CodeGen:
         return locked
 
     def _build_strict_word_arith(self, module: ast.Module) -> bool:
-        """Collect strict16arith pragma mode. Default is permissive (off)."""
+        """Collect strict16arith pragma mode. Default is permissive (off).
+
+        Flipping this default to True is a one-line change; see the blast-radius
+        analysis under Phase 5 in docs/CPU_68020_IMPLEMENTATION_PLAN.md.
+        """
         strict = False
         for item in module.items:
             if isinstance(item, ast.PragmaDirective) and item.name == 'strict16arith':
@@ -595,14 +853,17 @@ class CodeGen:
                         fs = sinfo['fields'][field]
                         offset = fs['offset']
                         suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
+                        operand = "(a0)" if offset == 0 else f"{offset}(a0)"
+                        if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
+                            code.extend(codegen_indexed_address.emit_narrow_element_load(
+                                self, operand, reg_left,
+                                1 if suffix == '.b' else 2, True))
+                            return code
                         # Dereference pointer with offset: field at (a0, offset)
                         # Clear register first for byte/word to avoid garbage in upper bits
                         if suffix in ('.b', '.w'):
                             code.append(f"    clr.l {reg_left}")
-                        if offset == 0:
-                            code.append(f"    move{suffix} (a0),{reg_left}")
-                        else:
-                            code.append(f"    move{suffix} {offset}(a0),{reg_left}")
+                        code.append(f"    move{suffix} {operand},{reg_left}")
                         return code
                     else:
                         return [f"    ; unknown field {field} in dereferenced struct", f"    move.l #0,{reg_left}"]
@@ -642,6 +903,11 @@ class CodeGen:
                 fs = sinfo['fields'][field]
                 suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
                 # Direct absolute access using equate emitted: name_field equ name+off
+                if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
+                    code.extend(codegen_indexed_address.emit_narrow_element_load(
+                        self, f"{name}_{field}", reg_left,
+                        1 if suffix == '.b' else 2, True))
+                    return code
                 # Clear register first for byte/word to avoid garbage in upper bits
                 if suffix in ('.b', '.w'):
                     code.append(f"    clr.l {reg_left}")
@@ -652,6 +918,16 @@ class CodeGen:
             elif isinstance(base, ast.ArrayAccess):
                 name = base.name
                 sinfo = self.struct_info.get(name)
+                struct_name = name
+                base_is_pointer = False
+                if sinfo is None:
+                    # p[i].field where p is a typed pointer to a struct.
+                    ptr_operand, pointee = self._resolve_pointer_operand(
+                        name, params, locals_info, frame_reg)
+                    if ptr_operand is not None and self._pointer_elem_info(pointee)['struct']:
+                        sinfo = self.struct_info[pointee]
+                        struct_name = ptr_operand
+                        base_is_pointer = True
                 if not sinfo or field not in sinfo['fields']:
                     return [f"    ; unknown struct array/member {name}.{field}", f"    move.l #0,{reg_left}"]
                 fs = sinfo['fields'][field]
@@ -662,7 +938,7 @@ class CodeGen:
                     self._fail(f"Only 1D array indexing supported for structs; '{name}' has {len(base.indices)} dimensions")
                 code.extend(codegen_indexed_address.emit_struct_array_read(
                     self,
-                    name,
+                    struct_name,
                     base.indices[0],
                     params,
                     locals_info,
@@ -671,6 +947,8 @@ class CodeGen:
                     stride,
                     fs['offset'],
                     suffix,
+                    field_signed=bool(fs.get('signed')),
+                    base_is_pointer=base_is_pointer,
                 ))
                 return code
             else:
@@ -688,15 +966,15 @@ class CodeGen:
 
                 # Check if this is a pointer variable (not an array)
                 if var_type and var_type.endswith('*'):
-                    # Determine element size from pointer type (e.g., "byte*" -> 1 byte)
-                    base_type = var_type[:-1]  # Remove the '*'
-                    elem_bytes = 1  # default to byte
-                    if base_type == 'word':
-                        elem_bytes = 2
-                    elif base_type in ('long', 'int'):
-                        elem_bytes = 4
+                    base_type = var_type[:-1].strip()  # Remove the '*'
+                    elem = self._pointer_elem_info(base_type)
 
                     if len(expr.indices) == 1:
+                        if elem['struct']:
+                            self._fail(
+                                f"Cannot load whole struct '{elem['struct']}' through '{name}[i]'; "
+                                f"index a field instead, e.g. '{name}[i].field'"
+                            )
                         code.extend(codegen_indexed_address.emit_typed_pointer_read(
                             self,
                             self._frame_offset(var_offset, frame_reg),
@@ -706,8 +984,8 @@ class CodeGen:
                             reg_left,
                             "d1",
                             frame_reg,
-                            elem_bytes,
-                            base_type,
+                            elem['bytes'],
+                            elem['signed'],
                         ))
                     else:
                         # Multi-dimensional indexing through pointer (not common, but handle it)
@@ -723,12 +1001,8 @@ class CodeGen:
 
             param_obj = next((p for p in params if p.name == name), None)
             if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
-                base_type = param_obj.ptype[:-1]
-                elem_bytes = 1
-                if base_type == 'word':
-                    elem_bytes = 2
-                elif base_type in ('long', 'int'):
-                    elem_bytes = 4
+                base_type = param_obj.ptype[:-1].strip()
+                elem = self._pointer_elem_info(base_type)
                 stack_params = [p for p in params if not (p.register and p.register != 'None')]
                 if param_obj.register and param_obj.register != 'None':
                     pointer_name = param_obj.register
@@ -737,6 +1011,11 @@ class CodeGen:
                 else:
                     pointer_name = name
                 if len(expr.indices) == 1:
+                    if elem['struct']:
+                        self._fail(
+                            f"Cannot load whole struct '{elem['struct']}' through '{name}[i]'; "
+                            f"index a field instead, e.g. '{name}[i].field'"
+                        )
                     return codegen_indexed_address.emit_typed_pointer_read(
                         self,
                         pointer_name,
@@ -746,8 +1025,8 @@ class CodeGen:
                         reg_left,
                         "d1",
                         frame_reg,
-                        elem_bytes,
-                        base_type,
+                        elem['bytes'],
+                        elem['signed'],
                     )
 
             # Global array or pointer access
@@ -772,20 +1051,21 @@ class CodeGen:
 
                     # Check if index is a constant
                     if isinstance(expr.indices[0], ast.Number):
-                        # Constant index: generate direct offset
+                        # Constant index: absolute operand, no index register live,
+                        # so the zero-extension can always be hoisted to a clr.l.
                         index_val = expr.indices[0].value
                         offset = index_val * elem_bytes
-                        size_suffix = ast.size_suffix(elem_bytes)
-
-                        if offset == 0:
-                            code.append(f"    move{size_suffix} {name},{reg_left}")
-                        else:
-                            code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
+                        operand = name if offset == 0 else f"{name}+{offset}"
+                        code.extend(codegen_indexed_address.emit_narrow_element_load(
+                            self, operand, reg_left, elem_bytes,
+                            self.array_dims[name].get('signed', False)
+                        ))
                     else:
                         # Variable index: use centralized address lowering helper
                         code.extend(codegen_indexed_address.emit_1d_array_read(
                             self, name, expr.indices[0], params, locals_info,
-                            reg_left, "d1", frame_reg, elem_bytes
+                            reg_left, "d1", frame_reg, elem_bytes,
+                            self.array_dims[name].get('signed', False)
                         ))
                 else:
                     # Non-array globals are treated as byte pointers here.
@@ -807,11 +1087,13 @@ class CodeGen:
                 elem_size = 'l'
                 elem_bytes = 4
                 col_count = None
+                elem_signed = False
 
                 if name in self.array_dims:
                     array_info = self.array_dims[name]
                     dims = array_info['dims']
                     elem_size = array_info.get('size', 'l')
+                    elem_signed = array_info.get('signed', False)
 
                     if elem_size == 'b':
                         elem_bytes = 1
@@ -833,12 +1115,10 @@ class CodeGen:
                         self._fail(f"Cannot determine column count for 2D array '{name}' - declare with explicit dimensions like 'int[3][5]'")
 
                     offset = (row_val * col_count + col_val) * elem_bytes
-                    size_suffix = ast.size_suffix(elem_bytes)
-
-                    if offset == 0:
-                        code.append(f"    move{size_suffix} {name},{reg_left}")
-                    else:
-                        code.append(f"    move{size_suffix} {name}+{offset},{reg_left}")
+                    operand = name if offset == 0 else f"{name}+{offset}"
+                    code.extend(codegen_indexed_address.emit_narrow_element_load(
+                        self, operand, reg_left, elem_bytes, elem_signed
+                    ))
                 else:
                     if col_count is not None:
                         code.extend(codegen_indexed_address.emit_2d_array_read(
@@ -853,6 +1133,7 @@ class CodeGen:
                             elem_size,
                             elem_bytes,
                             col_count,
+                            elem_signed,
                         ))
                     else:
                         self._fail(f"Cannot determine column count for 2D array '{name}'; declare with explicit dimensions like 'int[3][5]' or use 1D arrays")
@@ -1206,43 +1487,74 @@ class CodeGen:
             elif expr.op == '-':
                 code.append(f"    sub.l {reg_right},{reg_left}")
             elif expr.op == '*':
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32x32 -> 32 signed multiply; no 16-bit range limit.
-                    code.append(f"    muls.l {reg_right},{reg_left}")
+                    if unsigned_arith:
+                        # 68020 native 32x32 -> 32 unsigned multiply.
+                        code.append(f"    mulu.l {reg_right},{reg_left}")
+                    else:
+                        # 68020 native 32x32 -> 32 signed multiply; no 16-bit range limit.
+                        code.append(f"    muls.l {reg_right},{reg_left}")
+                elif unsigned_arith:
+                    # Unsigned 16x16 -> 32 multiply; no sign normalization (zero-extension applies).
+                    self._require_unsigned_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
+                    self._require_unsigned_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
+                    code.append(f"    mulu.w {reg_right},{reg_left}")
                 else:
                     # Use signed 16x16 -> 32 multiply for int arithmetic on 68000
                     # Assumes operands fit in 16 bits; result in reg_left (32-bit)
                     self._require_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
                     self._require_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_left}  ; normalize to signed 16-bit source semantics")
-                    code.append(f"    ext.l {reg_right}  ; normalize to signed 16-bit source semantics")
+                    # muls.w reads only the low word of both operands and overwrites all
+                    # 32 bits of the destination, so pre-normalizing with ext.l is inert.
                     code.append(f"    muls.w {reg_right},{reg_left}")
             elif expr.op == '/':
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Division by zero constant in expression.")
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32/32 -> 32 signed divide; no 16-bit range limit.
                     rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
-                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, quotient in {reg_left}")
+                    if unsigned_arith:
+                        # 68020 native 32/32 -> 32 unsigned divide.
+                        code.append(f"    divul.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit unsigned divide, quotient in {reg_left}")
+                    else:
+                        # 68020 native 32/32 -> 32 signed divide; no 16-bit range limit.
+                        code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, quotient in {reg_left}")
+                elif unsigned_arith:
+                    # Unsigned 32/16 divide; divisor keeps its zero-extended low word.
+                    self._require_unsigned_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
+                    code.append(f"    divu.w {reg_right},{reg_left}")
+                    code.append(f"    andi.l #$FFFF,{reg_left}  ; isolate quotient and clear remainder word")
                 else:
                     # Use DIVS.W for signed division. Do not rewrite to ASR for powers
                     # of two because ASR rounds negative values differently than DIVS.
                     self._require_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    # divs.w reads only the low word of the divisor, so normalizing it is inert.
                     code.append(f"    divs.w {reg_right},{reg_left}")
                     code.append(f"    ext.l {reg_left}  ; isolate quotient and clear remainder word")
             elif expr.op == '%':
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Modulo by zero constant in expression.")
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32/32 -> 32 signed divide; remainder captured directly.
                     rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
-                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, remainder in {rem_reg}")
+                    if unsigned_arith:
+                        # 68020 native 32/32 -> 32 unsigned divide; remainder captured directly.
+                        code.append(f"    divul.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit unsigned divide, remainder in {rem_reg}")
+                    else:
+                        # 68020 native 32/32 -> 32 signed divide; remainder captured directly.
+                        code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, remainder in {rem_reg}")
                     code.append(f"    move.l {rem_reg},{reg_left}  ; result = remainder")
+                elif unsigned_arith:
+                    # Modulo - after divu.w, remainder is in upper word
+                    self._require_unsigned_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
+                    code.append(f"    divu.w {reg_right},{reg_left}")
+                    code.append(f"    swap {reg_left}  ; get remainder")
+                    code.append(f"    andi.l #$FFFF,{reg_left}  ; zero-extend remainder")
                 else:
                     # Modulo - after divs.w, remainder is in upper word
                     self._require_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
-                    code.append(f"    ext.l {reg_right}  ; normalize divisor to signed 16-bit semantics")
+                    # divs.w reads only the low word of the divisor, so normalizing it is inert.
                     code.append(f"    divs.w {reg_right},{reg_left}")
                     code.append(f"    swap {reg_left}  ; get remainder")
                     code.append(f"    ext.l {reg_left}  ; sign-extend")
@@ -1321,6 +1633,8 @@ class CodeGen:
                     # 1D array case
                     if len(expr.operand.indices) == 1:
                         elem_bytes = 4
+                        base_is_pointer = False
+                        base_name = name
                         if name in self.struct_info:
                             elem_bytes = self.struct_info[name]['size']
                         elif name in self.array_dims:
@@ -1331,9 +1645,17 @@ class CodeGen:
                                 elem_bytes = 2
                             else:
                                 elem_bytes = 4
+                        else:
+                            # &p[i] on a typed pointer: same stride as the p[i] read.
+                            ptr_operand, pointee = self._resolve_pointer_operand(
+                                name, params, locals_info, frame_reg)
+                            if ptr_operand is not None:
+                                elem_bytes = self._pointer_elem_info(pointee)['bytes']
+                                base_name = ptr_operand
+                                base_is_pointer = True
                         code.extend(codegen_indexed_address.emit_array_address_of(
                             self,
-                            name,
+                            base_name,
                             expr.operand.indices[0],
                             params,
                             locals_info,
@@ -1341,6 +1663,7 @@ class CodeGen:
                             "d1",
                             frame_reg,
                             elem_bytes,
+                            base_is_pointer=base_is_pointer,
                         ))
                         return code
 
@@ -1445,7 +1768,10 @@ class CodeGen:
             elif expr.op == '!':
                 # Logical not
                 code += self._emit_expr(expr.operand, params, locals_info, reg_left, frame_reg=frame_reg)
-                code.append(f"    not.l {reg_left}")
+                code.append(f"    tst.l {reg_left}")
+                code.append(f"    seq {reg_left}")
+                code.append(f"    andi.l #$FF,{reg_left}")
+                code.append(f"    neg.b {reg_left}")
             elif expr.op == '~':
                 # Bitwise NOT (one's complement)
                 code += self._emit_expr(expr.operand, params, locals_info, reg_left, frame_reg=frame_reg)
@@ -2329,6 +2655,7 @@ class CodeGen:
 
     def _emit_stmt(self, stmt, params, locals_info, proc, indent, is_void, frame_reg="a6"):
         """Emit a single statement within a procedure."""
+        self.current_stmt_line = self.node_lines.get(id(stmt), self.current_stmt_line)
         if self.annotate:
             self._emit_source_line_comment(stmt, indent)
         if isinstance(stmt, ast.VarDecl):
@@ -2552,6 +2879,16 @@ class CodeGen:
                     elif isinstance(base, ast.ArrayAccess):
                         name = base.name
                         sinfo = self.struct_info.get(name)
+                        struct_name = name
+                        base_is_pointer = False
+                        if sinfo is None:
+                            # p[i].field = ... where p is a typed pointer to a struct.
+                            ptr_operand, pointee = self._resolve_pointer_operand(
+                                name, params, locals_info, frame_reg)
+                            if ptr_operand is not None and self._pointer_elem_info(pointee)['struct']:
+                                sinfo = self.struct_info[pointee]
+                                struct_name = ptr_operand
+                                base_is_pointer = True
                         if not sinfo or field not in sinfo['fields']:
                             self.emit(indent + f"; unknown struct array/member {name}.{field}")
                         else:
@@ -2565,7 +2902,7 @@ class CodeGen:
                                     self.emit(sub if sub.startswith(indent) else indent + sub)
                             store_code = codegen_indexed_address.emit_struct_array_store(
                                 self,
-                                name,
+                                struct_name,
                                 base.indices[0],
                                 params,
                                 locals_info,
@@ -2575,6 +2912,7 @@ class CodeGen:
                                 stride,
                                 fs['offset'],
                                 suffix,
+                                base_is_pointer=base_is_pointer,
                             )
                             for line in store_code:
                                 self.emit(indent + line.strip() if line.startswith("    ") else indent + line)
@@ -2608,27 +2946,18 @@ class CodeGen:
                     size_suffix = {1: '.b', 2: '.w', 4: '.l'}.get(elem_bytes, '.l')
 
                     if len(target.indices) == 1:
-                        pointer_info = next((item for item in locals_info if item[0] == name), None)
-                        pointer_param = next((item for item in params if item.name == name), None)
-                        if pointer_info and pointer_info[1] and pointer_info[1].endswith('*'):
-                            pointer_type = pointer_info[1][:-1]
-                            pointer_bytes = ast.type_size(pointer_type)
-                            pointer_name = self._frame_offset(pointer_info[2], frame_reg)
+                        pointer_operand, pointee = self._resolve_pointer_operand(
+                            name, params, locals_info, frame_reg)
+                        if pointer_operand is not None:
+                            elem = self._pointer_elem_info(pointee)
+                            if elem['struct']:
+                                self._fail(
+                                    f"Cannot assign a whole struct '{elem['struct']}' through "
+                                    f"'{name}[i]'; assign a field instead, e.g. '{name}[i].field = ...'"
+                                )
                             store_code = codegen_indexed_address.emit_typed_pointer_store(
-                                self, pointer_name, target.indices[0], params,
-                                locals_info, "d0", frame_reg, pointer_bytes
-                            )
-                        elif pointer_param and pointer_param.ptype and pointer_param.ptype.endswith('*'):
-                            pointer_type = pointer_param.ptype[:-1]
-                            pointer_bytes = ast.type_size(pointer_type)
-                            stack_params = [item for item in params if not (item.register and item.register != 'None')]
-                            if pointer_param.register and pointer_param.register != 'None':
-                                pointer_name = pointer_param.register
-                            else:
-                                pointer_name = f"{8 + 4 * stack_params.index(pointer_param)}(a6)"
-                            store_code = codegen_indexed_address.emit_typed_pointer_store(
-                                self, pointer_name, target.indices[0], params,
-                                locals_info, "d0", frame_reg, pointer_bytes
+                                self, pointer_operand, target.indices[0], params,
+                                locals_info, "d0", frame_reg, elem['bytes']
                             )
                         elif name not in self.array_dims:
                             store_code = codegen_indexed_address.emit_typed_pointer_store(
@@ -2803,7 +3132,10 @@ class CodeGen:
                 # Strip leading/trailing whitespace and emit with proper indentation
                 stripped = line.strip()
                 if stripped:
-                    self.emit(indent + stripped)
+                    if re.match(r"^[A-Za-z_.$][A-Za-z0-9_.$]*:", stripped):
+                        self.emit(stripped)
+                    else:
+                        self.emit(indent + stripped)
                 else:
                     self.emit("")
         elif isinstance(stmt, ast.PushRegs):
@@ -3281,6 +3613,47 @@ class CodeGen:
         """Generate frame offset reference: -offset(frame_reg)"""
         return codegen_utils.frame_offset(offset, frame_reg)
 
+    def _pointer_elem_info(self, base_type: str, line: int = 0):
+        """Single source of truth for `base_type*` element stride/width/signedness.
+
+        Stride, load width and sign-extension must all come from here; deriving
+        them separately lets a struct pointee take a scalar's size or a
+        sign-extension path it has no meaning for.
+
+        Returns {'bytes', 'signed', 'struct'} where 'struct' names the pointee
+        struct layout (None for scalar pointees).
+        """
+        name = (base_type or '').strip()
+        if name in self.struct_info:
+            # Same size the struct-array path strides by, so p[i] and arr[i] agree.
+            return {'bytes': self.struct_info[name]['size'], 'signed': False, 'struct': name}
+        if name == 'void':
+            self._fail(
+                "Cannot index through 'void*': the element size is undefined. "
+                "Declare the pointer with a concrete element type (e.g. 'byte*', 'int*')."
+            )
+        return {'bytes': ast.type_size(name), 'signed': ast.is_signed(name), 'struct': None}
+
+    def _pointer_elem_bytes(self, base_type: str) -> int:
+        """Element stride in bytes for `base_type*` indexing."""
+        return self._pointer_elem_info(base_type)['bytes']
+
+    def _resolve_pointer_operand(self, name, params, locals_info, frame_reg):
+        """Return (operand, pointee_type) when `name` is a typed-pointer local or
+        parameter, else (None, None). The operand holds the pointer *value*, so
+        callers must load it with move.l, not lea."""
+        local_info = next((l for l in locals_info if l[0] == name), None)
+        if local_info and len(local_info) > 2 and local_info[1] and local_info[1].endswith('*'):
+            return self._frame_offset(local_info[2], frame_reg), local_info[1][:-1].strip()
+        param_obj = next((p for p in params if p.name == name), None)
+        if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
+            pointee = param_obj.ptype[:-1].strip()
+            if param_obj.register and param_obj.register != 'None':
+                return param_obj.register, pointee
+            stack_params = [p for p in params if not (p.register and p.register != 'None')]
+            return f"{8 + 4 * stack_params.index(param_obj)}(a6)", pointee
+        return None, None
+
     def _expr_to_comment(self, expr):
         """Best-effort string for an expression to emit in comments."""
         return codegen_utils.expr_to_comment(expr)
@@ -3694,16 +4067,25 @@ class CodeGen:
                         # Reset push stack for each procedure
                         self.push_stack = []
                         self.dbra_depth = 0
+                        # Never let a diagnostic inherit a line from a previous procedure.
+                        self.current_stmt_line = None
 
-                        # Choose frame register (for frame pointer preservation across calls)
-                        frame_reg = self._choose_frame_register()
                         self.emit("")
                         self.emit(f"{it.name}:")
                         params, locals_info, localsize, saved_reg_params = self._analyze_proc(it)
 
+                        # Choose frame register (for frame pointer preservation across calls).
+                        # a4 may only be used when the prologue below actually initialises it;
+                        # otherwise every frame reference would go through an undefined a4.
+                        uses_a4_frame = (not it.native) and len(it.body) > 0 and len(locals_info) > 0
+                        frame_reg = self._choose_frame_register() if uses_a4_frame else "a6"
+                        if frame_reg != "a4":
+                            # Only a4 has save/restore support in the prologue/epilogue below;
+                            # any other candidate would be clobbered without being preserved.
+                            frame_reg = "a6"
+
                         # If using a4 as frame register, we need extra space in the frame for saved a4
-                        frame_reg = self._choose_frame_register()
-                        if len(locals_info) > 0 and frame_reg == "a4":
+                        if frame_reg == "a4":
                             localsize += 4  # Extra space for saved a4
 
                         # Add comments showing parameter locations

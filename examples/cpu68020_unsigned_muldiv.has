@@ -1,0 +1,86 @@
+// Phase 5.1 (unsigned multiply/divide/modulo lowering) demonstration.
+//
+// Compile with:
+//   python -m hasc.cli examples/cpu68020_unsigned_muldiv.has --cpu 68020 -o out.s
+//   python -m hasc.cli examples/cpu68020_unsigned_muldiv.has --cpu 68000 -o out.s
+//
+// The unsigned path is taken when every non-literal operand of `*`, `/` or `%`
+// is a local/parameter declared u8/u16/u32/UBYTE/UWORD/ULONG, and at least one
+// operand is such a value. A non-negative literal is signedness-neutral. Every
+// other type -- q16 (a SIGNED fixed-point format), float, ptr/APTR, bool,
+// pointer types like int*, struct types and globals -- stays signed.
+// HAS then emits the unsigned forms instead of the signed ones:
+//   --cpu 68020 : mulu.l / divul.l
+//   --cpu 68000 : mulu.w / divu.w    (16-bit operands, no ext.l sign normalization)
+//
+// What this actually fixes:
+//   * divul.l (68020) removes the signed-32-bit ceiling: u32 dividends above
+//     $7FFFFFFF now divide correctly.
+//   * mulu.w (68000) stops sign-extending word operands, so e.g. 50000 is no
+//     longer treated as -15536.
+//   * mulu.l (68020) is NOT a numeric fix: the 32x32 -> 32 single-destination
+//     forms MULS.L <ea>,Dn and MULU.L <ea>,Dn produce bit-identical products
+//     and differ only in the V flag, which HAS does not consume.
+//
+// Mixed signed/unsigned operands deliberately keep the signed lowering, so a
+// negative value is never reinterpreted as a huge unsigned number.
+
+code main:
+    // Both operands unsigned -> unsigned multiply.
+    proc u_mul(a: u32, b: u32) -> u32 {
+        // expect (68020): "mulu.l" emitted, no muls.l
+        // expect (68000): "mulu.w" emitted, no ext.l sign normalization
+        return a * b;
+    }
+
+    // Both operands unsigned -> unsigned divide, quotient result.
+    proc u_div(a: u32, b: u32) -> u32 {
+        // expect (68020): "divul.l" emitted, quotient in the result register
+        // expect (68000): "divu.w" followed by "andi.l #$FFFF" to isolate the quotient
+        // 68000 ceiling: divu.w is 32/16 -> 16:16, so this is only correct while
+        // a / b <= 65535. Quotient overflow does NOT trap (only divide-by-zero
+        // does); it sets V and leaves the destination unchanged, so the andi.l
+        // then masks the untouched dividend and returns a silently wrong value.
+        return a / b;
+    }
+
+    // Both operands unsigned -> unsigned divide, remainder result.
+    proc u_mod(a: u32, b: u32) -> u32 {
+        // expect (68020): "divul.l" emitted, remainder moved into the result register
+        // expect (68000): "divu.w" + "swap" + "andi.l #$FFFF" (zero-extended remainder)
+        return a % b;
+    }
+
+    // Non-negative literal is signedness-neutral, so this stays on the unsigned path.
+    proc u_scale(a: u32) -> u32 {
+        // expect: mulu.l (68020) / mulu.w (68000)
+        return a * 10;
+    }
+
+    // Edge case: mixed signedness keeps the signed lowering on purpose.
+    proc mixed_mul(a: u32, b: int) -> int {
+        // expect (68020): "muls.l" - NOT mulu.l
+        // expect (68000): "ext.l" + "ext.l" + "muls.w" - NOT mulu.w
+        return a * b;
+    }
+
+    proc main() -> u32 {
+        var big: u32;
+        var half: u32;
+        var rest: u32;
+
+        // 3000000000 ($B2D05E00) exceeds the signed 32-bit boundary. On 68020 the
+        // unsigned lowering keeps this correct; on 68000 the 16-bit word operations
+        // cannot represent it, so only the 68020 build produces the expected values.
+        big = 3000000000;
+
+        half = u_div(big, 3);       // expect (68020): 1000000000
+        rest = u_mod(big, 7);       // expect (68020): 3000000000 mod 7
+        half = u_mul(half, 2);      // expect (68020): 2000000000
+        half = u_scale(4);          // expect: 40
+        rest = mixed_mul(2, 3);     // expect: 6 via the signed path
+
+        return half + rest;
+    }
+
+    asm { jmp main }

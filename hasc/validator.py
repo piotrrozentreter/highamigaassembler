@@ -84,6 +84,7 @@ class Validator:
                         
                         self.globals.add(var.name)
                     if isinstance(var, ast.StructVarDecl):
+                        self._validate_struct_fields(var)
                         # Expose struct-derived constants: name__size, name__stride
                         struct_size, _ = self._struct_size_and_offsets(var)
                         self.constants[f"{var.name}__size"] = struct_size
@@ -132,6 +133,7 @@ class Validator:
 
                             self.globals.add(var.name)
                         elif isinstance(var, ast.StructVarDecl):
+                            self._validate_struct_fields(var)
                             self.globals.add(var.name)
                             # Expose struct-derived constants: name__size, name__stride
                             struct_size, _ = self._struct_size_and_offsets(var)
@@ -193,6 +195,24 @@ class Validator:
         
         return self.warnings
     
+    def _validate_struct_fields(self, struct_var):
+        """Reject unusable declared types in the "name: type" struct-field form."""
+        for field in getattr(struct_var, 'fields', []) or []:
+            type_name = getattr(field, 'type_name', None)
+            if not type_name:
+                continue
+            where = f" (line {field.line})" if getattr(field, 'line', 0) else ""
+            if type_name not in ast.ALL_TYPES:
+                self.errors.append(
+                    f"Unknown type '{type_name}' for struct field "
+                    f"'{struct_var.name}.{field.name}'{where}"
+                )
+            elif ast.type_size(type_name) not in (1, 2, 4) or type_name == 'void':
+                self.errors.append(
+                    f"Type '{type_name}' is not a valid struct field type for "
+                    f"'{struct_var.name}.{field.name}'{where}"
+                )
+
     def _struct_size_and_offsets(self, struct_var):
         """Compute size and field offsets with word alignment for w/l fields."""
         size_map = {'b': 1, 'w': 2, 'l': 4}
@@ -503,6 +523,7 @@ class Validator:
                     self.errors.append(
                         f"In proc '{proc.name}': Undefined array '{arr_name}'"
                     )
+                self._check_indexable(arr_name, symbols, proc)
                 # Validate index expressions
                 for idx_expr in stmt.target.indices:
                     self._validate_expr(idx_expr, symbols, proc)
@@ -520,6 +541,7 @@ class Validator:
                         self.errors.append(
                             f"In proc '{proc.name}': Undefined struct array '{arr_name}'"
                         )
+                    self._check_indexable(arr_name, symbols, proc)
                     for idx_expr in base.indices:
                         self._validate_expr(idx_expr, symbols, proc)
                 elif isinstance(base, ast.UnaryOp) and base.op == '*':
@@ -657,6 +679,17 @@ class Validator:
                 f"was never declared with 'interrupt NAME({index}) -> void {{ ... }}'"
             )
     
+    def _check_indexable(self, name, symbols, proc):
+        """Reject p[i] on a 'void*': the element size is undefined, so any stride
+        the code generator picked would be an arbitrary guess."""
+        declared = symbols.get(name)
+        if declared and declared.replace(' ', '') == 'void*':
+            self.errors.append(
+                f"In proc '{proc.name}': Cannot index through 'void*' variable '{name}': "
+                "the element size is undefined. Declare it with a concrete element "
+                "type (e.g. 'byte*', 'int*')."
+            )
+
     def _validate_expr(self, expr, symbols, proc):
         """Validate an expression."""
         if isinstance(expr, ast.Number):
@@ -672,6 +705,7 @@ class Validator:
         elif isinstance(expr, ast.ArrayAccess):
             # Validate array name exists (as global or local)
             # Note: For now we only support global arrays
+            self._check_indexable(expr.name, symbols, proc)
             # Validate all index expressions
             for idx_expr in expr.indices:
                 self._validate_expr(idx_expr, symbols, proc)
@@ -688,6 +722,7 @@ class Validator:
                     self.errors.append(
                         f"In proc '{proc.name}': Undefined struct array '{arr_name}'"
                     )
+                self._check_indexable(arr_name, symbols, proc)
                 for idx_expr in base.indices:
                     self._validate_expr(idx_expr, symbols, proc)
             elif isinstance(base, ast.UnaryOp) and base.op == '*':

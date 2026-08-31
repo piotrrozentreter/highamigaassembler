@@ -178,7 +178,7 @@ def test_68000_modulo_with_large_constant_still_fails():
         assert "outside signed 16-bit range" in str(exc)
 
 
-def test_68000_small_operand_multiply_output_unchanged():
+def test_68000_small_operand_multiply_has_no_inert_ext():
     src = """
 code main:
     proc mul_small(a: int, b: int) -> int {
@@ -191,10 +191,13 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("muls.w")
-    assert mnemonics[idx - 2:idx + 1] == ["ext.l", "ext.l", "muls.w"]
+    # muls.w reads only the low word of both operands and overwrites all 32 bits
+    # of the destination, so no sign normalization is needed before or after it.
+    assert mnemonics[idx] == "muls.w"
+    assert "ext.l" not in mnemonics
 
 
-def test_68000_small_operand_divide_output_unchanged():
+def test_68000_small_operand_divide_keeps_only_quotient_ext():
     src = """
 code main:
     proc div_small(a: int, b: int) -> int {
@@ -207,10 +210,14 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("divs.w")
-    assert mnemonics[idx - 1:idx + 2] == ["ext.l", "divs.w", "ext.l"]
+    # Divisor normalization is inert (divs.w reads its low word only); the trailing
+    # ext.l is load-bearing because it isolates the quotient from the remainder word.
+    assert mnemonics[idx - 1] != "ext.l"
+    assert mnemonics[idx:idx + 2] == ["divs.w", "ext.l"]
+    assert mnemonics.count("ext.l") == 1
 
 
-def test_68000_small_operand_modulo_output_unchanged():
+def test_68000_small_operand_modulo_keeps_only_remainder_ext():
     src = """
 code main:
     proc mod_small(a: int, b: int) -> int {
@@ -223,7 +230,69 @@ code main:
 
     mnemonics, _ = _instruction_mnemonics(lines)
     idx = mnemonics.index("divs.w")
-    assert mnemonics[idx - 1:idx + 3] == ["ext.l", "divs.w", "swap", "ext.l"]
+    # The post-swap ext.l is load-bearing: it sign-extends the remainder.
+    assert mnemonics[idx - 1] != "ext.l"
+    assert mnemonics[idx:idx + 3] == ["divs.w", "swap", "ext.l"]
+    assert mnemonics.count("ext.l") == 1
+
+
+COMPLEX_RIGHT_MUL_SRC = """
+code main:
+    proc mul_complex(a: int, b: int, c: int) -> int {
+        return a * (b - c);
+    }
+"""
+
+
+def test_68000_multiply_with_complex_right_keeps_stack_save_restore():
+    """The removed ext.l sat between the left-operand save/restore pair; pin the
+    surrounding sequence so the pair itself cannot silently disappear."""
+    module = parser.parse(COMPLEX_RIGHT_MUL_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    lines = asm.splitlines()
+
+    mnemonics, indices = _instruction_mnemonics(lines)
+    idx = mnemonics.index("muls.w")
+    assert mnemonics[idx - 1] == "move.l"
+    assert "(a7)+" in lines[indices[idx - 1]]
+    save = next(i for i in range(idx - 1, -1, -1) if "-(a7)" in lines[indices[i]])
+    assert mnemonics[save] == "move.l"
+    assert "ext.l" not in mnemonics
+
+
+COMPOUND_ASSIGN_SRC = """
+code main:
+    proc compound(a: int, b: int) -> int {
+        var x: int = a;
+        x *= b;
+        x /= b;
+        x %= b;
+        return x;
+    }
+"""
+
+
+def test_68000_compound_muldiv_assignment_matches_the_binop_lowering():
+    """`*=` / `/=` / `%=` desugar through the same _emit_expr path, so they must
+    lose the same inert ext.l and keep the load-bearing post-divide ones."""
+    module = parser.parse(COMPOUND_ASSIGN_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    mul = mnemonics.index("muls.w")
+    assert mnemonics[mul - 1] != "ext.l"
+    assert mnemonics[mul + 1] != "ext.l"
+
+    div = mnemonics.index("divs.w")
+    assert mnemonics[div - 1] != "ext.l"
+    assert mnemonics[div:div + 2] == ["divs.w", "ext.l"]
+
+    mod = mnemonics.index("divs.w", div + 1)
+    assert mnemonics[mod - 1] != "ext.l"
+    assert mnemonics[mod:mod + 3] == ["divs.w", "swap", "ext.l"]
+
+    # Exactly the two load-bearing post-divide extensions remain.
+    assert mnemonics.count("ext.l") == 2
 
 
 def test_division_by_zero_constant_still_rejected_on_both_targets():
@@ -339,3 +408,290 @@ code main:
         lines = asm.splitlines()
         assert any("andi.l #$FF," in line for line in lines)
         assert not any("extb.l" in line for line in lines)
+
+UNSIGNED_MUL_SRC = """
+code main:
+    proc mul_unsigned(a: u32, b: u32) -> u32 {
+        return a * b;
+    }
+"""
+
+UNSIGNED_DIV_SRC = """
+code main:
+    proc div_unsigned(a: u32, b: u32) -> u32 {
+        return a / b;
+    }
+"""
+
+UNSIGNED_MOD_SRC = """
+code main:
+    proc mod_unsigned(a: u32, b: u32) -> u32 {
+        return a % b;
+    }
+"""
+
+MIXED_SIGNEDNESS_SRC = """
+code main:
+    proc mixed_mul(a: u32, b: int) -> int {
+        return a * b;
+    }
+
+    proc mixed_div(a: u32, b: int) -> int {
+        return a / b;
+    }
+"""
+
+UNSIGNED_LITERAL_SRC = """
+code main:
+    proc scale_unsigned(a: u32) -> u32 {
+        return a * 10;
+    }
+
+    proc shrink_unsigned(a: u32) -> u32 {
+        return a / 10;
+    }
+"""
+
+
+def test_68020_unsigned_multiply_uses_mulu_l():
+    module = parser.parse(UNSIGNED_MUL_SRC)
+    asm = codegen.CodeGen(module, TARGET_68020).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    assert "mulu.l" in mnemonics
+    assert "muls.l" not in mnemonics
+    assert "mulu.w" not in mnemonics
+
+    rc, _, stderr = vasm_assemble(asm, "68020")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68020 failed: {stderr}"
+
+
+def test_68020_unsigned_divide_uses_divul_l():
+    module = parser.parse(UNSIGNED_DIV_SRC)
+    asm = codegen.CodeGen(module, TARGET_68020).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    assert "divul.l" in mnemonics
+    assert "divsl.l" not in mnemonics
+
+    rc, _, stderr = vasm_assemble(asm, "68020")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68020 failed: {stderr}"
+
+
+def test_68020_unsigned_modulo_uses_divul_l_and_remainder_move():
+    module = parser.parse(UNSIGNED_MOD_SRC)
+    asm = codegen.CodeGen(module, TARGET_68020).gen()
+    lines = asm.splitlines()
+    mnemonics, _ = _instruction_mnemonics(lines)
+
+    assert "divul.l" in mnemonics
+    assert "divsl.l" not in mnemonics
+    assert any("result = remainder" in line for line in lines)
+
+    rc, _, stderr = vasm_assemble(asm, "68020")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68020 failed: {stderr}"
+
+
+def test_68000_unsigned_multiply_uses_mulu_w_without_sign_extension():
+    module = parser.parse(UNSIGNED_MUL_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    idx = mnemonics.index("mulu.w")
+    assert "muls.w" not in mnemonics
+    # No ext.l sign-normalization anywhere in this fixture's unsigned multiply path.
+    assert "ext.l" not in mnemonics
+    assert mnemonics[idx - 1] != "ext.l"
+    assert "mulu.l" not in mnemonics
+
+    rc, _, stderr = vasm_assemble(asm, "68000")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68000 failed: {stderr}"
+
+
+def test_68000_unsigned_divide_uses_divu_w_and_masks_quotient():
+    module = parser.parse(UNSIGNED_DIV_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    lines = asm.splitlines()
+    mnemonics, _ = _instruction_mnemonics(lines)
+
+    idx = mnemonics.index("divu.w")
+    assert "divs.w" not in mnemonics
+    assert mnemonics[idx:idx + 2] == ["divu.w", "andi.l"]
+    assert "divul.l" not in mnemonics
+
+    rc, _, stderr = vasm_assemble(asm, "68000")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68000 failed: {stderr}"
+
+
+def test_68000_unsigned_modulo_uses_divu_w_swap_and_mask():
+    module = parser.parse(UNSIGNED_MOD_SRC)
+    asm = codegen.CodeGen(module, BASELINE).gen()
+    mnemonics, _ = _instruction_mnemonics(asm.splitlines())
+
+    idx = mnemonics.index("divu.w")
+    assert "divs.w" not in mnemonics
+    assert mnemonics[idx:idx + 3] == ["divu.w", "swap", "andi.l"]
+
+    rc, _, stderr = vasm_assemble(asm, "68000")
+    if rc is not None:
+        assert rc == 0, f"vasm -m68000 failed: {stderr}"
+
+
+def test_unsigned_operand_with_nonnegative_literal_takes_unsigned_path():
+    module = parser.parse(UNSIGNED_LITERAL_SRC)
+
+    mnemonics_68020, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, TARGET_68020).gen().splitlines())
+    assert "mulu.l" in mnemonics_68020
+    assert "divul.l" in mnemonics_68020
+
+    mnemonics_68000, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, BASELINE).gen().splitlines())
+    assert "mulu.w" in mnemonics_68000
+    assert "divu.w" in mnemonics_68000
+
+
+def test_mixed_signedness_keeps_signed_lowering_on_both_targets():
+    module = parser.parse(MIXED_SIGNEDNESS_SRC)
+
+    mnemonics_68020, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, TARGET_68020).gen().splitlines())
+    assert "muls.l" in mnemonics_68020
+    assert "divsl.l" in mnemonics_68020
+    assert "mulu.l" not in mnemonics_68020
+    assert "divul.l" not in mnemonics_68020
+
+    mnemonics_68000, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, BASELINE).gen().splitlines())
+    assert "muls.w" in mnemonics_68000
+    assert "divs.w" in mnemonics_68000
+    assert "mulu.w" not in mnemonics_68000
+    assert "divu.w" not in mnemonics_68000
+
+
+def test_no_68020_muldiv_instruction_leaks_into_68000_output():
+    for src in (UNSIGNED_MUL_SRC, UNSIGNED_DIV_SRC, UNSIGNED_MOD_SRC, MIXED_SIGNEDNESS_SRC):
+        module = parser.parse(src)
+        mnemonics, _ = _instruction_mnemonics(
+            codegen.CodeGen(module, BASELINE).gen().splitlines())
+        for banned in ("mulu.l", "muls.l", "divul.l", "divsl.l"):
+            assert banned not in mnemonics, f"{banned} leaked into --cpu 68000 output"
+
+
+def test_68000_unsigned_multiply_rejects_out_of_range_literal():
+    src = """
+code main:
+    proc mul_big(a: u32) -> u32 {
+        return a * 100000;
+    }
+"""
+    module = parser.parse(src)
+    try:
+        codegen.CodeGen(module, BASELINE).gen()
+        assert False, "expected CodeGenError for out-of-range unsigned constant on 68000"
+    except codegen.CodeGenError as exc:
+        assert "outside unsigned 16-bit range" in str(exc)
+
+
+def test_68000_negative_literal_with_unsigned_operand_stays_signed():
+    src = """
+code main:
+    proc mul_negative(a: u32) -> int {
+        return a * -3;
+    }
+"""
+    module = parser.parse(src)
+    mnemonics, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, BASELINE).gen().splitlines())
+    assert "muls.w" in mnemonics
+    assert "mulu.w" not in mnemonics
+
+
+# Regression guard for the closed-allowlist bug: `not ast.is_signed(t)` classified
+# every non-integer type (q16/float/ptr/bool/struct/`T*`) as unsigned and routed it
+# onto MULU/DIVU. Q16.16 in particular is a signed format, so `q / 3` produced a
+# huge positive value instead of the correct negative one.
+NON_INTEGER_TYPES_SRC = """
+code main:
+    proc q16_scale(a: q16) -> q16 {
+        return a * 3;
+    }
+
+    proc q16_ratio(a: q16, b: q16) -> q16 {
+        return a / b;
+    }
+
+    proc float_scale(a: float) -> float {
+        return a * 2;
+    }
+
+    proc ptr_scale(p: ptr) -> ptr {
+        return p / 4;
+    }
+
+    proc typed_ptr_scale(p: int*) -> int {
+        return p / 4;
+    }
+
+    proc bool_scale(f: bool) -> int {
+        return f * 3;
+    }
+"""
+
+
+def test_non_integer_types_never_take_unsigned_path_on_both_targets():
+    module = parser.parse(NON_INTEGER_TYPES_SRC)
+
+    mnemonics_68020, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, TARGET_68020).gen().splitlines())
+    assert mnemonics_68020.count("muls.l") == 3
+    assert mnemonics_68020.count("divsl.l") == 3
+    assert "mulu.l" not in mnemonics_68020
+    assert "divul.l" not in mnemonics_68020
+
+    mnemonics_68000, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, BASELINE).gen().splitlines())
+    assert mnemonics_68000.count("muls.w") == 3
+    assert mnemonics_68000.count("divs.w") == 3
+    assert "mulu.w" not in mnemonics_68000
+    assert "divu.w" not in mnemonics_68000
+
+
+def test_q16_arithmetic_assembles_signed_on_both_targets():
+    module = parser.parse(NON_INTEGER_TYPES_SRC)
+
+    for target, cpu in ((BASELINE, "68000"), (TARGET_68020, "68020")):
+        asm = codegen.CodeGen(module, target).gen()
+        rc, _, stderr = vasm_assemble(asm, cpu)
+        if rc is not None:
+            assert rc == 0, f"vasm -m{cpu} failed: {stderr}"
+
+
+# The positive case the unsigned lowering exists for: 50000 does not fit a signed
+# 16-bit word, so MULS.W would sign-extend it to -15536 and return a wrong product.
+UNSIGNED_U16_OVERFLOW_SRC = """
+code main:
+    proc double_big() -> u32 {
+        var big: u16 = 50000;
+        return big * 2;
+    }
+"""
+
+
+def test_u16_above_signed_word_range_uses_unsigned_multiply_on_both_targets():
+    module = parser.parse(UNSIGNED_U16_OVERFLOW_SRC)
+
+    mnemonics_68000, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, BASELINE).gen().splitlines())
+    assert "mulu.w" in mnemonics_68000
+    assert "muls.w" not in mnemonics_68000
+
+    mnemonics_68020, _ = _instruction_mnemonics(
+        codegen.CodeGen(module, TARGET_68020).gen().splitlines())
+    assert "mulu.l" in mnemonics_68020
+    assert "muls.l" not in mnemonics_68020
