@@ -2803,7 +2803,10 @@ class CodeGen:
                 # Strip leading/trailing whitespace and emit with proper indentation
                 stripped = line.strip()
                 if stripped:
-                    self.emit(indent + stripped)
+                    if re.match(r"^[A-Za-z_.$][A-Za-z0-9_.$]*:", stripped):
+                        self.emit(stripped)
+                    else:
+                        self.emit(indent + stripped)
                 else:
                     self.emit("")
         elif isinstance(stmt, ast.PushRegs):
