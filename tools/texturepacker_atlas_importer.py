@@ -52,15 +52,9 @@ Image: Any = PILImage
 sys.path.insert(0, str(Path(__file__).parent))
 from bob_importer import (  # type: ignore
     export_bob_asm_from_quantized,
+    flatten_image_pixels as _flatten_image_pixels,
     quantize_image,
 )
-
-
-def _flatten_image_pixels(img: Any) -> List[Tuple[int, ...]]:
-    """Return a flat list of RGBA or RGB pixels across Pillow versions."""
-    if hasattr(img, 'get_flattened_data'):
-        return list(img.get_flattened_data())
-    return list(img.getdata())
 
 
 def _new_rgba_image(width: int, height: int, color: Tuple[int, int, int, int]) -> Any:

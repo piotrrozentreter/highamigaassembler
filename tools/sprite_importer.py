@@ -15,6 +15,12 @@ except Exception:
 def _ensure_dir(p: Path):
     p.parent.mkdir(parents=True, exist_ok=True)
 
+def flatten_image_pixels(img):
+    """Flat pixel list, across Pillow versions (getdata is removed in Pillow 14)."""
+    if hasattr(img, 'get_flattened_data'):
+        return list(img.get_flattened_data())
+    return list(img.getdata())
+
 def quantize_image(img, colors: int):
     # Convert to adaptive palette with given colors
     return img.convert('RGB').convert('P', palette=Image.ADAPTIVE, colors=colors)
@@ -67,7 +73,7 @@ def export_sprite_asm(png_path: str, out_label: str, vstart: int = 0x10, vstop: 
     
     # Build list of opaque colors (for quantization)
     w, h = img.size
-    rgba_data = list(img.getdata())
+    rgba_data = flatten_image_pixels(img)
     opaque_pixels = [(r, g, b) for r, g, b, a in rgba_data if a >= ALPHA_THRESHOLD]
     
     if not opaque_pixels:
@@ -107,7 +113,7 @@ def export_sprite_asm(png_path: str, out_label: str, vstart: int = 0x10, vstop: 
 
     # Ensure transparent pixels are index 0; if any opaque pixel mapped to 0,
     # remap it to the nearest non-zero palette index (1..3)
-    mapped_indices = list(pal_mapped.getdata())
+    mapped_indices = flatten_image_pixels(pal_mapped)
     pal_indices = []
     for i, (r, g, b, a) in enumerate(rgba_data):
         if a < ALPHA_THRESHOLD:

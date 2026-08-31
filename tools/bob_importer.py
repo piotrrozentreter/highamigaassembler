@@ -18,6 +18,13 @@ def _ensure_dir(p: Path):
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
+def flatten_image_pixels(img):
+    """Flat pixel list, across Pillow versions (getdata is removed in Pillow 14)."""
+    if hasattr(img, 'get_flattened_data'):
+        return list(img.get_flattened_data())
+    return list(img.getdata())
+
+
 def _pack_planar_row_chunk(indices, chunk_x, width, planes):
     """Pack a single 16-pixel chunk (for one row) into planar words for each plane.
 
@@ -48,6 +55,7 @@ def export_bob_asm(png_path: str, out_label: str, planes: int = 5, use_dither: b
 
     Format produced:
     SECTION bobs,DATA_C
+    CNOP 0,4
     <out_label>:
         DC.W <width>    ; real source width in pixels
         DC.W <height>
@@ -207,7 +215,7 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
             final_palette = palette_bytes + [0] * (256 * 3 - len(palette_bytes))
 
         # Raw indices come from the palette image
-        qdata = list(img.getdata())
+        qdata = flatten_image_pixels(img)
 
         indices_by_row = []
         for y in range(h):
@@ -236,7 +244,7 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
         }
 
     # Fallback: non-paletted image flow — quantize RGB to palette_colors
-    rgba = list(img.convert('RGBA').getdata())
+    rgba = flatten_image_pixels(img.convert('RGBA'))
 
     ALPHA_THRESHOLD = 128
     has_transparent = any(a < ALPHA_THRESHOLD for (_, _, _, a) in rgba)
@@ -256,7 +264,7 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
     else:
         final_palette = palette_bytes + [0] * (256 * 3 - len(palette_bytes))
 
-    qdata = list(pal_indexed.getdata())
+    qdata = flatten_image_pixels(pal_indexed)
     indices_by_row = []
     for y in range(h):
         row_indices = []

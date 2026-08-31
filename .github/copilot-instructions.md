@@ -21,6 +21,14 @@
 - **Any future bug fix, codegen modification, or feature extension must be considered and validated against BOTH `--cpu 68000` and `--cpu 68020`** - not just the default target. The 68000 default output path must stay stable/unaffected by 68020-only work unless a change is explicitly intended to alter it.
 - See [docs/CPU_68020_IMPLEMENTATION_PLAN.md](docs/CPU_68020_IMPLEMENTATION_PLAN.md) for the phased 68020 roadmap and current status.
 
+### Memory Type Policy (chip RAM vs fast RAM)
+- Default to plain `data`/`bss` sections (fast RAM, `DATA`/`BSS`) for **all** data.
+- Use the chip-RAM variants (`data_chip`, `bss_chip`, `code_chip`, `SECTION ...,DATA_C`) **only** for
+  data the custom chips DMA from: bitplanes/screen buffers, BOB and sprite image/mask data, copper
+  lists, and audio samples - or when explicitly directed to.
+- Chip RAM is scarce and slower for CPU access. Never widen a section to chip RAM for convenience.
+- **If you are not sure which memory type a block needs, ask the user instead of guessing.**
+
 ### Core Philosophy
 - **Assembly-first**: Every high-level construct must compile to clean, inspectable 68000 assembly
 - **Zero-cost abstractions**: High-level features should not add runtime overhead
