@@ -11,6 +11,12 @@ from .asm_substitution import substitute_asm_vars
 from .target import DEFAULT_TARGET, TargetSpec
 
 
+# Types that may be lowered onto the unsigned MULU/DIVU arithmetic path. This is an
+# explicit allowlist, not the complement of ast.is_signed(): every unrecognised type
+# (q16, float, ptr, bool, struct names, `int*`, ...) must stay on the signed path.
+UNSIGNED_ARITH_TYPES = frozenset({'u8', 'u16', 'u32', 'UBYTE', 'UWORD', 'ULONG'})
+
+
 class CodeGenError(Exception):
     """Raised when codegen encounters irrecoverable semantic issues (e.g., unknown symbols)."""
     pass
@@ -102,8 +108,85 @@ class CodeGen:
                 f"{side} operand cannot be proven safe at compile time."
             )
 
+    def _fits_unsigned_word(self, value: int) -> bool:
+        return 0 <= value <= 65535
+
+    def _require_unsigned_word_const(self, expr, op_name: str, side: str):
+        """Ensure constant operands of unsigned arithmetic fit 68000 MULU/DIVU word range."""
+        if isinstance(expr, ast.Number) and not self._fits_unsigned_word(expr.value):
+            self._fail(
+                f"{op_name} uses 68000 word arithmetic; {side} constant {expr.value} "
+                f"is outside unsigned 16-bit range (0..65535)."
+            )
+
+    def _is_unsigned_word_arith_operand_safe(self, expr, locals_info, params=None) -> bool:
+        """Best-effort proof that expr is always representable as unsigned 16-bit."""
+        if isinstance(expr, ast.Number):
+            return self._fits_unsigned_word(expr.value)
+
+        if isinstance(expr, ast.VarRef):
+            vtype = self._declared_var_type(expr, locals_info, params)
+            if vtype is None:
+                return False
+            return ast.type_size(vtype) <= 2 and vtype in UNSIGNED_ARITH_TYPES
+
+        return False
+
+    def _require_unsigned_word_arith_operand(self, expr, op_name: str, side: str, locals_info, params=None):
+        """Validate operand width assumptions for MULU.W / DIVU.W operations."""
+        self._require_unsigned_word_const(expr, op_name, side)
+        if self.strict_word_arith and not self._is_unsigned_word_arith_operand_safe(expr, locals_info, params):
+            self._fail(
+                f"{op_name} with strict16arith(on) requires provably unsigned 16-bit operands; "
+                f"{side} operand cannot be proven safe at compile time."
+            )
+
+    def _is_unsigned_arith_pair(self, left, right, locals_info, params=None) -> bool:
+        """Decide whether `*`, `/`, `%` may use the unsigned MULU/DIVU lowering.
+
+        Mixed signed/unsigned operands deliberately keep the signed lowering: a
+        negative signed operand must never be reinterpreted as a large unsigned
+        value just because the other side happens to be unsigned.
+        A non-negative integer literal is signedness-neutral (it is representable
+        in both domains), so it does not force the signed path, but at least one
+        operand must be declared with a type in UNSIGNED_ARITH_TYPES for the
+        unsigned path to apply.
+        """
+        def classify(expr):
+            if isinstance(expr, ast.Number) and isinstance(expr.value, int):
+                return 'either' if expr.value >= 0 else 'signed'
+            return 'unsigned' if self._is_declared_unsigned_arith_expr(expr, locals_info, params) else 'signed'
+
+        left_kind = classify(left)
+        right_kind = classify(right)
+        if 'signed' in (left_kind, right_kind):
+            return False
+        return 'unsigned' in (left_kind, right_kind)
+
+    def _declared_var_type(self, expr, locals_info, params=None):
+        """Return the declared type name of a VarRef local/parameter, else None."""
+        if not isinstance(expr, ast.VarRef):
+            return None
+        local_info = next((l for l in locals_info if l[0] == expr.name), None)
+        if local_info:
+            return local_info[1]
+        if params:
+            param_info = next((p for p in params if p.name == expr.name), None)
+            if param_info and param_info.ptype:
+                return param_info.ptype
+        return None
+
+    def _is_declared_unsigned_arith_expr(self, expr, locals_info, params=None) -> bool:
+        """Explicit unsigned test for the `*` / `/` / `%` lowering.
+
+        Only types in UNSIGNED_ARITH_TYPES qualify. Anything else -- including q16,
+        float, pointers, bool, struct types and globals without signedness metadata --
+        is treated as signed, which is the answer-preserving default.
+        """
+        return self._declared_var_type(expr, locals_info, params) in UNSIGNED_ARITH_TYPES
+
     def _muldiv_remainder_reg(self, reg_left: str, reg_right: str) -> str:
-        """Pick a scratch data register for DIVSL.L remainder capture, distinct from the operand registers."""
+        """Pick a scratch data register for DIVUL.L / DIVSL.L remainder capture, distinct from the operand registers."""
         for candidate in ("d2", "d3", "d4", "d5", "d6"):
             if candidate != reg_left and candidate != reg_right:
                 return candidate
@@ -1206,9 +1289,19 @@ class CodeGen:
             elif expr.op == '-':
                 code.append(f"    sub.l {reg_right},{reg_left}")
             elif expr.op == '*':
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32x32 -> 32 signed multiply; no 16-bit range limit.
-                    code.append(f"    muls.l {reg_right},{reg_left}")
+                    if unsigned_arith:
+                        # 68020 native 32x32 -> 32 unsigned multiply.
+                        code.append(f"    mulu.l {reg_right},{reg_left}")
+                    else:
+                        # 68020 native 32x32 -> 32 signed multiply; no 16-bit range limit.
+                        code.append(f"    muls.l {reg_right},{reg_left}")
+                elif unsigned_arith:
+                    # Unsigned 16x16 -> 32 multiply; no sign normalization (zero-extension applies).
+                    self._require_unsigned_word_arith_operand(expr.left, 'multiplication', 'left', locals_info, params)
+                    self._require_unsigned_word_arith_operand(expr.right, 'multiplication', 'right', locals_info, params)
+                    code.append(f"    mulu.w {reg_right},{reg_left}")
                 else:
                     # Use signed 16x16 -> 32 multiply for int arithmetic on 68000
                     # Assumes operands fit in 16 bits; result in reg_left (32-bit)
@@ -1220,10 +1313,20 @@ class CodeGen:
             elif expr.op == '/':
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Division by zero constant in expression.")
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32/32 -> 32 signed divide; no 16-bit range limit.
                     rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
-                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, quotient in {reg_left}")
+                    if unsigned_arith:
+                        # 68020 native 32/32 -> 32 unsigned divide.
+                        code.append(f"    divul.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit unsigned divide, quotient in {reg_left}")
+                    else:
+                        # 68020 native 32/32 -> 32 signed divide; no 16-bit range limit.
+                        code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, quotient in {reg_left}")
+                elif unsigned_arith:
+                    # Unsigned 32/16 divide; divisor keeps its zero-extended low word.
+                    self._require_unsigned_word_arith_operand(expr.right, 'division', 'right', locals_info, params)
+                    code.append(f"    divu.w {reg_right},{reg_left}")
+                    code.append(f"    andi.l #$FFFF,{reg_left}  ; isolate quotient and clear remainder word")
                 else:
                     # Use DIVS.W for signed division. Do not rewrite to ASR for powers
                     # of two because ASR rounds negative values differently than DIVS.
@@ -1234,11 +1337,22 @@ class CodeGen:
             elif expr.op == '%':
                 if isinstance(expr.right, ast.Number) and expr.right.value == 0:
                     self._fail("Modulo by zero constant in expression.")
+                unsigned_arith = self._is_unsigned_arith_pair(expr.left, expr.right, locals_info, params)
                 if self.target.supports_32bit_muldiv:
-                    # 68020 native 32/32 -> 32 signed divide; remainder captured directly.
                     rem_reg = self._muldiv_remainder_reg(reg_left, reg_right)
-                    code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, remainder in {rem_reg}")
+                    if unsigned_arith:
+                        # 68020 native 32/32 -> 32 unsigned divide; remainder captured directly.
+                        code.append(f"    divul.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit unsigned divide, remainder in {rem_reg}")
+                    else:
+                        # 68020 native 32/32 -> 32 signed divide; remainder captured directly.
+                        code.append(f"    divsl.l {reg_right},{rem_reg}:{reg_left}  ; 32-bit signed divide, remainder in {rem_reg}")
                     code.append(f"    move.l {rem_reg},{reg_left}  ; result = remainder")
+                elif unsigned_arith:
+                    # Modulo - after divu.w, remainder is in upper word
+                    self._require_unsigned_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)
+                    code.append(f"    divu.w {reg_right},{reg_left}")
+                    code.append(f"    swap {reg_left}  ; get remainder")
+                    code.append(f"    andi.l #$FFFF,{reg_left}  ; zero-extend remainder")
                 else:
                     # Modulo - after divs.w, remainder is in upper word
                     self._require_word_arith_operand(expr.right, 'modulo', 'right', locals_info, params)

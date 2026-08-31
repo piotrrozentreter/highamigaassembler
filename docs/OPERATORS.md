@@ -3,9 +3,9 @@
 ## Arithmetic Operators
 - `+` - Addition
 - `-` - Subtraction  
-- `*` - Multiplication (signed 16-bit muls.w)
-- `/` - Division (signed 16-bit divs.w)
-- `%` - Modulo (via divs.w, remainder in upper word)
+- `*` - Multiplication (signed `muls.w`, or unsigned `mulu.w` when both operands are unsigned)
+- `/` - Division (signed `divs.w`, or unsigned `divu.w` when both operands are unsigned)
+- `%` - Modulo (via `divs.w`/`divu.w`, remainder in upper word)
 
 ### 68000 Arithmetic Safety Notes
 
@@ -21,6 +21,42 @@
   `muls.l`/`divsl.l`, supporting full 32-bit operands with no compile-time
   range restriction (gated on `TargetSpec.supports_32bit_muldiv`). Division/
   modulo by constant zero remains a compile-time error on both targets.
+
+### Unsigned Multiply/Divide/Modulo
+
+The unsigned path is selected only when **every non-literal operand** of `*`,
+`/` or `%` is a local or parameter whose declared type is one of
+`u8`/`u16`/`u32`/`UBYTE`/`UWORD`/`ULONG`, and **at least one** operand is such
+a value. A non-negative integer literal is *signedness-neutral*: it is
+representable in both domains, so it neither forces nor blocks the unsigned
+path (`a * 10` with `a: u32` is unsigned; `10 * 3` alone is not). Every other
+type - `q16`, `float`, `ptr`/`APTR`, `bool`, pointer types such as `int*`, and
+struct types - is treated as **signed**. In particular `q16` is a *signed*
+fixed-point format and always uses the signed lowering.
+
+| Target | Signed operands | Unsigned operands |
+| --- | --- | --- |
+| `--cpu 68000` | `muls.w` / `divs.w` (with `ext.l` sign normalization) | `mulu.w` / `divu.w` (no `ext.l`; quotient/remainder masked with `andi.l #$FFFF`) |
+| `--cpu 68020` | `muls.l` / `divsl.l` | `mulu.l` / `divul.l` |
+
+- On `--cpu 68000` the constant operand-range check for the unsigned path is
+  the unsigned `0..65535` range instead of the signed `-32768..32767` range;
+  `#pragma strict16arith(on)` correspondingly requires provably unsigned
+  16-bit operands. This is where the change matters numerically: `muls.w`
+  sign-extends a word operand such as `50000` to `-15536`, while `mulu.w`
+  treats it as `50000`.
+- On `--cpu 68020` `divul.l` removes the signed-32-bit ceiling, so `u32`
+  dividends above `$7FFFFFFF` compute correctly. The multiply is different:
+  the 32x32 -> 32 single-destination forms `MULS.L <ea>,Dn` and
+  `MULU.L <ea>,Dn` produce **bit-identical** products and differ only in the V
+  flag, which HAS does not consume - so `mulu.l` documents intent rather than
+  changing results on this target.
+- **Mixed signed/unsigned operands keep the signed lowering** so a negative
+  value is never reinterpreted as a large unsigned number. A negative literal
+  therefore also forces the signed path.
+- Globals carry no signedness metadata and are always treated as signed.
+
+See `examples/cpu68020_unsigned_muldiv.has`.
 
 ## Comparison Operators (all signed)
 - `==` - Equal (returns 1 or 0)

@@ -4,6 +4,46 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Unsigned `*`, `/` and `%` now use unsigned instruction lowering**
+  (Phase 5.1 of [CPU_68020_IMPLEMENTATION_PLAN.md](CPU_68020_IMPLEMENTATION_PLAN.md)).
+  The unsigned path is selected only when every non-literal operand of `*`, `/`
+  or `%` is a local or parameter whose declared type is one of
+  `u8`/`u16`/`u32`/`UBYTE`/`UWORD`/`ULONG`, and at least one operand is such a
+  value. A non-negative integer literal is signedness-neutral: it is
+  representable in both domains, so it neither forces nor blocks the unsigned
+  path (`a * 10` with `a: u32` is unsigned; `a * -3` stays signed). Every other
+  type - including `q16`, `float`, `ptr`/`APTR`, `bool`, pointer types such as
+  `int*`, struct types, and globals, which carry no signedness metadata - is
+  treated as signed. HAS then emits:
+  - `--cpu 68020`: `divul.l` instead of `divsl.l`, so `u32` dividends above
+    `$7FFFFFFF` now compute correctly, and `mulu.l` instead of `muls.l`. Note
+    that the 32x32 -> 32 single-destination forms `MULS.L <ea>,Dn` and
+    `MULU.L <ea>,Dn` produce bit-identical products and differ only in the V
+    flag (which HAS does not consume), so the multiply change is a
+    documentation-of-intent change rather than a numeric fix on this target.
+  - `--cpu 68000`: `mulu.w` / `divu.w` instead of `muls.w` / `divs.w`, with the
+    `ext.l` sign-normalization removed (zero-extension semantics apply) and the
+    quotient/remainder masked with `andi.l #$FFFF` instead of sign-extended.
+    This *is* a numeric fix on this target: `muls.w` sign-extends a word
+    operand such as `50000` to `-15536`, while `mulu.w` treats it as `50000`.
+    The compile-time operand-range restriction for that case is now the
+    unsigned `0..65535` range instead of the signed `-32768..32767` range, so a
+    constant such as `40000` is accepted where it was previously rejected.
+
+  This is a **behavior change without opt-in**: programs that relied on the
+  previous (incorrect) signed lowering of unsigned operands will produce
+  different - now correct - results on both CPU targets. There is no source
+  change required; review any code that intentionally exploited the old
+  wrap-around behavior.
+
+  Mixed signed/unsigned operands deliberately keep the signed lowering so a
+  negative value is never reinterpreted as a large unsigned number. Signed-only
+  code is unaffected: `--cpu 68000` and `--cpu 68020` output for all existing
+  examples is byte-identical to before this change.
+  See `examples/cpu68020_unsigned_muldiv.has`.
+
 ### Added
 
 - **`interrupt`/`starti`/`endi` keywords**: 16 software VBlank dispatch slots
