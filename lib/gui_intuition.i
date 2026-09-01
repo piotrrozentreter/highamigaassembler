@@ -11,7 +11,11 @@
 ; This file was authored on a Windows host where the NDK 3.2 include tree
 ; (NDK3.2/Include/include_i/...) is NOT mounted, so none of the values below
 ; could be diffed against the official includes. Before shipping, verify on a
-; machine that has the NDK:
+; machine that has the NDK. Locate it first rather than assuming a path:
+;
+;   NDK=$(dirname "$(find / -name intuition.i -path '*include_i*' 2>/dev/null | head -1)")/..
+;
+; then diff these against the EQUs below:
 ;
 ;   intuition/intuition.i   : NW_* (NewWindow, 48 bytes)
 ;                             GG_* (Gadget, 44 bytes)
@@ -24,6 +28,15 @@
 ;   graphics/text.i         : JAM1 / JAM2 / COMPLEMENT / INVERSVID
 ;   exec/ports.i            : MP_SIGBIT
 ;   intuition/screens.i     : WBENCHSCREEN (nw_Type)
+;
+; Check _LVOENDREFRESH (-366) first: a transcription slip there produces a
+; hang at runtime, not an assembler error.
+;
+; Then confirm there is no name collision when the real includes are also on
+; the path:
+;   vasmm68k_mot -m68000 -Fhunk -I lib -I "$NDK" -o /tmp/gi.o lib/gui_intuition.s
+;
+; Delete this whole block once the values are confirmed.
 ;
 ; The Window tail layout (WD_RPORT 50, WD_BORDERLEFT 54, WD_USERPORT 86) is
 ; documented as stable across V33..V40 but should still be confirmed.

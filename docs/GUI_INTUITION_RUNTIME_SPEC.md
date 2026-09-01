@@ -739,9 +739,12 @@ Implemented in [lib/gui_intuition.s](../lib/gui_intuition.s) and
 - [x] `IDCMP_REFRESHWINDOW` answered with `BeginRefresh`/`EndRefresh` (gotcha 9).
 - [x] Assembles clean with `vasmm68k_mot` for both `-m68000` and `-m68020`.
 - [x] `examples/gui_login_form.has` links (`vlink -bamigahunk`, 5984 bytes).
+- [x] Registered in `scripts/build_example.sh` (`LIB_SOURCES` + `ORDERED_LIBS`), so
+      `bash scripts/build_example.sh examples/gui_login_form.has` auto-detects it.
 - [ ] **Offsets diffed against the NDK 3.2 include tree** — blocked: the NDK lives on a Linux
-      path not mounted on the Windows dev box. The cross-check list is in the header of
-      `lib/gui_intuition.i`.
+      path not mounted on the Windows dev box. The cross-check list and a `find`-based locate
+      command are in the header of `lib/gui_intuition.i`. Check `_LVOENDREFRESH` (-366) first:
+      a slip there hangs at runtime instead of failing to assemble.
 - [ ] **Runs under Kickstart 2.0+** — blocked: needs WinUAE/FS-UAE or real hardware. Test
       matrix: Shell *and* Workbench launch; occlude/restore to force `IDCMP_REFRESHWINDOW`;
       type + RETURN in the string gadget; TAB focus cycling; close gadget under

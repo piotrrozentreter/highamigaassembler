@@ -114,6 +114,8 @@ LIB_SOURCES=(
     "$LIB_DIR/ptplayer.s"
     "$LIB_DIR/timer.s"
     "$LIB_DIR/dos.s"
+    "$LIB_DIR/gui_intuition.s"
+    "$LIB_DIR/wbstartup.s"
 )
 
 declare -A SYM_TO_LIB=()
@@ -257,6 +259,8 @@ ORDERED_LIBS=(
     "$LIB_DIR/ptplayer.s"
     "$LIB_DIR/timer.s"
     "$LIB_DIR/dos.s"
+    "$LIB_DIR/gui_intuition.s"
+    "$LIB_DIR/wbstartup.s"
 )
 
 SELECTED_LIBS=()

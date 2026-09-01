@@ -41,7 +41,7 @@ class HasEmitter:
     ) -> None:
         self.m = manager
         self.module = re.sub(r"\W", "_", module_name) or "gui_form"
-        self.meta_source = meta_source
+        self.meta_source = _portable_path(meta_source)
         self.user_code = user_code or {}
         self.buttons = manager.by_kind(ControlType.BUTTON)
         self.editboxes = manager.by_kind(ControlType.EDITBOX)
@@ -432,6 +432,19 @@ class HasEmitter:
 def _has_str(text: str) -> str:
     """HAS string literals have no escape sequences; sanitise instead."""
     return text.replace("\\", "").replace('"', "'")
+
+
+def _portable_path(source: str) -> str:
+    """Record the layout path CWD-relative with forward slashes, so the same
+    project regenerates byte-identically on Windows and Linux."""
+    if not source or source.startswith("<"):
+        return source
+    path = Path(source)
+    try:
+        path = path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        pass
+    return path.as_posix()
 
 
 def extract_user_code(text: str) -> Dict[str, str]:
