@@ -4,6 +4,48 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **GUI Creator (`guicreator/`) - WYSIWYG form designer for Amiga GUIs.** A Tkinter
+  editor that produces structured metadata for the HAS/68000 pipeline rather than a
+  standalone application. Place Buttons, EditBoxes and Labels on a retro Workbench-style
+  canvas, set the window caption/size/`WFLG_*` flags, and export:
+
+  - `.hasmeta` - layout pseudo-code (`DEFINE_WINDOW` / `ADD_CONTROL` / `HANDLE_ACTION` /
+    `SECTION DATA CONSTANTS`). Also the project format; reads back exactly.
+  - `.has` - a compilable, system-friendly `intuition.library` program skeleton with
+    empty `on_button` / `on_string` / `on_key` / `on_close` handlers. Re-exporting
+    preserves anything written between `// USER CODE BEGIN <key>` and `// USER CODE END`.
+
+  Headless use: `python -m guicreator --validate LAYOUT` and
+  `python -m guicreator --export-has LAYOUT -o OUT.has` do not import Tkinter.
+  Layout validation covers ActionID uniqueness, gadget-pool limits, client-area bounds,
+  overlap (Intuition hit-testing takes the first list match) and string-gadget sizing.
+
+  Documentation: [GUI_CREATOR.md](GUI_CREATOR.md) (tool + metadata-to-assembler mapping) and
+  [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md) (the `lib/gui_intuition.s`
+  runtime contract the generated code targets). Sample output:
+  [examples/gui_login_form.has](../examples/gui_login_form.has).
+
+- **`lib/gui_intuition.s` + `lib/gui_intuition.i` - system-friendly `intuition.library`
+  widget runtime.** 19 `XDEF`'d entry points backing the GUI Creator's generated code:
+  `GuiInit`/`GuiShutdown`, `GuiBeginWindow`/`GuiAdd{Label,Button,EditBox}`/`GuiShow`/
+  `GuiCloseWindow`, `GuiWaitEvent` + `GuiGetEvent{ID,Code,X,Y}`, and
+  `GuiGet/SetEditText`, `GuiSetLabelText`, `GuiEnableWidget`, `GuiActivateEdit`, `GuiRedraw`.
+
+  Real Intuition windows and gadgets; no `TakeSystem`, no `$DFF0xx`, no `AllocMem` (static
+  pools of 32 gadgets + 32 labels, ~5 KB fast RAM). Gadgets are linked through
+  `nw_FirstGadget` before `OpenWindow`, so there is no `AddGList`/`RefreshGList` window.
+  `GuiWaitEvent` snapshots `im_Class`/`im_Code`/`im_IAddress`/`im_MouseX/Y` before
+  `ReplyMsg`; `IDCMP_REFRESHWINDOW` is answered internally with
+  `BeginRefresh`/`EndRefresh`; teardown follows the RKM `CloseWindowSafely()` order
+  (drain *before* `ModifyIDCMP`, which deletes the UserPort).
+
+  Assembles clean for `-m68000` and `-m68020` and links to a working Amiga hunk executable
+  (`examples/gui_login_form.has` → 5984 bytes). **Not yet run on real hardware or an
+  emulator, and the struct offsets have not been diffed against the NDK 3.2 include tree** -
+  `lib/gui_intuition.i` carries an explicit cross-check header listing what to verify.
+
 ### Changed
 
 - **Inert `ext.l` sign-normalization removed from 68000 `*`, `/` and `%`.**

@@ -534,6 +534,26 @@
   `grep -c '"a5"' hasc/codegen.py` = zero hits, HAS codegen never touches a5)
   `#pragma lockreg(a5);` the user had added defensively.
 
+## guicreator + lib/gui_intuition.s (2026-09-01)
+- New `guicreator/` package: Tkinter WYSIWYG form designer -> `.hasmeta` layout metadata +
+  generated `.has` skeleton. Headless paths (`--validate`, `--export-has`) don't import Tkinter.
+  Docs: `docs/GUI_CREATOR.md`, `docs/GUI_INTUITION_RUNTIME_SPEC.md`.
+- New `lib/gui_intuition.s`/`.i`: system-friendly intuition.library widget runtime (real
+  OpenWindow + Gadget list, NOT the bare-metal `lib/gui.s`). Static pools, no AllocMem.
+  Offsets came from the spec doc, NOT yet diffed against NDK 3.2 (Linux-only path) - the
+  cross-check list is in the header of `lib/gui_intuition.i`. Never run on hw/emulator yet.
+- **HAS stack ABI re-confirmed from generated .s**: args pushed right-to-left as 32-bit longs,
+  CALLER cleans (`add.l #N,a7`). After `link a6,#0`: 1st param at `8(a6)`, 2nd `12(a6)`, ...
+  Always `move.l`, never `move.w`, when reading an `int` param (see the SetTextMode bug below).
+- **Amiga gotcha worth remembering**: `ModifyIDCMP(win, 0)` DELETES the window's UserPort, so
+  the RKM `CloseWindowSafely` order is Forbid -> drain+ReplyMsg -> `win->UserPort = NULL` ->
+  ModifyIDCMP(win,0) -> RemoveGList -> CloseWindow -> Permit. Draining after ModifyIDCMP is a
+  use-after-free. Also: never read `im_Code`/`im_IAddress` after `ReplyMsg`.
+- **hasc emits an XREF for every declared `extern func`, used or not** -> vasm warning 62
+  ("imported symbol was not referenced"). Generators should declare only what they call.
+- `vasmm68k_mot` assembles ONE source file per invocation; multi-file needs separate `-Fhunk`
+  assembles then one `vlink`. `-Fhunkexe` is for single-file-to-executable only.
+
 ## SetTextMode graphics.s feature + subagent bug caught (2026-08-21)
 - Added `SetTextMode(mode: int) -> int` to lib/graphics.s (XDEF + `gfx_text_mode` word var
   + function, modeled on `SetFont`). `_DrawChar`'s `.dc_plane_loop` background-clear step now
