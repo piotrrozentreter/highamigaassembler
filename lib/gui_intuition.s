@@ -696,6 +696,17 @@ GuiShow:
     clr.w gui_building
 
     bsr gui_clear_client_area
+
+    move.l gui_firstgad,d0
+    beq .gsh_labels
+    move.l gui_int_base,a6
+    move.l gui_firstgad,a0
+    move.l gui_window,a1
+    sub.l a2,a2
+    moveq #-1,d0
+    jsr _LVORefreshGList(a6)
+
+.gsh_labels:
     bsr gui_redraw_labels
 
     move.l gui_window,d0
