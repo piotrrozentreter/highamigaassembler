@@ -706,11 +706,10 @@ GuiWaitEvent:
     move.l gui_userport,d0
     beq .gwe_bad
 
-.gwe_wait:
-    move.l ExecBase,a6
-    move.l gui_sigmask,d0
-    jsr _LVOWait(a6)
-
+; Signals are a single latched bit, not a counter: PutMsg()'s Signal() call
+; coalesces if two messages arrive before Wait() is next called, so a message
+; already queued from an earlier (already-consumed) signal must always be
+; drained BEFORE blocking again, or it can starve forever behind Wait().
 .gwe_drain:
     move.l ExecBase,a6
     move.l gui_userport,d0
@@ -719,7 +718,15 @@ GuiWaitEvent:
     jsr _LVOGetMsg(a6)
     move.l d0,a3
     tst.l d0
-    beq .gwe_wait                   ; spurious wakeup
+    bne .gwe_got
+
+.gwe_wait:
+    move.l ExecBase,a6
+    move.l gui_sigmask,d0
+    jsr _LVOWait(a6)
+    bra .gwe_drain
+
+.gwe_got:
 
     ; ---- snapshot BEFORE ReplyMsg ----
     move.l IM_CLASS(a3),d1
