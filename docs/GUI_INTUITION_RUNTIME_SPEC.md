@@ -260,7 +260,7 @@ semantics. Instead the designer canvas origin is already inset by
 | --- | --- | --- |
 | 12 / 14 | WORD | `wd_MouseY` / `wd_MouseX` (note the order) |
 | **50** | APTR | **`wd_RPort`** — for `PrintIText` / `DrawBorder` |
-| 65–68 | UBYTE | `wd_BorderLeft` / `Top` / `Right` / `Bottom` |
+| 54–57 | UBYTE | `wd_BorderLeft` / `Top` / `Right` / `Bottom` |
 | 86 | APTR | `wd_UserPort` — the IDCMP message port |
 
 ### 3.5 `Gadget` — 44 bytes

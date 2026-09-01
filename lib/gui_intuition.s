@@ -47,6 +47,7 @@
 
     include "hardware.i"
     include "exec_lib.i"
+    include "graphics_lib.i"
     include "gui_intuition.i"
 
 ; =============================================================================
@@ -655,10 +656,8 @@ GuiAddEditBox:
 ; Function: GuiShow
 ; Input: none
 ; Output: d0=Window* on success, 0 if OpenWindow failed, -1 on order violation
-; Description: Links the built gadget list into nw_FirstGadget, opens the
-;              window, caches RPort/UserPort/signal mask and paints the labels.
-; Notes: Intuition renders the gadgets as part of OpenWindow, so no AddGList
-;        or RefreshGList is needed here (spec 1.1).
+; Description: Opens the window, clears its client area, adds the built gadget
+;              list, then caches RPort/UserPort/signal mask and paints labels.
 ; -----------------------------------------------------------------------------
 GuiShow:
     link a6,#0
@@ -671,11 +670,10 @@ GuiShow:
     move.l gui_window,d0
     bne .gsh_order
 
-    lea gui_nw,a0
-    move.l gui_firstgad,NW_FIRSTGADGET(a0)
-
     move.l gui_int_base,d0
     beq .gsh_order
+    lea gui_nw,a0
+    move.l gui_firstgad,NW_FIRSTGADGET(a0)   ; install gadgets before open for hit-testing
     move.l d0,a6
     lea gui_nw,a0
     jsr _LVOOpenWindow(a6)
@@ -707,6 +705,7 @@ GuiShow:
     jsr _LVORefreshGList(a6)
 
 .gsh_labels:
+    bsr gui_redraw_buttons
     bsr gui_redraw_labels
 
     move.l gui_window,d0
@@ -863,6 +862,7 @@ GuiWaitEvent:
     moveq #-1,d0
     jsr _LVORefreshGList(a6)
 .gwer_labels:
+    bsr gui_redraw_buttons
     bsr gui_redraw_labels
     move.l gui_int_base,a6
     move.l gui_window,a0
@@ -1055,8 +1055,8 @@ GuiSetLabelText:
 
     move.l gui_rport,d0
     beq .glbl_ok
-    move.l a1,a2
-    move.l a0,a3
+    move.l a0,a3                    ; a3 = IntuiText* (before a0 is overwritten)
+    move.l a1,a2                    ; a2 = xy pointer
     move.l gui_int_base,a6
     move.l gui_rport,a0
     move.l a3,a1
@@ -1180,6 +1180,7 @@ GuiRedraw:
     jsr _LVORefreshGList(a6)
 
 .grd_labels:
+    bsr gui_redraw_buttons
     bsr gui_redraw_labels
 
 .grd_done:
@@ -1205,7 +1206,7 @@ gui_slot_ptrs:
     add.l d0,a0
 
     move.w d7,d0
-    mulu.w #BD_SIZEOF,d0
+    mulu.w #BD_SIZEOF*2,d0
     lea gui_borders,a1
     add.l d0,a1
 
@@ -1376,17 +1377,17 @@ gui_redraw_labels:
     beq .grl_done
     move.l gui_int_base,d0
     beq .grl_done
-    move.w gui_nlabels,d3
+    move.w gui_nlabels,d4
     beq .grl_done
-    subq.w #1,d3
-    moveq #0,d2
+    subq.w #1,d4
+    moveq #0,d5
 
 .grl_loop:
-    move.w d2,d0
+    move.w d5,d0
     mulu.w #IT_SIZEOF,d0
     lea gui_labels,a2
     add.l d0,a2
-    move.w d2,d0
+    move.w d5,d0
     mulu.w #4,d0
     lea gui_label_xy,a3
     add.l d0,a3
@@ -1400,10 +1401,60 @@ gui_redraw_labels:
     ext.l d1
     jsr _LVOPrintIText(a6)
 
-    addq.w #1,d2
-    dbra d3,.grl_loop
+    addq.w #1,d5
+    dbra d4,.grl_loop
 
 .grl_done:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_redraw_buttons
+; Input:  none
+; Output: none
+; Description: Draws Border and IntuiText imagery for bool gadgets after a
+;              client-area clear. Intuition retains the active gadget list and
+;              handles their selection state and IDCMP events.
+; Clobbers: d0-d3, a0-a3, a6
+; -----------------------------------------------------------------------------
+gui_redraw_buttons:
+    move.l gui_rport,d0
+    beq .grb_done
+    move.l gui_int_base,d0
+    beq .grb_done
+    move.w gui_ngads,d4
+    beq .grb_done
+    subq.w #1,d4
+    lea gui_gadgets,a3
+
+.grb_loop:
+    move.w GG_GADGETTYPE(a3),d2
+    and.w #GTYP_GTYPEMASK,d2
+    cmp.w #GTYP_BOOLGADGET,d2
+    bne .grb_next
+
+    move.l gui_int_base,a6
+    move.l gui_rport,a0
+    move.l GG_GADGETRENDER(a3),a1
+    move.w GG_LEFTEDGE(a3),d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    ext.l d1
+    jsr _LVODrawBorder(a6)
+
+    move.l gui_int_base,a6
+    move.l gui_rport,a0
+    move.l GG_GADGETTEXT(a3),a1
+    move.w GG_LEFTEDGE(a3),d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    ext.l d1
+    jsr _LVOPrintIText(a6)
+
+.grb_next:
+    lea GG_SIZEOF(a3),a3
+    dbra d4,.grb_loop
+
+.grb_done:
     rts
 
 ; -----------------------------------------------------------------------------
@@ -1517,12 +1568,14 @@ gui_clear_client_area:
     moveq #0,d1
     move.b WD_BORDERTOP(a2),d1      ; d1 = ymin
 
+    moveq #0,d2
     move.w WD_WIDTH(a2),d2
     moveq #0,d4
     move.b WD_BORDERRIGHT(a2),d4
     sub.w d4,d2
     subq.w #1,d2                    ; d2 = xmax
 
+    moveq #0,d3
     move.w WD_HEIGHT(a2),d3
     move.b WD_BORDERBOTTOM(a2),d4
     sub.w d4,d3

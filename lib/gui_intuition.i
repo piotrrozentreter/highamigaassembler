@@ -83,10 +83,10 @@ WD_HEIGHT           EQU 10          ; WORD
 WD_MOUSEY           EQU 12          ; WORD  (note the order: Y before X)
 WD_MOUSEX           EQU 14          ; WORD
 WD_RPORT            EQU 50          ; APTR
-WD_BORDERLEFT       EQU 65          ; UBYTE
-WD_BORDERTOP        EQU 66          ; UBYTE
-WD_BORDERRIGHT      EQU 67          ; UBYTE
-WD_BORDERBOTTOM     EQU 68          ; UBYTE
+WD_BORDERLEFT       EQU 54          ; UBYTE
+WD_BORDERTOP        EQU 55          ; UBYTE
+WD_BORDERRIGHT      EQU 56          ; UBYTE
+WD_BORDERBOTTOM     EQU 57          ; UBYTE
 WD_FIRSTGADGET      EQU 62          ; APTR
 WD_USERPORT         EQU 86          ; APTR
 
@@ -124,7 +124,7 @@ BD_NEXTBORDER       EQU 12          ; APTR
 BD_SIZEOF           EQU 16
 
 GUI_BORDER_POINTS   EQU 3           ; 3 points per 3D bevel segment
-GUI_BORDXY_SIZEOF   EQU 12          ; 3 points * 2 words
+GUI_BORDXY_SIZEOF   EQU 24          ; 2 segments * 3 points * 2 words
 
 ; -----------------------------------------------------------------------------
 ; struct IntuiText - 20 bytes

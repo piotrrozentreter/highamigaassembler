@@ -177,7 +177,7 @@ code gui_test_form:
 
         if (id == ID_BTN_OK) {
             // USER CODE BEGIN btn_ok.on_click
-            // TODO: button "OK" clicked
+            running = 0;
             // USER CODE END btn_ok.on_click
         }
 
