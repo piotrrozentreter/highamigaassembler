@@ -106,9 +106,9 @@ gui_nw:
 gui_gadgets:
     ds.b GG_SIZEOF*GUI_MAX_GADGETS
 gui_borders:
-    ds.b BD_SIZEOF*GUI_MAX_GADGETS
+    ds.b BD_SIZEOF*GUI_MAX_GADGETS*2
 gui_bordxy:
-    ds.w 2*GUI_BORDER_POINTS*GUI_MAX_GADGETS
+    ds.w 12*GUI_MAX_GADGETS
 gui_itexts:
     ds.b IT_SIZEOF*GUI_MAX_GADGETS
 gui_strinfo:
@@ -275,8 +275,8 @@ GuiBeginWindow:
     move.l 24(a5),d0
     move.w d0,NW_HEIGHT(a0)
 
-    clr.b NW_DETAILPEN(a0)
-    move.b #1,NW_BLOCKPEN(a0)
+    move.b #$FF,NW_DETAILPEN(a0)
+    move.b #$FF,NW_BLOCKPEN(a0)
 
     move.l 28(a5),NW_IDCMPFLAGS(a0)
     move.l 32(a5),NW_FLAGS(a0)
@@ -397,7 +397,9 @@ GuiAddButton:
     cmp.w #GUI_MAX_GADGETS,d7
     bge .gab_fail
 
-    bsr gui_slot_ptrs               ; d7 -> a0=gad a1=bord a2=xy a3=itext a4=si
+    bsr gui_slot_ptrs               ; d7 -> a0=gad a1=bord1 a2=xy1 a3=itext a4=si
+    lea BD_SIZEOF(a1),a6            ; a6 = bord2
+    lea 12(a2),a4                   ; a4 = xy2
 
     move.l 20(a5),d4                ; d4 = w
     move.l 24(a5),d5                ; d5 = h
@@ -422,31 +424,49 @@ GuiAddButton:
     move.w d0,GG_GADGETID(a0)
     clr.l GG_USERDATA(a0)
 
-    ; ---- Border ----
+    ; ---- Border 1 (Top and Left: Pen 2 White highlight) ----
     clr.w BD_LEFTEDGE(a1)
     clr.w BD_TOPEDGE(a1)
-    move.b #1,BD_FRONTPEN(a1)
+    move.b #2,BD_FRONTPEN(a1)
     clr.b BD_BACKPEN(a1)
     move.b #JAM1,BD_DRAWMODE(a1)
-    move.b #GUI_BORDER_POINTS,BD_COUNT(a1)
+    move.b #3,BD_COUNT(a1)
     move.l a2,BD_XY(a1)
-    clr.l BD_NEXTBORDER(a1)
+    move.l a6,BD_NEXTBORDER(a1)
 
-    ; ---- Border polyline: 0,0  w-1,0  w-1,h-1  0,h-1  0,0 ----
+    ; ---- Border 1 polyline: (0, h-2) -> (0, 0) -> (w-2, 0) ----
+    move.w d4,d2
+    subq.w #2,d2                    ; d2 = w-2
+    move.w d5,d3
+    subq.w #2,d3                    ; d3 = h-2
+    clr.w 0(a2)
+    move.w d3,2(a2)
+    clr.w 4(a2)
+    clr.w 6(a2)
+    move.w d2,8(a2)
+    clr.w 10(a2)
+
+    ; ---- Border 2 (Bottom and Right: Pen 1 Black shadow) ----
+    clr.w BD_LEFTEDGE(a6)
+    clr.w BD_TOPEDGE(a6)
+    move.b #1,BD_FRONTPEN(a6)
+    clr.b BD_BACKPEN(a6)
+    move.b #JAM1,BD_DRAWMODE(a6)
+    move.b #3,BD_COUNT(a6)
+    move.l a4,BD_XY(a6)
+    clr.l BD_NEXTBORDER(a6)
+
+    ; ---- Border 2 polyline: (w-1, 0) -> (w-1, h-1) -> (0, h-1) ----
     move.w d4,d2
     subq.w #1,d2                    ; d2 = w-1
     move.w d5,d3
     subq.w #1,d3                    ; d3 = h-1
-    clr.w 0(a2)
-    clr.w 2(a2)
-    move.w d2,4(a2)
-    clr.w 6(a2)
-    move.w d2,8(a2)
-    move.w d3,10(a2)
-    clr.w 12(a2)
-    move.w d3,14(a2)
-    clr.w 16(a2)
-    clr.w 18(a2)
+    move.w d2,0(a4)
+    clr.w 2(a4)
+    move.w d2,4(a4)
+    move.w d3,6(a4)
+    clr.w 8(a4)
+    move.w d3,10(a4)
 
     ; ---- IntuiText caption, centred ----
     move.b #1,IT_FRONTPEN(a3)
@@ -511,6 +531,8 @@ GuiAddEditBox:
     bge .gae_fail
 
     bsr gui_slot_ptrs               ; d7 -> a0=gad a1=bord a2=xy a3=itext a4=si
+    lea BD_SIZEOF(a1),a6            ; a6 = bord2
+    lea 12(a2),a3                   ; a3 = xy2
 
     move.l 20(a5),d4                ; d4 = outer w
     move.l 24(a5),d5                ; d5 = outer h
@@ -542,32 +564,51 @@ GuiAddEditBox:
     move.w d0,GG_GADGETID(a0)
     clr.l GG_USERDATA(a0)
 
-    ; ---- Border ----
+    ; ---- Border 1 (Top and Left: Pen 1 Black recessed shadow) ----
     clr.w BD_LEFTEDGE(a1)
     clr.w BD_TOPEDGE(a1)
     move.b #1,BD_FRONTPEN(a1)
     clr.b BD_BACKPEN(a1)
     move.b #JAM1,BD_DRAWMODE(a1)
-    move.b #GUI_BORDER_POINTS,BD_COUNT(a1)
+    move.b #3,BD_COUNT(a1)
     move.l a2,BD_XY(a1)
-    clr.l BD_NEXTBORDER(a1)
+    move.l a6,BD_NEXTBORDER(a1)
 
-    ; ---- polyline: -2,-2  w-3,-2  w-3,h-3  -2,h-3  -2,-2 ----
+    ; ---- Border 1 polyline: (-2, h-3) -> (-2, -2) -> (w-3, -2) ----
     move.w d4,d2
     sub.w #3,d2                     ; d2 = w-3
     move.w d5,d3
     sub.w #3,d3                     ; d3 = h-3
     move.w #-2,d1
     move.w d1,0(a2)
-    move.w d1,2(a2)
-    move.w d2,4(a2)
+    move.w d3,2(a2)
+    move.w d1,4(a2)
     move.w d1,6(a2)
     move.w d2,8(a2)
-    move.w d3,10(a2)
-    move.w d1,12(a2)
-    move.w d3,14(a2)
-    move.w d1,16(a2)
-    move.w d1,18(a2)
+    move.w d1,10(a2)
+
+    ; ---- Border 2 (Bottom and Right: Pen 2 White recessed highlight) ----
+    clr.w BD_LEFTEDGE(a6)
+    clr.w BD_TOPEDGE(a6)
+    move.b #2,BD_FRONTPEN(a6)
+    clr.b BD_BACKPEN(a6)
+    move.b #JAM1,BD_DRAWMODE(a6)
+    move.b #3,BD_COUNT(a6)
+    move.l a3,BD_XY(a6)
+    clr.l BD_NEXTBORDER(a6)
+
+    ; ---- Border 2 polyline: (w-3, -2) -> (w-3, h-3) -> (-2, h-3) ----
+    move.w d4,d2
+    sub.w #3,d2                     ; d2 = w-3
+    move.w d5,d3
+    sub.w #3,d3                     ; d3 = h-3
+    move.w #-2,d1
+    move.w d2,0(a3)
+    move.w d1,2(a3)
+    move.w d2,4(a3)
+    move.w d3,6(a3)
+    move.w d1,8(a3)
+    move.w d3,10(a3)
 
     ; ---- StringInfo ----
     move.l 28(a5),SI_BUFFER(a4)
@@ -654,6 +695,7 @@ GuiShow:
     move.w #1,gui_shown
     clr.w gui_building
 
+    bsr gui_clear_client_area
     bsr gui_redraw_labels
 
     move.l gui_window,d0
@@ -729,7 +771,7 @@ GuiWaitEvent:
 .gwe_got:
 
     ; ---- snapshot BEFORE ReplyMsg ----
-    move.l IM_CLASS(a3),d1
+    move.l IM_CLASS(a3),d4
     moveq #0,d2
     move.w IM_CODE(a3),d2
     move.l IM_IADDRESS(a3),d3
@@ -742,17 +784,17 @@ GuiWaitEvent:
     move.l d2,gui_evt_code
     clr.l gui_evt_id
 
-    btst #IDCMPB_CLOSEWINDOW,d1
+    btst #IDCMPB_CLOSEWINDOW,d4
     bne .gwe_close
-    btst #IDCMPB_GADGETUP,d1
+    btst #IDCMPB_GADGETUP,d4
     bne .gwe_gadup
-    btst #IDCMPB_GADGETDOWN,d1
+    btst #IDCMPB_GADGETDOWN,d4
     bne .gwe_gaddown
-    btst #IDCMPB_VANILLAKEY,d1
+    btst #IDCMPB_VANILLAKEY,d4
     bne .gwe_key
-    btst #IDCMPB_MOUSEBUTTONS,d1
+    btst #IDCMPB_MOUSEBUTTONS,d4
     bne .gwe_mouse
-    btst #IDCMPB_REFRESHWINDOW,d1
+    btst #IDCMPB_REFRESHWINDOW,d4
     bne .gwe_refresh
     bra .gwe_drain                  ; unknown class: already replied, take next
 
@@ -800,6 +842,16 @@ GuiWaitEvent:
     move.l gui_int_base,a6
     move.l gui_window,a0
     jsr _LVOBeginRefresh(a6)
+    bsr gui_clear_client_area
+    move.l gui_firstgad,d0
+    beq .gwer_labels
+    move.l gui_int_base,a6
+    move.l gui_firstgad,a0
+    move.l gui_window,a1
+    sub.l a2,a2
+    moveq #-1,d0
+    jsr _LVORefreshGList(a6)
+.gwer_labels:
     bsr gui_redraw_labels
     move.l gui_int_base,a6
     move.l gui_window,a0
@@ -1103,6 +1155,9 @@ GuiRedraw:
 
     move.l gui_window,d0
     beq .grd_done
+
+    bsr gui_clear_client_area
+
     move.l gui_firstgad,d0
     beq .grd_labels
 
@@ -1412,4 +1467,59 @@ gui_do_close_window:
     jsr _LVOPermit(a6)
 
 .gdc_done:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_clear_client_area
+; Input:  none
+; Output: none
+; Description: Fills the interior client rectangle of the window with Pen 0
+;              (Grey background).
+; Clobbers: none (preserves d0-d4/a0-a2/a6)
+; -----------------------------------------------------------------------------
+gui_clear_client_area:
+    movem.l d0-d4/a0-a2/a6,-(sp)
+
+    move.l gui_window,d0
+    beq .gcca_done
+    move.l d0,a2                    ; a2 = Window*
+
+    move.l gui_rport,d0
+    beq .gcca_done
+    move.l d0,a1                    ; a1 = RastPort*
+
+    move.l gui_gfx_base,d0
+    beq .gcca_done
+    move.l d0,a6                    ; a6 = GfxBase*
+
+    ; SetAPen(rp, 0)
+    move.l gui_rport,a1
+    moveq #0,d0
+    jsr _LVOSetAPen(a6)
+
+    ; Compute client rectangle: xmin, ymin, xmax, ymax
+    move.l gui_window,a2
+    move.l gui_gfx_base,a6
+
+    moveq #0,d0
+    move.b WD_BORDERLEFT(a2),d0     ; d0 = xmin
+    moveq #0,d1
+    move.b WD_BORDERTOP(a2),d1      ; d1 = ymin
+
+    move.w WD_WIDTH(a2),d2
+    moveq #0,d4
+    move.b WD_BORDERRIGHT(a2),d4
+    sub.w d4,d2
+    subq.w #1,d2                    ; d2 = xmax
+
+    move.w WD_HEIGHT(a2),d3
+    move.b WD_BORDERBOTTOM(a2),d4
+    sub.w d4,d3
+    subq.w #1,d3                    ; d3 = ymax
+
+    move.l gui_rport,a1
+    jsr _LVORectFill(a6)
+
+.gcca_done:
+    movem.l (sp)+,d0-d4/a0-a2/a6
     rts

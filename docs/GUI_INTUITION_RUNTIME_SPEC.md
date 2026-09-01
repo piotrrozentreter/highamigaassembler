@@ -501,9 +501,11 @@ which restores registers and returns `d0`.
 
 ## 6. Gotchas — non-negotiable
 
-1. **Copy before reply.** After `ReplyMsg`, the `IntuiMessage` is dead memory owned by
-   Intuition. Reading `im_Code` or `im_IAddress` afterwards works 99 times out of 100 and then
-   corrupts a gadget pointer under load. This is the single most common failure in this design.
+1. **Copy before reply into a preserved register.** After `ReplyMsg`, the `IntuiMessage` is dead
+   memory owned by Intuition. Reading `im_Code` or `im_IAddress` afterwards works 99 times out of 100
+   and then corrupts a gadget pointer under load. Furthermore, `_LVOReplyMsg` is an Exec call that
+   clobbers scratch registers `d0`/`d1`, so snapshot `im_Class` into a preserved register (e.g. `d4`)
+   before calling `ReplyMsg`.
 2. **Reply every message.** No early `return` out of the middle of the loop.
 3. **Drain before closing, and drain *before* `ModifyIDCMP`.** `GuiCloseWindow` must follow the
    RKM `CloseWindowSafely()` order:

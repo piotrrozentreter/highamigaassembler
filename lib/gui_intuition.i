@@ -123,8 +123,8 @@ BD_XY               EQU 8           ; APTR -> WORD pairs
 BD_NEXTBORDER       EQU 12          ; APTR
 BD_SIZEOF           EQU 16
 
-GUI_BORDER_POINTS   EQU 5           ; polyline is NOT auto-closed
-GUI_BORDXY_SIZEOF   EQU 20          ; 5 points * 2 words
+GUI_BORDER_POINTS   EQU 3           ; 3 points per 3D bevel segment
+GUI_BORDXY_SIZEOF   EQU 12          ; 3 points * 2 words
 
 ; -----------------------------------------------------------------------------
 ; struct IntuiText - 20 bytes
