@@ -801,6 +801,15 @@ The `tools/` directory contains Python utilities for converting graphics and ass
   - Example: `python3 tools/create_trackio_adf.py output.adf --asset 1:graphics.bin --asset 2:music.mod`
   - Documentation: [TRACKIO_LIBRARY.md](docs/TRACKIO_LIBRARY.md)
 
+### GUI Design Tools
+
+- **`guicreator/`** - WYSIWYG GUI designer for Amiga forms (Tkinter)
+  - Place Buttons, EditBoxes and Labels on a retro Workbench-style canvas
+  - Exports `.hasmeta` layout metadata *and* a compilable `intuition.library` `.has` skeleton
+  - Re-export preserves handler code between `// USER CODE BEGIN/END` markers
+  - Example: `python3 -m guicreator` or `python3 -m guicreator --export-has form.hasmeta -o form.has`
+  - Documentation: [GUI_CREATOR.md](docs/GUI_CREATOR.md), [GUI_INTUITION_RUNTIME_SPEC.md](docs/GUI_INTUITION_RUNTIME_SPEC.md)
+
 ### Example Usage
 
 See the `examples/games/launchers/` and `examples/games/robots/` directories for practical usage examples of these asset conversion tools in complete game projects.

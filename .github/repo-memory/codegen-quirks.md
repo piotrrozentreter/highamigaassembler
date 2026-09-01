@@ -534,6 +534,39 @@
   `grep -c '"a5"' hasc/codegen.py` = zero hits, HAS codegen never touches a5)
   `#pragma lockreg(a5);` the user had added defensively.
 
+## guicreator + lib/gui_intuition.s (2026-09-01)
+- New `guicreator/` package: Tkinter WYSIWYG form designer -> `.hasmeta` layout metadata +
+  generated `.has` skeleton. Headless paths (`--validate`, `--export-has`) don't import Tkinter.
+  Docs: `docs/GUI_CREATOR.md`, `docs/GUI_INTUITION_RUNTIME_SPEC.md`.
+- New `lib/gui_intuition.s`/`.i`: system-friendly intuition.library widget runtime (real
+  OpenWindow + Gadget list, NOT the bare-metal `lib/gui.s`). Static pools, no AllocMem.
+  Offsets came from the spec doc, NOT yet diffed against NDK 3.2 (Linux-only path) - the
+  cross-check list is in the header of `lib/gui_intuition.i`. Never run on hw/emulator yet.
+- **HAS stack ABI re-confirmed from generated .s**: args pushed right-to-left as 32-bit longs,
+  CALLER cleans (`add.l #N,a7`). After `link a6,#0`: 1st param at `8(a6)`, 2nd `12(a6)`, ...
+  Always `move.l`, never `move.w`, when reading an `int` param (see the SetTextMode bug below).
+- **Amiga gotcha worth remembering**: `ModifyIDCMP(win, 0)` DELETES the window's UserPort, so
+  the RKM `CloseWindowSafely` order is Forbid -> drain+ReplyMsg -> `win->UserPort = NULL` ->
+  ModifyIDCMP(win,0) -> RemoveGList -> CloseWindow -> Permit. Draining after ModifyIDCMP is a
+  use-after-free. Also: never read `im_Code`/`im_IAddress` after `ReplyMsg`.
+- **hasc emits an XREF for every declared `extern func`, used or not** -> vasm warning 62
+  ("imported symbol was not referenced"). Generators should declare only what they call.
+- `vasmm68k_mot` assembles ONE source file per invocation; multi-file needs separate `-Fhunk`
+  assembles then one `vlink`. `-Fhunkexe` is for single-file-to-executable only.
+- **New `lib/*.s` modules must be registered in BOTH `LIB_SOURCES` and `ORDERED_LIBS` in
+  `scripts/build_example.sh`** or the script silently reports "Libs: (none auto-detected)" and
+  the link fails. Added `gui_intuition.s` + `wbstartup.s` (wbstartup had never been registered).
+  `scripts/build_game.sh` has its own separate pair of lists - update it too if a game needs the lib.
+- Hand-written `lib/*.s` do NOT follow the `cnop 0,4`-after-SECTION convention (that is
+  codegen.py + tools/*.py only) - verified against dos.s/gui.s/timer.s/wbstartup.s.
+- `tests/test_guicreator.py` (22 tests) covers the metadata layer headlessly - it never imports
+  `guicreator.builder`, so no Tk display is needed. Includes a drift test asserting
+  `examples/gui_login_form.has` still matches regeneration from `login.hasmeta`; the emitter
+  normalizes the recorded layout path to a CWD-relative POSIX path so Windows and Linux
+  regenerate byte-identically.
+- Running bare `pytest` from the repo root breaks on the stale `tmp/headwt` git worktree
+  (24 collection errors). Use `pytest tests/`.
+
 ## SetTextMode graphics.s feature + subagent bug caught (2026-08-21)
 - Added `SetTextMode(mode: int) -> int` to lib/graphics.s (XDEF + `gfx_text_mode` word var
   + function, modeled on `SetFont`). `_DrawChar`'s `.dc_plane_loop` background-clear step now
