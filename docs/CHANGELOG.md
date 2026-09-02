@@ -4,12 +4,49 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-09-02
+
+### Added
+
+- **GUI Creator and `lib/gui_intuition` now support CheckBox, List, and Bitmap widgets.**
+  CheckBoxes are toggle-select Intuition gadgets and generated handlers read their state with
+  `GuiGetCheckBox()`. Lists are fixed Topaz-8 row, single-select controls; a selected row emits
+  `GUI_EVT_LIST` and is available through `GuiGetListSelected()`. They intentionally provide no
+  scrolling or multiselect behavior. Bitmap widgets accept PNG or BMP assets in the designer;
+  export requires Pillow, resizes them to the placed dimensions, and embeds a monochrome one-bit
+  `graphics/Image`. Bitmap clicks are ignored because generated forms create no bitmap handler.
+  The new runtime entry points are
+  `GuiAddCheckBox`, `GuiAddList`, `GuiAddBitmap`, `GuiGetCheckBox`, and `GuiGetListSelected`.
+  First hardware/emulator bring-up (AROS 68k) drove a set of runtime fixes (see below); List,
+  CheckBox and Button now use `GFLG_GADGHNONE` and render their own visuals (list rows with an
+  inverse-video selection, checkbox `x` mark, and a raised/recessed button press animation).
+
 ### Fixed
+
+- **`lib/gui_intuition.s` - first-run (AROS 68k) correctness fixes:**
+  - **`GuiAddButton` illegal-address crash**: `gui_strlen` leaves the caption pointer in `a0`,
+    and the following `gui_link_gadget` linked that data address as the gadget, so Intuition
+    executed string data. `a0` is now reloaded with the gadget pointer before linking.
+  - **`RefreshGList` LVO corrected** from an erroneous `-450` (that is `ActivateWindow`) back to
+    the correct `-432`.
+  - **Border coordinate stride**: `GUI_BORDXY_SIZEOF` was 20 but each gadget uses 24 bytes, so
+    multi-gadget forms overlapped their border coordinates (diagonal-line garbage). Now 24.
+  - **List rendering/selection**: the label-pointer table was clobbered by `PrintIText`
+    (garbage on rows 2+), and the click handler wrote the selection to the wrong slot. Both
+    fixed; the list is now selectable.
+  - **Bitmap rendering**: `struct Image.Depth` was emitted as a byte pair (`Depth = 256`); it is
+    now a word (`dc.w 1`). Bitmap pixel data is now emitted in a **chip-RAM** (`data_chip`)
+    section because `DrawImage` renders through the blitter, which cannot read fast RAM.
+  - **Text "dots"**: gadget text was drawn twice (by `RefreshGList` and a redundant manual
+    pass); the manual pass was removed so gadget imagery is drawn once.
+  - Windows are now explicitly brought to front and activated on open (`WindowToFront` /
+    `ActivateWindow`).
 
 - **`lib/gui_intuition.s` - Fixed Close Gadget (`IDCMP_CLOSEWINDOW`), window background fill, and 3D widget rendering**:
   - **Close Button Fix**: In `GuiWaitEvent`, `IM_CLASS` was stored in scratch register `d1` before calling `_LVOReplyMsg(a6)`. Since Exec library routines clobber scratch registers `d0`/`d1`, `_LVOReplyMsg` corrupted `d1`, causing `btst #IDCMPB_CLOSEWINDOW, d1` to check garbage and miss Close Gadget clicks. `IM_CLASS` is now safely snapshotted into preserved register `d4`.
   - **Window and Gadget Initial Rendering Fix**: Corrected the `Window` border offsets used by the client-area fill (`54..57`), fixed the per-widget two-border/coordinate pool strides, then installs and refreshes the built gadget list after clearing the opened window. Boolean gadget Borders are explicitly repainted and static text uses `graphics.library` after that refresh. The renderer now preserves text coordinates and redraw-loop state across graphics-library calls, so GUI Creator forms no longer depend on a later Workbench redraw or corrupt their event loop before it starts.
-  - **Window Client Area Background**: Added `gui_clear_client_area` helper that uses `_LVOSetAPen(rp, 0)` and `_LVORectFill` to clear the interior client rectangle `(BorderLeft, BorderTop)` to `(Width - BorderRight - 1, Height - BorderBottom - 1)` with Pen 0 (Grey). Called automatically during `GuiShow`, `GuiRedraw`, and `IDCMP_REFRESHWINDOW`, eliminating un-cleared screen background / blue canvas bleed.
+  - **Window Client Area Background**: Added `gui_clear_client_area` helper that uses `_LVOSetAPen(rp, 0)` and `_LVORectFill` to clear the client-relative rectangle `(0, 0)` to `(client width - 1, client height - 1)` with Pen 0 (Grey). Called automatically during `GuiShow`, `GuiRedraw`, and `IDCMP_REFRESHWINDOW`, eliminating un-cleared screen background / blue canvas bleed.
+  - **Button Event Delivery**: Buttons use `GACT_RELVERIFY|GACT_IMMEDIATE`: the completed click reports `IDCMP_GADGETUP` and is delivered to the generated `on_button()` handler, while `GACT_IMMEDIATE` exposes the press state for rendering. This matches the GUI Creator event-loop contract.
   - **3D Widget Styling**: Upgraded `GuiAddButton` to generate two chained `Border` polylines (Pen 2 White highlight for top/left, Pen 1 Black shadow for bottom/right) for classic Amiga 2.0+ 3D raised buttons with centered text. Upgraded `GuiAddEditBox` to recessed 3D borders (Pen 1 Black top/left shadow, Pen 2 White bottom/right highlight).
   - **Screen Pens**: Updated `GuiBeginWindow` to set `nw_DetailPen = $FF` and `nw_BlockPen = $FF` in `NewWindow`, allowing Intuition to use native screen pens across all Workbench screen color schemes.
 

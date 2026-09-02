@@ -1,7 +1,8 @@
 # GUI Creator
 
-WYSIWYG GUI designer for Amiga forms. It is **not** a standalone application and it produces no
-executable of its own: it is an editor that emits structured metadata for the HAS/68000 pipeline.
+GUI Creator is the initial foundation for a broader Amiga GUI utility. Today it is a WYSIWYG
+designer for Amiga forms. It is **not** a standalone application and produces no executable of
+its own: it is an editor that emits structured metadata for the HAS/68000 pipeline.
 
 - **Tool:** `guicreator/` (Python 3.8+, Tkinter, no extra dependencies)
 - **Layout output:** `.hasmeta` — structured pseudo-code, also the designer's project format
@@ -47,12 +48,12 @@ vlink -bamigahunk build/gui_login_form.o build/gui_intuition.o build/wbstartup.o
 
 | Area | Purpose |
 | --- | --- |
-| Toolbox | Add Button / EditBox / Label |
+| Toolbox | Add Button / CheckBox / EditBox / Label / List / Bitmap |
 | Window | Caption, Width, Height, screen position |
 | Window flags | `WFLG_DRAGBAR` / `DEPTHGADGET` / `CLOSEGADGET` / `ACTIVATE` / `SIZEGADGET` |
 | Canvas | Click to select, drag to move, drag the corner handle to resize, arrows to nudge |
 | TAB order | List order = Intuition gadget list order = hit-test priority and TAB cycle |
-| Properties | Symbol name, caption/text, X/Y/W/H, MaxLen (EditBox only) |
+| Properties | Symbol name, caption/text, X/Y/W/H; MaxLen (EditBox); checked state (CheckBox); `|`-separated items and selected row (List); PNG/BMP asset path (Bitmap) |
 | Validation | Live problem list; export warns before writing an invalid layout |
 
 The dashed rectangle on the canvas is the **client area**. Widgets must stay inside it: window
@@ -79,6 +80,9 @@ BEGIN_GUI_LAYOUT
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=LABEL, ID=1, X=12, Y=24, W=40, H=8, NAME="lbl_name", TEXT="Name:")}
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=EDITBOX, ID=2, X=92, Y=22, W=200, H=14, NAME="edit_name", ITEXT="", MAXLEN=32)}
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=BUTTON, ID=3, X=116, Y=64, W=88, H=18, NAME="btn_ok", CAPT="OK")}
+    {CALL_HAS_CMD: ADD_CONTROL(TYPE=CHECKBOX, ID=4, X=12, Y=64, W=88, H=14, NAME="chk_remember", CAPT="Remember", CHECKED=1)}
+    {CALL_HAS_CMD: ADD_CONTROL(TYPE=LIST, ID=5, X=12, Y=88, W=120, H=28, NAME="list_mode", ITEMS64="RWFzeQBIYXJk", SELECTED=0)}
+    {CALL_HAS_CMD: ADD_CONTROL(TYPE=BITMAP, ID=6, X=160, Y=88, W=32, H=32, NAME="bmp_logo", ASSET="assets/logo.png")}
 END_GUI_LAYOUT
 
 ; --- EVENT HANDLER DEFINITIONS ---
@@ -96,6 +100,9 @@ SECTION DATA CONSTANTS
     CONTROL_TYPE_LABEL    EQU 0
     CONTROL_TYPE_BUTTON   EQU 1
     CONTROL_TYPE_EDITBOX  EQU 2
+    CONTROL_TYPE_CHECKBOX EQU 3
+    CONTROL_TYPE_LIST     EQU 4
+    CONTROL_TYPE_BITMAP   EQU 5
     ID_LBL_NAME           EQU 1
     ID_EDIT_NAME          EQU 2
     ID_BTN_OK             EQU 3
@@ -152,6 +159,9 @@ UWORD at `Gadget+38`:
 | `LABEL` | 0 | *(not a gadget)* | — | `PrintIText()` LVO -216 |
 | `BUTTON` | 1 | `GTYP_BOOLGADGET` | `$0001` | `OpenWindow` / `RefreshGList` LVO -432 |
 | `EDITBOX` | 2 | `GTYP_STRGADGET` | `$0004` | `OpenWindow` / `RefreshGList` |
+| `CHECKBOX` | 3 | `GTYP_BOOLGADGET` | `$0001` | Intuition toggle-select gadget |
+| `LIST` | 4 | `GTYP_BOOLGADGET` | `$0001` | Runtime-drawn fixed Topaz-8 rows |
+| `BITMAP` | 5 | `GTYP_BOOLGADGET` | `$0001` | Intuition `Image` gadget; no generated event handler |
 
 Coordinate caveats the metadata deliberately hides from the designer:
 
@@ -163,6 +173,16 @@ Coordinate caveats the metadata deliberately hides from the designer:
   offsets so the frame surrounds the text.
 - **Labels:** `X,Y` are passed to `PrintIText()` as the `d0`/`d1` draw offsets; `W,H` are advisory
   and used only by the designer's hit-testing and overlap check.
+- **CheckBoxes:** `CHECKED=0`/`1` supplies the initial state. Intuition owns the selected flag;
+  generated `on_checkbox()` handlers read it with `GuiGetCheckBox()`.
+- **Lists:** `ITEMS64` is a base64-encoded, NUL-separated string list and `SELECTED` is a zero-based initial row.
+  Clicking a visible row changes the selection and emits an event. Lists are intentionally
+  single-select, fixed-row controls: there is no scrolling or multiselect behavior.
+- **Bitmaps:** `ASSET` must name a PNG or BMP. Export requires Pillow, resizes the source to the
+  control's `W,H` using nearest-neighbor sampling, and embeds a monochrome one-bit `Image`:
+  opaque pixels with RGB sum below 384 become foreground pixels; transparent and lighter pixels
+  become background. The exporter generates no bitmap handler; bitmap `GADGETUP` events are
+  ignored by the runtime.
 - **All coordinates are window-relative**, i.e. `(0,0)` is under the drag bar. `WFLG_GIMMEZEROZERO`
   is deliberately not used, so the canvas origin is pre-inset by `(4, 11)`.
 
@@ -182,6 +202,8 @@ IntuiMessage.im_Class    (offset 20)  →  GUI_EVT_* → on_button()/on_string()
 | --- | --- | --- | --- |
 | `BUTTON_CLICK` | `IDCMP_GADGETUP` | `$40` | `proc on_button(id)` |
 | `EDITBOX_CHANGE` | `IDCMP_GADGETUP` on `GTYP_STRGADGET` | `$40` | `proc on_string(id)` |
+| `CHECKBOX_CHANGE` | `IDCMP_GADGETUP` on a checkbox | `$40` | `proc on_checkbox(id)` |
+| `LIST_SELECT` | `IDCMP_GADGETUP` on a list row | `$40` | `proc on_list(id)` |
 | `WINDOW_CLOSE` | `IDCMP_CLOSEWINDOW` | `$200` | `proc on_close()` |
 | *(implicit)* | `IDCMP_VANILLAKEY` | `$200000` | `proc on_key(code)` |
 | *(implicit)* | `IDCMP_REFRESHWINDOW` | `$04` | handled inside `GuiWaitEvent()` |
@@ -211,17 +233,20 @@ In order, for the lifetime of a generated form:
 
 ### 3.5 Memory placement
 
-Everything the generator emits is CPU-accessed only — nothing is DMA'd by the custom chips —
-so it all goes in plain fast RAM:
+Almost everything the generator emits is CPU-accessed only, so it goes in plain fast RAM. The
+one exception is **bitmap pixel data**: `intuition.library/DrawImage` renders a `struct Image`
+through the **blitter**, which can only read **chip RAM**, so the pixel data must be `data_chip`.
 
 | Emitted | Section | Why |
 | --- | --- | --- |
-| Window title, label texts, button captions | `data` | read-only, must outlive the window |
+| Window title, label texts, button/check box captions, list item strings | `data` | read-only, must outlive the window |
+| List pointer tables and `struct Image` headers | inline `asm` after generated procedures | address-bearing static data; CPU-accessed only, never at the code entry point |
+| Bitmap pixel data (`*_image_data`) | `data_chip` | `DrawImage` reads it via the blitter — fast RAM renders as garbage/stripes |
 | `NAME_buf`, `NAME_undo` | `bss` | `si_Buffer`/`si_UndoBuffer` must be **writable** |
 | `Gadget`/`Border`/`IntuiText`/`StringInfo` pools | `bss` (in `lib/gui_intuition.s`) | static, no `AllocMem` |
 
-`data_chip` / `bss_chip` must **not** be used: Intuition renders through the window's `RastPort`
-and manages its own chip memory.
+Only bitmap pixel data uses chip RAM. The `struct Image` header, gadget pools, strings and
+buffers all stay in fast RAM.
 
 ---
 
@@ -231,13 +256,17 @@ and manages its own chip memory.
 
 1. Window at least 90 × 26 (Intuition's floor for a window with system gadgets).
 2. Non-empty window caption.
-3. At most `GUI_MAX_GADGETS` (32) interactive controls and `GUI_MAX_LABELS` (32) labels.
+3. At most `GUI_MAX_GADGETS` (32) gadget controls (Button, EditBox, CheckBox, List, Bitmap) and
+  `GUI_MAX_LABELS` (32) labels.
 4. ActionIDs unique and ≥ 1 (0 is reserved for "no gadget").
 5. Control names unique and valid HAS identifiers (they become assembler symbols).
 6. Every control rectangle inside the client area.
 7. No two controls overlap — Intuition hit-testing takes the first list match, so overlap is
    always a layout bug.
 8. EditBox `maxlen` ≥ 2 and wide enough for one character.
+9. A List has at least one item, its selected row is in range, and it is at least one text row
+  high.
+10. A Bitmap has a PNG or BMP asset path. Export also requires Pillow to read and convert it.
 
 ActionIDs are **never recycled** when a control is deleted, so IDs stay stable across
 regeneration and hand-written handler bodies keep referring to the right widget.

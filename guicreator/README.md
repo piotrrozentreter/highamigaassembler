@@ -1,6 +1,7 @@
 # guicreator
 
-WYSIWYG GUI designer for Amiga forms. Emits **structured metadata**, not an application:
+GUI Creator is the initial foundation for a broader Amiga GUI utility. Today it is a WYSIWYG
+designer for Amiga forms that emits **structured metadata**, not an application:
 
 - `.hasmeta` — layout pseudo-code for the HAS/68000 pipeline (also the project format)
 - `.has` — a compilable `intuition.library` program skeleton with empty event handlers

@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.9.6
+**Version:** 0.9.7
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -385,51 +385,34 @@ details and pin-management internals, see `docs/MUSASHI_RUNTIME_TESTING.md`.
 ## 🏗️ Project Structure
 
 ```
-hasc/                   # Main compiler source code
-├── __init__.py
-├── cli.py             # Command-line interface
-├── parser.py          # Lark-based parser
-├── ast.py             # AST node definitions
-├── validator.py       # Semantic analysis
-├── codegen.py         # Code generation orchestration (~2900 lines)
-├── register_allocator.py  # 68000 register allocation with spilling (~160 lines)
-├── codegen_utils.py   # Code generation utilities (~310 lines)
-├── asm_substitution.py # Assembly placeholder substitution
-├── macro_expander.py   # Macro expansion support
-├── peepholeopt.py     # Peephole optimization passes
-└── reachability.py     # Dead-procedure reachability analysis
+hasc/                       # Compiler package
+├── cli.py                  # Command-line orchestration
+├── parser.py, ast.py       # Lark grammar and typed AST
+├── validator.py            # Two-pass semantic validation
+├── codegen.py              # 68000/68020 assembly generation
+├── codegen_indexed_address.py, indexed_address.py  # Indexed addressing
+├── target.py               # CPU capability definitions
+├── register_allocator.py   # Register allocation and spilling
+├── peepholeopt.py          # Post-generation optimizations
+└── macro_expander.py, reachability.py, asm_substitution.py
 
-vscode-highamigassembler/  # VS Code extension
-├── package.json       # Extension manifest
-├── extension.js       # Extension entry point
-├── language-configuration.json  # Language configuration
-├── syntaxes/          # Syntax highlighting grammar
-├── themes/            # Color themes
-├── icon.png           # Extension marketplace icon
-└── README.md          # Extension documentation
+guicreator/                 # GUI Creator: WYSIWYG Amiga form designer
+├── builder.py              # Tkinter designer
+├── model.py, hasmeta.py    # Layout model and .hasmeta format
+├── has_export.py           # Generated HAS skeleton exporter
+└── examples/               # Sample GUI layouts
 
-examples/              # Example programs and games
-├── *.has              # Basic example programs
-└── games/             # Known semi-projects and game concepts
-    ├── launchers/     # Space shooter concept demo
-    └── robots/        # Robot concept demo
+examples/                   # HAS examples and larger game projects
+├── *.has                   # Standalone language/runtime examples
+└── games/                  # Game concepts and demos
 
-lib/                   # Standard library modules
-scripts/               # Build and utility scripts
-tools/                 # Asset conversion utilities
-├── ham6_gen.py        # HAM6 image generator
-├── sprite_importer.py # Hardware sprite converter
-├── sprite_strip_importer.py # Hardware sprite strip converter
-├── bob_importer.py    # Blitter object converter
-├── bob_strip_importer.py # Blitter object strip converter
-├── tile_importer.py   # Tile graphics converter
-├── frame_merger.py    # Assembly frame file merger
-├── c64_font_converter.py  # C64 font importer
-├── c64_sprites_to_bobs.py # C64 sprite converter
-├── q16_helper.py       # Q16.16 conversion helper utility
-├── texturepacker_atlas_importer.py # TexturePacker atlas importer
-└── iff_importer.py    # IFF format importer
-docs/                  # Additional documentation
+tests/                      # Pytest compiler, runtime, GUI, and tool tests
+lib/                        # Assembly runtime and standard library modules
+include/                    # Shared assembly include files
+scripts/                    # Build, regression, and Musashi runtime scripts
+tools/                      # Asset conversion and assembly-data utilities
+docs/                       # Language, runtime, tool, and contributor documentation
+vscode-highamigassembler/   # VS Code extension (syntax, navigation, themes)
 ```
 
 ## 🎓 Language Basics
@@ -638,7 +621,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.9.6** - Active Development
+**Version 0.9.7** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 
@@ -801,10 +784,11 @@ The `tools/` directory contains Python utilities for converting graphics and ass
   - Example: `python3 tools/create_trackio_adf.py output.adf --asset 1:graphics.bin --asset 2:music.mod`
   - Documentation: [TRACKIO_LIBRARY.md](docs/TRACKIO_LIBRARY.md)
 
-### GUI Design Tools
+### GUI Creator
 
-- **`guicreator/`** - WYSIWYG GUI designer for Amiga forms (Tkinter)
-  - Place Buttons, EditBoxes and Labels on a retro Workbench-style canvas
+- **`guicreator/`** - Initial foundation for a broader Amiga GUI utility; currently a WYSIWYG GUI designer for Amiga forms (Tkinter)
+  - Place Buttons, CheckBoxes, EditBoxes, Labels, Lists, and display-only Bitmaps on a retro Workbench-style canvas
+  - Lists are fixed-row and single-select, without scrolling or multiselect; Bitmap clicks generate no handler
   - Exports `.hasmeta` layout metadata *and* a compilable `intuition.library` `.has` skeleton
   - Re-export preserves handler code between `// USER CODE BEGIN/END` markers
   - Example: `python3 -m guicreator` or `python3 -m guicreator --export-has form.hasmeta -o form.has`

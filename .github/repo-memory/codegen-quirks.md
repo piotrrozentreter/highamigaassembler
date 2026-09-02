@@ -1,4 +1,4 @@
-# hasc/codegen.py quirks and conventions (discovered while implementing Scc/DBcc fast paths)
+﻿# hasc/codegen.py quirks and conventions (discovered while implementing Scc/DBcc fast paths)
 
 > Committed export of the agent's repo memory (`/memories/repo/codegen-quirks.md`). The live memory
 > store is per-machine and not in git, so this file is the only copy that travels between the Linux
@@ -566,6 +566,62 @@
   regenerate byte-identically.
 - Running bare `pytest` from the repo root breaks on the stale `tmp/headwt` git worktree
   (24 collection errors). Use `pytest tests/`.
+
+## GUI widget extension + first real AROS bring-up (2026-09-02)
+- Added CheckBox/List/Bitmap widgets to guicreator + lib/gui_intuition.s. First time the
+  runtime was ever run on an emulator (AROS 68k). Long bring-up; bugs found ONLY at runtime
+  (all assembled/linked clean). Key lessons:
+- **`GuiAddButton` a0-clobber (crash, illegal-address executing string DATA)**: `bsr gui_strlen`
+  leaves the caption pointer in `a0`, then `bsr gui_link_gadget` linked THAT (a data address)
+  as the gadget -> Intuition walked into the data hunk and executed strings. Fix: reload
+  `a0 = &gui_gadgets[d7]` before `gui_link_gadget`. Lesson: any helper that clobbers a0
+  (gui_strlen does) must be followed by an a0 reload before gui_link_gadget. EditBox/CheckBox/
+  List/Bitmap were fine (they don't call gui_strlen); only the button crashed -> single-widget
+  isolation tests (guibutton.has etc.) nailed it fast.
+- **AROS crash requester "Module file Segment N Offset 0xNN" is 0-based over ALL hunks**
+  (code+data+bss in link order). Parse the linked exe with a tiny Python HUNK reader
+  (tmp/hunkdump.py, tmp/hunkreloc.py) to map segment->hunk and disassemble the offset. If the
+  faulting offset is mid-instruction for a code hunk, you're really executing a DATA hunk.
+- **RefreshGList LVO is -432** (not -450, which is ActivateWindow). A subagent gave -450; I
+  applied it without verifying -> regression. ALWAYS verify hand-transcribed intuition LVOs.
+  Other verified intuition LVOs: WindowToFront -312, ActivateWindow -450, DrawImage -114,
+  DrawBorder -108, ActivateGadget -462, AddGList -438, RemoveGList -444.
+- **`GUI_BORDXY_SIZEOF` must be 24, not 20**: each gadget uses two 3-point borders = 12 words
+  = 24 bytes of gui_bordxy; the BSS reserves `ds.w 12*GUI_MAX_GADGETS` (24 B/slot) but the
+  stride constant was 20 -> multi-gadget forms overlapped border coords (diagonal-line garbage
+  on the editbox/2nd+ gadget). Single-gadget forms (guibutton) never hit it.
+- **PrintIText clobbers a0/a1**: `gui_redraw_lists` held the label-pointer table in a1 across
+  the row loop -> rows 2+ drew garbage. Moved it to a4 (a2-a6 preserved by library calls).
+- **List selection stored to the wrong slot**: click handler indexed the word arrays
+  `gui_list_count`/`gui_list_selected` with `slot*4` (extra `add.w d1,d1`) while the redraw read
+  `slot*2` -> selection written where redraw never looked (list at slot 3). Word arrays index
+  `slot*2`, long array `gui_list_labels` indexes `slot*4`. Also removed a leftover write through
+  the now-null `GG_GADGETTEXT` (would fault).
+- **Intuition `struct Image.Depth` is a WORD at offset 8**: generator emitted `dc.b 1,0` ->
+  Depth=256 -> DrawImage walked 256 planes of garbage (striped box). Fix: `dc.w 1`.
+- **DrawImage renders via the BLITTER -> ImageData MUST be chip RAM.** Generated bitmap pixel
+  data was in the code section (fast RAM) -> stripes. Fixed: emit pixels in a `data_chip`
+  section (`SECTION name,DATA_C`); the `struct Image` (inline asm in code) points at the chip
+  label via reloc. The earlier spec note "GUI image data is not DMA'd, keep it fast RAM" was
+  WRONG - corrected in docs. (Struct Image itself can stay fast; only ImageData must be chip.)
+- **On this Workbench palette ANY Intuition highlight renders orange** (GADGHCOMP complement AND
+  GADGHBOX box). For custom-drawn widgets (list rows, checkbox mark) the box also obscured the
+  content. Design: list + checkbox + button all use `GFLG_GADGHNONE` and do their own visuals:
+  list = frame border + inverse-video selected row (JAM2 so re-select clears the old row);
+  checkbox = square border + JAM2 'x'/' ' mark redrawn on every toggle; button = manual
+  raised<->recessed border swap on GADGETDOWN/GADGETUP (needs GACT_IMMEDIATE for the down event)
+  via `gui_button_render`.
+- **Double-draw dots**: after gui_clear_client_area, RefreshGList redraws ALL gadget imagery
+  (borders, text, string frames, images). The old `gui_redraw_buttons` redrew button/checkbox
+  text AGAIN, ~1px off on AROS -> "dots" under letters. Removed gui_redraw_buttons entirely;
+  RefreshGList is the single source for gadget imagery, custom overlays (labels/list rows/
+  checkbox marks) draw on top.
+- **Run generated Intuition programs from a real Shell/Workbench, NOT the boot startup-sequence**
+  - windows opened during early boot don't get input focus and get obscured. Added explicit
+  WindowToFront+ActivateWindow in GuiShow anyway (good practice for any opened window).
+- Isolation-test methodology that worked: build tiny single-feature .has (mintest bare exe,
+  mintestwb + WBStartup, guiempty window-only, guilabel/guibutton one-widget) and bisect on the
+  emulator. Each round-trip localized one bug.
 
 ## SetTextMode graphics.s feature + subagent bug caught (2026-08-21)
 - Added `SetTextMode(mode: int) -> int` to lib/graphics.s (XDEF + `gfx_text_mode` word var

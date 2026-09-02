@@ -46,6 +46,9 @@ class HasEmitter:
         self.buttons = manager.by_kind(ControlType.BUTTON)
         self.editboxes = manager.by_kind(ControlType.EDITBOX)
         self.labels = manager.by_kind(ControlType.LABEL)
+        self.checkboxes = manager.by_kind(ControlType.CHECKBOX)
+        self.lists = manager.by_kind(ControlType.LIST)
+        self.bitmaps = manager.by_kind(ControlType.BITMAP)
 
     # -- public ------------------------------------------------------------
     def render(self) -> str:
@@ -55,6 +58,7 @@ class HasEmitter:
         out += self._code_section()
         out += self._data_section()
         out += self._bss_section()
+        out += self._chip_section()
         return "\n".join(out).rstrip() + "\n"
 
     # -- sections ----------------------------------------------------------
@@ -109,6 +113,10 @@ class HasEmitter:
             "",
             "// ---- widget ActionIDs (mirrored in the .hasmeta layout) ----",
         ]
+        if self.checkboxes:
+            lines.insert(-2, "const GUI_EVT_CHECKBOX = 8;")
+        if self.lists:
+            lines.insert(-2, "const GUI_EVT_LIST     = 9;")
         if self.m.controls:
             width = max(len(c.id_const) for c in self.m.controls)
             for c in self.m.controls:
@@ -146,6 +154,21 @@ class HasEmitter:
         if self.editboxes:
             lines.append("    extern func GuiAddEditBox(id: int, x: int, y: int, w: int, h: int,")
             lines.append("                              buf: int, undo: int, maxlen: int) -> int;")
+        if self.checkboxes:
+            lines.append("    extern func GuiAddCheckBox(id: int, x: int, y: int, w: int, h: int,")
+            lines.append("                               caption: int, checked: int) -> int;")
+            lines.append("    extern func GuiGetCheckBox(id: int) -> int;")
+        if self.lists:
+            lines.append("    extern func GuiAddList(id: int, x: int, y: int, w: int, h: int,")
+            lines.append("                           labels: int, count: int, selected: int) -> int;")
+            lines.append("    extern func GuiGetListSelected(id: int) -> int;")
+        if self.bitmaps:
+            lines.append("    extern func GuiAddBitmap(id: int, x: int, y: int, w: int, h: int,")
+            lines.append("                             image: int) -> int;")
+        for c in self.lists:
+            lines.append(f"    extern var {c.name}_items: int;")
+        for c in self.bitmaps:
+            lines.append(f"    extern var {c.image_symbol}: int;")
         lines += [
             "    extern func GuiShow() -> int;",
             "    extern func GuiCloseWindow() -> void;",
@@ -196,8 +219,13 @@ class HasEmitter:
             lines += self._proc_on_button()
         if self.editboxes:
             lines += self._proc_on_string()
+        if self.checkboxes:
+            lines += self._proc_on_checkbox()
+        if self.lists:
+            lines += self._proc_on_list()
         lines += self._proc_on_key()
         lines += self._proc_on_close()
+        lines += self._asset_asm()
         return lines
 
     def _proc_main(self) -> List[str]:
@@ -256,10 +284,22 @@ class HasEmitter:
                 f"call GuiAddButton({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
                 f"&{c.text_symbol});"
             )
-        return (
+        if c.kind is ControlType.EDITBOX:
+            return (
             f"call GuiAddEditBox({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
             f"&{c.buffer_symbol}, &{c.undo_symbol}, {c.maxlen_const});"
-        )
+            )
+        if c.kind is ControlType.CHECKBOX:
+            return (
+                f"call GuiAddCheckBox({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
+                f"&{c.text_symbol}, {int(c.checked)});"
+            )
+        if c.kind is ControlType.LIST:
+            return (
+                f"call GuiAddList({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
+                f"&{c.name}_items, {len(c.items)}, {c.selected});"
+            )
+        return f"call GuiAddBitmap({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, &{c.image_symbol});"
 
     def _proc_event_loop(self) -> List[str]:
         lines = [
@@ -293,6 +333,20 @@ class HasEmitter:
                 "",
                 "            if (evt == GUI_EVT_STRING) {",
                 "                running = on_string(id);",
+                "            }",
+            ]
+        if self.checkboxes:
+            lines += [
+                "",
+                "            if (evt == GUI_EVT_CHECKBOX) {",
+                "                running = on_checkbox(id);",
+                "            }",
+            ]
+        if self.lists:
+            lines += [
+                "",
+                "            if (evt == GUI_EVT_LIST) {",
+                "                running = on_list(id);",
                 "            }",
             ]
         lines += [
@@ -354,6 +408,40 @@ class HasEmitter:
         lines += ["        return running;", "    }", ""]
         return lines
 
+    def _proc_on_checkbox(self) -> List[str]:
+        lines = [
+            "    proc on_checkbox(id: int) -> int {",
+            "        var running: int = 1;",
+            "        var checked: int;",
+            "",
+        ]
+        for c in self.checkboxes:
+            lines += [
+                f"        if (id == {c.id_const}) {{",
+                f"            checked = GuiGetCheckBox({c.id_const});",
+                self._user_block(f"{c.name}.on_change", 12, f'checkbox "{c.caption}" changed'),
+                "        }",
+                "",
+            ]
+        return lines + ["        return running;", "    }", ""]
+
+    def _proc_on_list(self) -> List[str]:
+        lines = [
+            "    proc on_list(id: int) -> int {",
+            "        var running: int = 1;",
+            "        var selected: int;",
+            "",
+        ]
+        for c in self.lists:
+            lines += [
+                f"        if (id == {c.id_const}) {{",
+                f"            selected = GuiGetListSelected({c.id_const});",
+                self._user_block(f"{c.name}.on_select", 12, f'list "{c.name}" selected a row'),
+                "        }",
+                "",
+            ]
+        return lines + ["        return running;", "    }", ""]
+
     def _proc_on_key(self) -> List[str]:
         return [
             "    // -------------------------------------------------------------------",
@@ -397,8 +485,93 @@ class HasEmitter:
         for c in self.m.controls:
             if c.kind is ControlType.EDITBOX:
                 continue
-            lines.append(f'    {c.text_symbol}.b = "{_has_str(c.caption)}", 0')
+            if c.kind is ControlType.LIST:
+                for index, item in enumerate(c.items):
+                    lines.append(f'    {c.name}_item_{index}.b = "{_has_str(item)}", 0')
+            elif c.kind is ControlType.BITMAP:
+                continue
+            else:
+                lines.append(f'    {c.text_symbol}.b = "{_has_str(c.caption)}", 0')
         lines.append("")
+        return lines
+
+    @staticmethod
+    def _bitmap_words(c: Control) -> List[int]:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise RuntimeError("Bitmap export requires Pillow; install the project requirements.") from exc
+
+        source = Path(c.asset_path)
+        if source.suffix.lower() not in {".png", ".bmp"}:
+            raise ValueError(f"Bitmap '{source}' must be a PNG or BMP file.")
+        with Image.open(source) as image:
+            image = image.convert("RGBA")
+            if image.size != (c.w, c.h):
+                resampling = getattr(Image, "Resampling", Image).NEAREST
+                image = image.resize((c.w, c.h), resampling)
+            pixels = [image.getpixel((x, y)) for y in range(c.h) for x in range(c.w)]
+
+        row_words = (c.w + 15) // 16
+        words: List[int] = []
+        for y in range(c.h):
+            for word_index in range(row_words):
+                word = 0
+                for bit in range(16):
+                    x = word_index * 16 + bit
+                    if x < c.w:
+                        red, green, blue, alpha = pixels[y * c.w + x]
+                        if alpha >= 128 and red + green + blue < 384:
+                            word |= 1 << (15 - bit)
+                words.append(word)
+        return words
+
+    @staticmethod
+    def _bitmap_asm(c: Control) -> List[str]:
+        # Only the struct Image lives here; its ImageData points into chip RAM
+        # (see _chip_section) because DrawImage renders through the blitter.
+        return [
+            f"    {c.image_symbol}:",
+            f"        dc.w 0,0,{c.w},{c.h}",
+            "        dc.w 1",
+            f"        dc.l {c.image_symbol}_data",
+            "        dc.b 1,0",
+            "        dc.l 0",
+            "        even",
+        ]
+
+    def _chip_section(self) -> List[str]:
+        if not self.bitmaps:
+            return []
+        lines = [
+            "// =============================================================================",
+            "// Bitmap pixel data. CHIP RAM: intuition.library/DrawImage renders struct Image",
+            "// through the blitter, which can only read chip memory.",
+            "// =============================================================================",
+            f"data_chip {self.module}_images:",
+        ]
+        for c in self.bitmaps:
+            words = self._bitmap_words(c)
+            values = ", ".join(f"${w:04X}" for w in words)
+            lines.append(f"    {c.image_symbol}_data.w = {values}")
+        lines.append("")
+        return lines
+
+
+    def _asset_asm(self) -> List[str]:
+        if not self.lists and not self.bitmaps:
+            return []
+        lines = [
+            "    // Address-bearing tables and Image structures are emitted after all code.",
+            "    // The program entry is therefore always executable instructions, never data.",
+            "    asm {",
+        ]
+        for c in self.lists:
+            lines.append(f"    {c.name}_items:")
+            lines.append("        dc.l " + ",".join(f"{c.name}_item_{index}" for index in range(len(c.items))))
+        for c in self.bitmaps:
+            lines += self._bitmap_asm(c)
+        lines += ["    }"]
         return lines
 
     def _bss_section(self) -> List[str]:

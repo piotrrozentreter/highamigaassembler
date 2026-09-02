@@ -135,6 +135,9 @@ class GuiCreatorApp(tk.Tk):
             (ControlType.BUTTON, "Add Button"),
             (ControlType.EDITBOX, "Add EditBox"),
             (ControlType.LABEL, "Add Label"),
+            (ControlType.CHECKBOX, "Add CheckBox"),
+            (ControlType.LIST, "Add List"),
+            (ControlType.BITMAP, "Add Bitmap"),
         ):
             ttk.Button(box, text=label, command=lambda k=kind: self.add_control(k)).pack(
                 fill="x", pady=2
@@ -202,7 +205,7 @@ class GuiCreatorApp(tk.Tk):
 
         self.prop_box = ttk.LabelFrame(panel, text="Properties", padding=6)
         self.prop_box.pack(fill="x")
-        self.prop_vars = {k: tk.StringVar() for k in ("name", "caption", "x", "y", "w", "h", "maxlen")}
+        self.prop_vars = {k: tk.StringVar() for k in ("name", "caption", "x", "y", "w", "h", "maxlen", "items", "selected", "asset")}
         self.prop_rows = {}
         for row, (key, label) in enumerate(
             [
@@ -213,6 +216,9 @@ class GuiCreatorApp(tk.Tk):
                 ("w", "Width"),
                 ("h", "Height"),
                 ("maxlen", "MaxLen (+NUL)"),
+                ("items", "List items (|)"),
+                ("selected", "Selected row"),
+                ("asset", "PNG/BMP asset"),
             ]
         ):
             lbl = ttk.Label(self.prop_box, text=label)
@@ -324,6 +330,27 @@ class GuiCreatorApp(tk.Tk):
                 x0 + 2 * z, y0 + 2 * z, x0 + 2 * z + CHAR_W * z // 2, y1 - 2 * z,
                 fill=PEN_BLUE, outline="",
             )
+        elif ctl.kind is ControlType.CHECKBOX:
+            box = min((y1 - y0) - 2 * z, 12 * z)
+            c.create_rectangle(x0, y0, x0 + box, y0 + box, fill=PEN_WHITE, outline=PEN_BLACK)
+            if ctl.checked:
+                c.create_line(x0 + 2 * z, y0 + box // 2, x0 + box // 2, y0 + box - 2 * z, x0 + box - 2 * z, y0 + 2 * z, fill=PEN_BLACK, width=max(1, z))
+            c.create_text(x0 + box + 3 * z, (y0 + y1) // 2, text=ctl.caption, anchor="w", fill=PEN_BLACK, font=self._font())
+        elif ctl.kind is ControlType.LIST:
+            c.create_rectangle(x0, y0, x1, y1, fill=PEN_WHITE, outline=PEN_BLACK)
+            for index, item in enumerate(ctl.items):
+                row_y = y0 + (2 + index * CHAR_H) * z
+                if row_y + CHAR_H * z > y1:
+                    break
+                if index == ctl.selected:
+                    c.create_rectangle(x0 + z, row_y, x1 - z, row_y + CHAR_H * z, fill=PEN_BLUE, outline="")
+                    colour = PEN_WHITE
+                else:
+                    colour = PEN_BLACK
+                c.create_text(x0 + 3 * z, row_y + CHAR_H * z // 2, text=item, anchor="w", fill=colour, font=self._font())
+        elif ctl.kind is ControlType.BITMAP:
+            c.create_rectangle(x0, y0, x1, y1, fill=PEN_WHITE, outline=PEN_BLACK)
+            c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text="BMP", fill=PEN_BLACK, font=self._font())
         else:
             c.create_text(
                 x0, (y0 + y1) // 2, text=ctl.caption, anchor="w",
@@ -404,6 +431,15 @@ class GuiCreatorApp(tk.Tk):
         if self.manager.controls:
             y = min(win.client_bottom - 20, max(c.bottom for c in self.manager.controls) + 6)
         ctl = self.manager.add(kind, x, y)
+        if kind is ControlType.LIST:
+            ctl.items = ["Item 1", "Item 2", "Item 3"]
+        if kind is ControlType.BITMAP:
+            path = filedialog.askopenfilename(title="Select bitmap", filetypes=[("Image", "*.png *.bmp"), ("All files", "*.*")])
+            if not path:
+                self.manager.remove(ctl)
+                self._refresh_all()
+                return
+            ctl.asset_path = path
         self.selected = ctl
         self.status.set(f"Added {kind.value} '{ctl.name}' with ActionID {ctl.action_id}.")
         self._refresh_all()
@@ -495,7 +531,11 @@ class GuiCreatorApp(tk.Tk):
         if not path:
             return
         source = str(self.project_path) if self.project_path else "<unsaved layout>"
-        has_export.save(self.manager, Path(path), meta_source=source)
+        try:
+            has_export.save(self.manager, Path(path), meta_source=source)
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
         self.status.set(f"Exported {path} (existing USER CODE blocks preserved).")
 
     def show_validation(self) -> None:
@@ -563,6 +603,9 @@ class GuiCreatorApp(tk.Tk):
             self.prop_vars["w"].set(str(s.w))
             self.prop_vars["h"].set(str(s.h))
             self.prop_vars["maxlen"].set(str(s.maxlen))
+            self.prop_vars["items"].set("|".join(s.items))
+            self.prop_vars["selected"].set(str(s.selected))
+            self.prop_vars["asset"].set(s.asset_path)
             self.info.set(
                 f"{s.kind.value}  ActionID={s.action_id}\n"
                 f"const {s.id_const} = {s.action_id};\n"
@@ -575,6 +618,10 @@ class GuiCreatorApp(tk.Tk):
         state = "normal" if (s is not None and s.kind is ControlType.EDITBOX) else "disabled"
         for widget in self.prop_rows["maxlen"]:
             widget.configure(state=state)
+        for key, allowed in (("items", ControlType.LIST), ("selected", ControlType.LIST), ("asset", ControlType.BITMAP)):
+            state = "normal" if (s is not None and s.kind is allowed) else "disabled"
+            for widget in self.prop_rows[key]:
+                widget.configure(state=state)
         self._suspend_sync = False
 
     def _apply_props(self) -> None:
@@ -590,6 +637,9 @@ class GuiCreatorApp(tk.Tk):
         s.w = max(1, _int_or(self.prop_vars["w"].get(), s.w))
         s.h = max(1, _int_or(self.prop_vars["h"].get(), s.h))
         s.maxlen = max(2, _int_or(self.prop_vars["maxlen"].get(), s.maxlen))
+        s.items = [item.strip() for item in self.prop_vars["items"].get().split("|") if item.strip()]
+        s.selected = max(0, _int_or(self.prop_vars["selected"].get(), s.selected))
+        s.asset_path = self.prop_vars["asset"].get().strip()
         self._refresh_all()
 
     def _sync_list(self) -> None:
