@@ -1,0 +1,74 @@
+// Bisect widget builders: empty window + ONE button only.
+const WIN_X = 40;
+const WIN_Y = 30;
+const WIN_W = 320;
+const WIN_H = 120;
+const FORM_IDCMP = $0020026C;
+const FORM_FLAGS = $0000100E;
+const GUI_EVT_CLOSE = 1;
+const ID_BTN = 1;
+
+code guibutton:
+
+    extern func WBStartup() -> void;
+    extern func WBExit() -> void;
+    extern func GuiInit() -> int;
+    extern func GuiShutdown() -> void;
+    extern func GuiBeginWindow(title: int, x: int, y: int, w: int, h: int,
+                               idcmp: int, flags: int) -> int;
+    extern func GuiAddButton(id: int, x: int, y: int, w: int, h: int,
+                             caption: int) -> int;
+    extern func GuiShow() -> int;
+    extern func GuiCloseWindow() -> void;
+    extern func GuiWaitEvent() -> int;
+
+    public main;
+
+    asm {
+        jsr WBStartup
+        jsr main
+        jsr WBExit
+        rts
+    }
+
+    proc main() -> int {
+        var status: int;
+        var win: int;
+        var evt: int;
+        var running: int = 1;
+
+        status = GuiInit();
+        if (status != 0) {
+            return -1;
+        }
+
+        status = GuiBeginWindow(&win_title, WIN_X, WIN_Y, WIN_W, WIN_H,
+                                FORM_IDCMP, FORM_FLAGS);
+        if (status != 0) {
+            call GuiShutdown();
+            return -1;
+        }
+
+        call GuiAddButton(ID_BTN, 20, 30, 88, 18, &btn_text);
+
+        win = GuiShow();
+        if (win == 0) {
+            call GuiShutdown();
+            return -1;
+        }
+
+        while (running != 0) {
+            evt = GuiWaitEvent();
+            if (evt == GUI_EVT_CLOSE) {
+                running = 0;
+            }
+        }
+
+        call GuiCloseWindow();
+        call GuiShutdown();
+        return 0;
+    }
+
+data guibutton_strings:
+    win_title.b = "Button", 0
+    btn_text.b = "OK", 0

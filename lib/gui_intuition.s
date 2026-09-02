@@ -508,7 +508,12 @@ GuiAddButton:
 
     ; the StringInfo slot of this index stays unused for bool gadgets
 
-    bsr gui_link_gadget             ; a0 = new tail
+    ; gui_strlen (above) clobbered a0; reload the gadget pointer before linking.
+    move.w d7,d0
+    mulu.w #GG_SIZEOF,d0
+    lea gui_gadgets,a0
+    add.l d0,a0
+    bsr gui_link_gadget             ; a0 = gadget to append
     addq.w #1,gui_ngads
     moveq #0,d0
     bra .gab_done
@@ -897,6 +902,15 @@ GuiShow:
 
     move.w #1,gui_shown
     clr.w gui_building
+
+    ; Bring the freshly opened window to front and give it input focus, so it
+    ; is not left behind an existing screen/window (e.g. a boot Shell).
+    move.l gui_int_base,a6
+    move.l gui_window,a0
+    jsr _LVOWindowToFront(a6)
+    move.l gui_int_base,a6
+    move.l gui_window,a0
+    jsr _LVOActivateWindow(a6)
 
     bsr gui_clear_client_area
 

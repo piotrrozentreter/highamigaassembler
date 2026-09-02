@@ -71,6 +71,8 @@ _LVOAddGList        EQU -438        ; a0=Win, a1=Gad, d0=pos, d1=count, a2=0
 _LVORemoveGList     EQU -444        ; a0=Win, a1=Gad, d0=count
 _LVORefreshGList    EQU -432        ; a0=Gad, a1=Win, a2=0, d0=count
 _LVOActivateGadget  EQU -462        ; a0=Gad, a1=Win, a2=0
+_LVOWindowToFront   EQU -312        ; a0=Win
+_LVOActivateWindow  EQU -450        ; a0=Win
 _LVOModifyIDCMP     EQU -150        ; a0=Win, d0=flags
 _LVOBeginRefresh    EQU -354        ; a0=Win
 _LVOEndRefresh      EQU -366        ; a0=Win, d0=complete

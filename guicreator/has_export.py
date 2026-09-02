@@ -200,7 +200,6 @@ class HasEmitter:
     def _code_section(self) -> List[str]:
         lines = [f"code {self.module}:", ""]
         lines += self._externs()
-        lines += self._asset_asm()
         lines += [
             "    public main;",
             "",
@@ -225,6 +224,7 @@ class HasEmitter:
             lines += self._proc_on_list()
         lines += self._proc_on_key()
         lines += self._proc_on_close()
+        lines += self._asset_asm()
         return lines
 
     def _proc_main(self) -> List[str]:
@@ -543,17 +543,16 @@ class HasEmitter:
         if not self.lists and not self.bitmaps:
             return []
         lines = [
-            "    // Address-bearing tables and Image structures must be assembler data.",
-            "    // The branch keeps this static data out of the execution path.",
+            "    // Address-bearing tables and Image structures are emitted after all code.",
+            "    // The program entry is therefore always executable instructions, never data.",
             "    asm {",
-            f"        bra {self.module}_assets_end",
         ]
         for c in self.lists:
             lines.append(f"    {c.name}_items:")
             lines.append("        dc.l " + ",".join(f"{c.name}_item_{index}" for index in range(len(c.items))))
         for c in self.bitmaps:
             lines += self._bitmap_asm(c)
-        lines += [f"    {self.module}_assets_end:", "    }"]
+        lines += ["    }"]
         return lines
 
     def _bss_section(self) -> List[str]:

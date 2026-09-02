@@ -238,7 +238,7 @@ so it all goes in plain fast RAM:
 | Emitted | Section | Why |
 | --- | --- | --- |
 | Window title, label texts, button/check box captions, list item strings | `data` | read-only, must outlive the window |
-| List pointer tables and embedded monochrome `Image`/bitplane data | guarded inline `asm` in `code` | address-bearing static data; CPU-accessed only |
+| List pointer tables and embedded monochrome `Image`/bitplane data | inline `asm` after generated procedures | address-bearing static data; CPU-accessed only, never at the code entry point |
 | `NAME_buf`, `NAME_undo` | `bss` | `si_Buffer`/`si_UndoBuffer` must be **writable** |
 | `Gadget`/`Border`/`IntuiText`/`StringInfo` pools | `bss` (in `lib/gui_intuition.s`) | static, no `AllocMem` |
 

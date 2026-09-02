@@ -1,0 +1,18 @@
+// Minimal isolation test: bare HAS executable, no libraries, no Workbench
+// startup, no GUI. Same code+data hunk shape as the generated form.
+// If this faults on AROS, the problem is the toolchain/loader, not the GUI code.
+code mintest:
+
+    public main;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        return 0;
+    }
+
+data mintest_strings:
+    msg.b = "Test", 0

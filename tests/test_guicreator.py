@@ -168,6 +168,22 @@ def test_shipped_example_layout_is_valid():
     assert m.validate() == []
 
 
+def test_gui_runtime_uses_the_refresh_glist_lvo():
+    runtime = (ROOT / "lib" / "gui_intuition.i").read_text(encoding="utf-8")
+    assert "_LVORefreshGList    EQU -432" in runtime
+
+
+def test_gui_addbutton_reloads_gadget_pointer_after_strlen():
+    """gui_strlen clobbers a0, so GuiAddButton must reload it before gui_link_gadget
+    or a caption-string pointer gets linked into the gadget list (illegal-address crash)."""
+    runtime = (ROOT / "lib" / "gui_intuition.s").read_text(encoding="utf-8")
+    button = runtime[runtime.index("GuiAddButton:"):runtime.index("GuiAddEditBox:")]
+    strlen_pos = button.index("bsr gui_strlen")
+    link_pos = button.index("bsr gui_link_gadget")
+    between = button[strlen_pos:link_pos]
+    assert "lea gui_gadgets,a0" in between, "a0 must be reloaded between gui_strlen and gui_link_gadget"
+
+
 def test_bitmap_assets_must_exist_and_use_a_supported_format():
     m = MetadataManager()
     m.window.width, m.window.height = 320, 160
@@ -213,6 +229,8 @@ def test_has_emits_new_widget_calls_events_and_bitmap_data(tmp_path):
     assert "GUI_EVT_CHECKBOX = 8" in text and "GUI_EVT_LIST     = 9" in text
     assert "dc.w 0,0,16,8" in text and "dc.w $FFFF" in text
     assert text.index("call GuiAddBitmap") < text.index("win = GuiShow()")
+    assert text.index("jsr WBStartup") < text.index("    bmp_icon_image:")
+    assert "assets_end" not in text
 
 
 def test_has_adds_widgets_before_show():

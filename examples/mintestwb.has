@@ -1,0 +1,24 @@
+// Isolation test 2: bare HAS executable PLUS the Workbench startup handshake
+// (lib/wbstartup.s), still no GUI and no other libraries.
+// Compare against mintest.exe: if mintest runs but this faults, WBStartup is
+// the cause; if both run, the fault is in the GUI runtime path.
+code mintestwb:
+
+    extern func WBStartup() -> void;
+    extern func WBExit() -> void;
+
+    public main;
+
+    asm {
+        jsr WBStartup
+        jsr main
+        jsr WBExit
+        rts
+    }
+
+    proc main() -> int {
+        return 0;
+    }
+
+data mintestwb_strings:
+    msg.b = "Test", 0
