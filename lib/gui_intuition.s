@@ -33,6 +33,9 @@
 ;   GuiAddLabel(id,x,y,text) -> int
 ;   GuiAddButton(id,x,y,w,h,caption) -> int
 ;   GuiAddEditBox(id,x,y,w,h,buf,undo,maxlen) -> int
+;   GuiAddCheckBox(id,x,y,w,h,caption,checked) -> int
+;   GuiAddList(id,x,y,w,h,labels,count,selected) -> int
+;   GuiAddBitmap(id,x,y,w,h,image) -> int
 ;   GuiShow() -> int                     ; Window*, 0 fail, -1 order violation
 ;   GuiCloseWindow() -> void
 ;   GuiWaitEvent() -> int                ; GUI_EVT_*, -1 if not shown
@@ -120,6 +123,14 @@ gui_label_xy:
     ds.w 2*GUI_MAX_LABELS
 gui_label_id:
     ds.w GUI_MAX_LABELS
+gui_widget_kind:
+    ds.w GUI_MAX_GADGETS
+gui_list_labels:
+    ds.l GUI_MAX_GADGETS
+gui_list_count:
+    ds.w GUI_MAX_GADGETS
+gui_list_selected:
+    ds.w GUI_MAX_GADGETS
 
 ; =============================================================================
 ; Code
@@ -133,6 +144,9 @@ gui_label_id:
     XDEF GuiAddLabel
     XDEF GuiAddButton
     XDEF GuiAddEditBox
+    XDEF GuiAddCheckBox
+    XDEF GuiAddList
+    XDEF GuiAddBitmap
     XDEF GuiShow
     XDEF GuiCloseWindow
     XDEF GuiWaitEvent
@@ -140,6 +154,8 @@ gui_label_id:
     XDEF GuiGetEventCode
     XDEF GuiGetEventX
     XDEF GuiGetEventY
+    XDEF GuiGetCheckBox
+    XDEF GuiGetListSelected
     XDEF GuiGetEditText
     XDEF GuiSetEditText
     XDEF GuiSetLabelText
@@ -653,6 +669,195 @@ GuiAddEditBox:
     rts
 
 ; -----------------------------------------------------------------------------
+; GuiAddCheckBox(id,x,y,w,h,caption,checked) -> int
+; A toggle-select bool gadget. Intuition owns the selected flag; GuiGetCheckBox
+; exposes it to generated handlers.
+; -----------------------------------------------------------------------------
+GuiAddCheckBox:
+    link a6,#0
+    movem.l d1-d7/a0-a6,-(sp)
+    move.l a6,a5
+    tst.w gui_building
+    beq .fail
+    move.w gui_ngads,d7
+    cmp.w #GUI_MAX_GADGETS,d7
+    bge .fail
+    bsr gui_slot_ptrs
+    clr.l GG_NEXTGADGET(a0)
+    move.l 12(a5),d0
+    move.w d0,GG_LEFTEDGE(a0)
+    move.l 16(a5),d0
+    move.w d0,GG_TOPEDGE(a0)
+    move.l 20(a5),d0
+    move.w d0,GG_WIDTH(a0)
+    move.l 24(a5),d0
+    move.w d0,GG_HEIGHT(a0)
+    move.w #GFLG_GADGHBOX,GG_FLAGS(a0)
+    tst.l 32(a5)
+    beq .unchecked
+    or.w #GFLG_SELECTED,GG_FLAGS(a0)
+.unchecked:
+    move.w #GACT_RELVERIFY|GACT_TOGGLESELECT,GG_ACTIVATION(a0)
+    move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
+    clr.l GG_GADGETRENDER(a0)
+    clr.l GG_SELECTRENDER(a0)
+    move.l a3,GG_GADGETTEXT(a0)
+    move.b #1,IT_FRONTPEN(a3)
+    clr.b IT_BACKPEN(a3)
+    move.b #JAM1,IT_DRAWMODE(a3)
+    clr.b IT_PAD(a3)
+    move.w #16,IT_LEFTEDGE(a3)
+    move.w #3,IT_TOPEDGE(a3)
+    clr.l IT_ITEXTFONT(a3)
+    move.l 28(a5),IT_ITEXT(a3)
+    clr.l IT_NEXTTEXT(a3)
+    clr.l GG_SPECIALINFO(a0)
+    move.l 8(a5),d0
+    move.w d0,GG_GADGETID(a0)
+    clr.l GG_USERDATA(a0)
+    move.w d7,d0
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    move.w #GUI_WIDGET_CHECKBOX,(a1,d0.w)
+    bsr gui_link_gadget
+    addq.w #1,gui_ngads
+    moveq #0,d0
+    bra .done
+.fail:
+    moveq #-1,d0
+.done:
+    movem.l (sp)+,d1-d7/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; GuiAddList(id,x,y,w,h,labels,count,selected) -> int
+; labels is a table of NUL-terminated string pointers. Rows are Topaz-8 high;
+; scrolling and multi-select are intentionally outside this compact runtime.
+; -----------------------------------------------------------------------------
+GuiAddList:
+    link a6,#0
+    movem.l d1-d7/a0-a6,-(sp)
+    move.l a6,a5
+    tst.w gui_building
+    beq .fail
+    move.w gui_ngads,d7
+    cmp.w #GUI_MAX_GADGETS,d7
+    bge .fail
+    move.l 28(a5),d6
+    beq .fail
+    move.l 32(a5),d5
+    ble .fail
+    move.l 36(a5),d4
+    cmp.l d5,d4
+    bge .fail
+    bsr gui_slot_ptrs
+    clr.l GG_NEXTGADGET(a0)
+    move.l 12(a5),d0
+    move.w d0,GG_LEFTEDGE(a0)
+    move.l 16(a5),d0
+    move.w d0,GG_TOPEDGE(a0)
+    move.l 20(a5),d0
+    move.w d0,GG_WIDTH(a0)
+    move.l 24(a5),d0
+    move.w d0,GG_HEIGHT(a0)
+    move.w #GFLG_GADGHBOX,GG_FLAGS(a0)
+    move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
+    move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
+    clr.l GG_GADGETRENDER(a0)
+    clr.l GG_SELECTRENDER(a0)
+    move.l a3,GG_GADGETTEXT(a0)
+    move.b #1,IT_FRONTPEN(a3)
+    clr.b IT_BACKPEN(a3)
+    move.b #JAM1,IT_DRAWMODE(a3)
+    clr.b IT_PAD(a3)
+    move.w #2,IT_LEFTEDGE(a3)
+    move.w #2,IT_TOPEDGE(a3)
+    clr.l IT_ITEXTFONT(a3)
+    move.w d4,d0
+    lsl.w #2,d0
+    move.l d6,a6
+    move.l (a6,d0.w),IT_ITEXT(a3)
+    clr.l IT_NEXTTEXT(a3)
+    clr.l GG_SPECIALINFO(a0)
+    move.l 8(a5),d0
+    move.w d0,GG_GADGETID(a0)
+    clr.l GG_USERDATA(a0)
+    move.w d7,d0
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    move.w #GUI_WIDGET_LIST,(a1,d0.w)
+    move.w d7,d0
+    lsl.w #2,d0
+    lea gui_list_labels,a1
+    move.l d6,(a1,d0.w)
+    move.w d7,d0
+    add.w d0,d0
+    lea gui_list_count,a1
+    move.w d5,(a1,d0.w)
+    lea gui_list_selected,a1
+    move.w d4,(a1,d0.w)
+    bsr gui_link_gadget
+    addq.w #1,gui_ngads
+    moveq #0,d0
+    bra .done
+.fail:
+    moveq #-1,d0
+.done:
+    movem.l (sp)+,d1-d7/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; GuiAddBitmap(id,x,y,w,h,image) -> int. image is a graphics/Image structure.
+; -----------------------------------------------------------------------------
+GuiAddBitmap:
+    link a6,#0
+    movem.l d1-d7/a0-a6,-(sp)
+    move.l a6,a5
+    tst.w gui_building
+    beq .fail
+    move.w gui_ngads,d7
+    cmp.w #GUI_MAX_GADGETS,d7
+    bge .fail
+    move.l 28(a5),d0
+    beq .fail
+    bsr gui_slot_ptrs
+    clr.l GG_NEXTGADGET(a0)
+    move.l 12(a5),d0
+    move.w d0,GG_LEFTEDGE(a0)
+    move.l 16(a5),d0
+    move.w d0,GG_TOPEDGE(a0)
+    move.l 20(a5),d0
+    move.w d0,GG_WIDTH(a0)
+    move.l 24(a5),d0
+    move.w d0,GG_HEIGHT(a0)
+    move.w #GFLG_GADGIMAGE,GG_FLAGS(a0)
+    move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
+    move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
+    move.l 28(a5),GG_GADGETRENDER(a0)
+    clr.l GG_SELECTRENDER(a0)
+    clr.l GG_GADGETTEXT(a0)
+    clr.l GG_SPECIALINFO(a0)
+    move.l 8(a5),d0
+    move.w d0,GG_GADGETID(a0)
+    clr.l GG_USERDATA(a0)
+    move.w d7,d0
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    move.w #GUI_WIDGET_BITMAP,(a1,d0.w)
+    bsr gui_link_gadget
+    addq.w #1,gui_ngads
+    moveq #0,d0
+    bra .done
+.fail:
+    moveq #-1,d0
+.done:
+    movem.l (sp)+,d1-d7/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
 ; Function: GuiShow
 ; Input: none
 ; Output: d0=Window* on success, 0 if OpenWindow failed, -1 on order violation
@@ -706,6 +911,7 @@ GuiShow:
 
 .gsh_labels:
     bsr gui_redraw_buttons
+    bsr gui_redraw_lists
     bsr gui_redraw_labels
 
     move.l gui_window,d0
@@ -823,10 +1029,49 @@ GuiWaitEvent:
     and.w #GTYP_GTYPEMASK,d0
     cmp.w #GTYP_STRGADGET,d0
     beq .gwe_is_str
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .gwe_none
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    move.w (a1,d0.w),d1
+    cmp.w #GUI_WIDGET_CHECKBOX,d1
+    beq .gwe_is_checkbox
+    cmp.w #GUI_WIDGET_LIST,d1
+    beq .gwe_is_list
+    cmp.w #GUI_WIDGET_BITMAP,d1
+    beq .gwe_none
     moveq #GUI_EVT_BUTTON,d0
     bra .gwe_out
 .gwe_is_str:
     moveq #GUI_EVT_STRING,d0
+    bra .gwe_out
+.gwe_is_checkbox:
+    moveq #GUI_EVT_CHECKBOX,d0
+    bra .gwe_out
+.gwe_is_list:
+    move.w d0,d1
+    move.w gui_evt_my,d0
+    sub.w GG_TOPEDGE(a0),d0
+    subq.w #2,d0
+    bmi .gwe_none
+    lsr.w #3,d0
+    add.w d1,d1
+    lea gui_list_count,a1
+    cmp.w (a1,d1.w),d0
+    bge .gwe_none
+    lea gui_list_selected,a1
+    move.w d0,(a1,d1.w)
+    lsl.w #1,d0
+    move.w d1,d2
+    add.w d2,d2
+    lea gui_list_labels,a1
+    move.l (a1,d2.w),a1
+    move.l GG_GADGETTEXT(a0),a2
+    move.l (a1,d0.w),IT_ITEXT(a2)
+    bsr gui_refresh_gadget
+    bsr gui_redraw_lists
+    moveq #GUI_EVT_LIST,d0
     bra .gwe_out
 
 .gwe_gaddown:
@@ -863,6 +1108,7 @@ GuiWaitEvent:
     jsr _LVORefreshGList(a6)
 .gwer_labels:
     bsr gui_redraw_buttons
+    bsr gui_redraw_lists
     bsr gui_redraw_labels
     move.l gui_int_base,a6
     move.l gui_window,a0
@@ -934,6 +1180,56 @@ GuiGetEventY:
     link a6,#0
     move.w gui_evt_my,d0
     ext.l d0
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; GuiGetCheckBox(id) -> int. Returns 1 if selected, 0 if clear or not found.
+; -----------------------------------------------------------------------------
+GuiGetCheckBox:
+    link a6,#0
+    movem.l d1-d2/a0,-(sp)
+    move.l 8(a6),d0
+    bsr gui_find_gadget
+    move.l a0,d1
+    beq .done
+    bsr gui_get_slot_index
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    cmp.w #GUI_WIDGET_CHECKBOX,(a1,d0.w)
+    bne .done
+    moveq #0,d0
+    btst #7,GG_FLAGS(a0)
+    beq .done
+    moveq #1,d0
+.done:
+    movem.l (sp)+,d1-d2/a0
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; GuiGetListSelected(id) -> int. Returns selected row, or -1 if not a list.
+; -----------------------------------------------------------------------------
+GuiGetListSelected:
+    link a6,#0
+    movem.l d1-d2/a0,-(sp)
+    move.l 8(a6),d0
+    bsr gui_find_gadget
+    move.l a0,d1
+    beq .none
+    bsr gui_get_slot_index
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    cmp.w #GUI_WIDGET_LIST,(a1,d0.w)
+    bne .none
+    lea gui_list_selected,a1
+    move.w (a1,d0.w),d0
+    ext.l d0
+    bra .done
+.none:
+    moveq #-1,d0
+.done:
+    movem.l (sp)+,d1-d2/a0
     unlk a6
     rts
 
@@ -1181,6 +1477,7 @@ GuiRedraw:
 
 .grd_labels:
     bsr gui_redraw_buttons
+    bsr gui_redraw_lists
     bsr gui_redraw_labels
 
 .grd_done:
@@ -1287,6 +1584,24 @@ gui_find_gadget:
     bne .gfg_loop
     sub.l a0,a0
 .gfg_out:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_get_slot_index
+; Input: a0 = pointer within gui_gadgets. Output: d0.w = slot, or -1.
+; -----------------------------------------------------------------------------
+gui_get_slot_index:
+    lea gui_gadgets,a1
+    moveq #0,d0
+.ggsi_loop:
+    cmpa.l a1,a0
+    beq .ggsi_done
+    lea GG_SIZEOF(a1),a1
+    addq.w #1,d0
+    cmp.w gui_ngads,d0
+    blt .ggsi_loop
+    moveq #-1,d0
+.ggsi_done:
     rts
 
 ; -----------------------------------------------------------------------------
@@ -1432,6 +1747,20 @@ gui_redraw_buttons:
     cmp.w #GTYP_BOOLGADGET,d2
     bne .grb_next
 
+    move.l a3,a0
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .grb_next
+    add.w d0,d0
+    lea gui_widget_kind,a0
+    move.w (a0,d0.w),d2
+    cmp.w #GUI_WIDGET_BITMAP,d2
+    beq .grb_next
+    cmp.w #GUI_WIDGET_LIST,d2
+    beq .grb_next
+    cmp.w #GUI_WIDGET_BUTTON,d2
+    bne .grb_text
+
     move.l gui_int_base,a6
     move.l gui_rport,a0
     move.l GG_GADGETRENDER(a3),a1
@@ -1441,9 +1770,13 @@ gui_redraw_buttons:
     ext.l d1
     jsr _LVODrawBorder(a6)
 
+.grb_text:
     move.l gui_int_base,a6
     move.l gui_rport,a0
     move.l GG_GADGETTEXT(a3),a1
+    move.l a1,d0
+    tst.l d0
+    beq .grb_next
     move.w GG_LEFTEDGE(a3),d0
     ext.l d0
     move.w GG_TOPEDGE(a3),d1
@@ -1455,6 +1788,74 @@ gui_redraw_buttons:
     dbra d4,.grb_loop
 
 .grb_done:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_redraw_lists
+; Draws every fixed-height (Topaz-8) list row. The selected row is inverse
+; video; the enclosing GADGHBOX is drawn by Intuition during RefreshGList.
+; -----------------------------------------------------------------------------
+gui_redraw_lists:
+    move.l gui_rport,d0
+    beq .grls_done
+    move.w gui_ngads,d4
+    beq .grls_done
+    subq.w #1,d4
+    lea gui_gadgets,a3
+
+.grls_gadget:
+    move.l a3,a0
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .grls_next
+    move.w d0,d5
+    add.w d0,d0
+    lea gui_widget_kind,a0
+    cmp.w #GUI_WIDGET_LIST,(a0,d0.w)
+    bne .grls_next
+    lea gui_list_count,a0
+    move.w (a0,d0.w),d6
+    beq .grls_next
+    subq.w #1,d6
+    lea gui_list_labels,a1
+    move.w d5,d0
+    lsl.w #2,d0
+    move.l (a1,d0.w),a1
+    lea gui_list_selected,a0
+    move.w d5,d0
+    add.w d0,d0
+    move.w (a0,d0.w),d5
+    moveq #0,d7
+
+.grls_row:
+    move.l GG_GADGETTEXT(a3),a2
+    move.w d7,d0
+    lsl.w #2,d0
+    move.l (a1,d0.w),IT_ITEXT(a2)
+    move.w d7,d0
+    lsl.w #3,d0
+    addq.w #2,d0
+    move.w d0,IT_TOPEDGE(a2)
+    move.b #JAM1,IT_DRAWMODE(a2)
+    cmp.w d5,d7
+    bne .grls_draw
+    or.b #INVERSVID,IT_DRAWMODE(a2)
+.grls_draw:
+    move.l gui_int_base,a6
+    move.l gui_rport,a0
+    move.l a2,a1
+    move.w GG_LEFTEDGE(a3),d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    ext.l d1
+    jsr _LVOPrintIText(a6)
+    addq.w #1,d7
+    dbra d6,.grls_row
+
+.grls_next:
+    lea GG_SIZEOF(a3),a3
+    dbra d4,.grls_gadget
+.grls_done:
     rts
 
 ; -----------------------------------------------------------------------------
@@ -1524,10 +1925,8 @@ gui_do_close_window:
     clr.l gui_rport
     clr.w gui_shown
     clr.w gui_building
-
     move.l ExecBase,a6
     jsr _LVOPermit(a6)
-
 .gdc_done:
     rts
 

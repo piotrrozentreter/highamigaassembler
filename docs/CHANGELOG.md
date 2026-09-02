@@ -4,6 +4,18 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **GUI Creator and `lib/gui_intuition` now support CheckBox, List, and Bitmap widgets.**
+  CheckBoxes are toggle-select Intuition gadgets and generated handlers read their state with
+  `GuiGetCheckBox()`. Lists are fixed Topaz-8 row, single-select controls; a selected row emits
+  `GUI_EVT_LIST` and is available through `GuiGetListSelected()`. They intentionally provide no
+  scrolling or multiselect behavior. Bitmap widgets accept PNG or BMP assets in the designer;
+  export requires Pillow, resizes them to the placed dimensions, and embeds a monochrome one-bit
+  `graphics/Image`. Bitmap clicks are ignored because generated forms create no bitmap handler.
+  The new runtime entry points are
+  `GuiAddCheckBox`, `GuiAddList`, `GuiAddBitmap`, `GuiGetCheckBox`, and `GuiGetListSelected`.
+
 ### Fixed
 
 - **`lib/gui_intuition.s` - Fixed Close Gadget (`IDCMP_CLOSEWINDOW`), window background fill, and 3D widget rendering**:

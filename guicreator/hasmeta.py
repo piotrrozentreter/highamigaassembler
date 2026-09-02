@@ -14,6 +14,7 @@ Layout (spec section 2.1):
 from __future__ import annotations
 
 import re
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -26,7 +27,7 @@ from .model import (
     WindowSpec,
 )
 
-META_VERSION = "2.0"
+META_VERSION = "2.1"
 
 _ATTR_RE = re.compile(
     r'(\w+)\s*=\s*(?:"([^"]*)"|(\$[0-9A-Fa-f]+|-?\d+|[A-Za-z_]\w*))'
@@ -38,7 +39,7 @@ _ADD_CONTROL_RE = re.compile(r"ADD_CONTROL\s*\((.*)\)\s*\}?\s*;?\s*$")
 def _esc(text: str) -> str:
     """Metadata strings are double-quoted; strip the two characters that would
     break either the .hasmeta grammar or the emitted HAS string literal."""
-    return text.replace("\\", "").replace('"', "'")
+    return text.replace('"', "'")
 
 
 def _hex32(value: int) -> str:
@@ -118,12 +119,16 @@ def render(manager: MetadataManager, source_name: str = "form") -> str:
                 f"    HANDLE_ACTION(ID: {c.action_id}, ACTION: BUTTON_CLICK): "
                 f"CALL_FUNCTION(amiga_button_action_{c.action_id});"
             )
-        else:
+        elif c.kind is ControlType.EDITBOX:
             w(
                 f"    HANDLE_ACTION(ID: {c.action_id}, ACTION: EDITBOX_CHANGE): "
                 f"PROCESS_INPUT(memory_offset={c.buffer_symbol}, "
                 f"max_chars={c.maxlen});"
             )
+        elif c.kind is ControlType.CHECKBOX:
+            w(f"    HANDLE_ACTION(ID: {c.action_id}, ACTION: CHECKBOX_CHANGE): CALL_FUNCTION(amiga_checkbox_action_{c.action_id});")
+        elif c.kind is ControlType.LIST:
+            w(f"    HANDLE_ACTION(ID: {c.action_id}, ACTION: LIST_SELECT): CALL_FUNCTION(amiga_list_action_{c.action_id});")
     w("    HANDLE_ACTION(ID: 0, ACTION: WINDOW_CLOSE): CALL_FUNCTION(amiga_window_close);")
     w("END_EVENT_HANDLERS")
     w("")
@@ -140,6 +145,9 @@ def render(manager: MetadataManager, source_name: str = "form") -> str:
     w("    CONTROL_TYPE_LABEL    EQU 0")
     w("    CONTROL_TYPE_BUTTON   EQU 1")
     w("    CONTROL_TYPE_EDITBOX  EQU 2")
+    w("    CONTROL_TYPE_CHECKBOX EQU 3")
+    w("    CONTROL_TYPE_LIST     EQU 4")
+    w("    CONTROL_TYPE_BITMAP   EQU 5")
     w(f"    CONTROL_COUNT         EQU {len(manager.controls)}")
     w("")
     for c in manager.controls:
@@ -165,9 +173,18 @@ def _control_line(c: Control) -> str:
         parts.append(f'TEXT="{_esc(c.caption)}"')
     elif c.kind is ControlType.BUTTON:
         parts.append(f'CAPT="{_esc(c.caption)}"')
-    else:
+    elif c.kind is ControlType.EDITBOX:
         parts.append(f'ITEXT="{_esc(c.caption)}"')
         parts.append(f"MAXLEN={c.maxlen}")
+    elif c.kind is ControlType.CHECKBOX:
+        parts.append(f'CAPT="{_esc(c.caption)}"')
+        parts.append(f"CHECKED={int(c.checked)}")
+    elif c.kind is ControlType.LIST:
+        payload = base64.b64encode("\0".join(c.items).encode("utf-8")).decode("ascii")
+        parts.append(f'ITEMS64="{payload}"')
+        parts.append(f"SELECTED={c.selected}")
+    else:
+        parts.append(f'ASSET="{_esc(c.asset_path)}"')
     return "{CALL_HAS_CMD: ADD_CONTROL(" + ", ".join(parts) + ")}"
 
 
@@ -249,5 +266,19 @@ def _apply_control(manager: MetadataManager, attrs: Dict[str, str]) -> None:
         caption=caption,
         name=attrs.get("NAME") or None,
         maxlen=_as_int(attrs.get("MAXLEN", ""), 32),
+        checked=bool(_as_int(attrs.get("CHECKED", ""), 0)),
+        items=_decode_items(attrs),
+        selected=_as_int(attrs.get("SELECTED", ""), 0),
+        asset_path=attrs.get("ASSET", ""),
         action_id=_as_int(attrs.get("ID", ""), 0) or None,
     )
+
+
+def _decode_items(attrs: Dict[str, str]) -> List[str]:
+    payload = attrs.get("ITEMS64", "")
+    if payload:
+        try:
+            return base64.b64decode(payload.encode("ascii")).decode("utf-8").split("\0")
+        except (UnicodeDecodeError, ValueError):
+            return []
+    return [item for item in attrs.get("ITEMS", "").split("|") if item]

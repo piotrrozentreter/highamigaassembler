@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 # Topaz-8 Workbench border thickness. Matches Window.wd_BorderLeft/Top/Right/Bottom.
@@ -44,15 +45,23 @@ class ControlType(Enum):
     LABEL = "LABEL"
     BUTTON = "BUTTON"
     EDITBOX = "EDITBOX"
+    CHECKBOX = "CHECKBOX"
+    LIST = "LIST"
+    BITMAP = "BITMAP"
 
     @property
     def numeric(self) -> int:
         """Value emitted as CONTROL_TYPE_* in the .hasmeta constants block."""
-        return {"LABEL": 0, "BUTTON": 1, "EDITBOX": 2}[self.value]
+        return {"LABEL": 0, "BUTTON": 1, "EDITBOX": 2, "CHECKBOX": 3, "LIST": 4, "BITMAP": 5}[self.value]
 
     @property
     def interactive(self) -> bool:
         """True when the control produces IDCMP events and needs a handler."""
+        return self not in {ControlType.LABEL, ControlType.BITMAP}
+
+    @property
+    def uses_gadget(self) -> bool:
+        """True when the runtime allocates a Gadget slot for this control."""
         return self is not ControlType.LABEL
 
     @property
@@ -61,6 +70,8 @@ class ControlType(Enum):
         return {
             ControlType.BUTTON: "BUTTON_CLICK",
             ControlType.EDITBOX: "EDITBOX_CHANGE",
+            ControlType.CHECKBOX: "CHECKBOX_CHANGE",
+            ControlType.LIST: "LIST_SELECT",
         }.get(self)
 
 
@@ -77,6 +88,10 @@ class Control:
     h: int
     caption: str = ""
     maxlen: int = 32  # EditBox only; counts the terminating NUL.
+    checked: bool = False
+    items: List[str] = field(default_factory=list)
+    selected: int = 0
+    asset_path: str = ""
 
     @property
     def right(self) -> int:
@@ -97,7 +112,7 @@ class Control:
     # -- derived assembler symbol names -----------------------------------
     @property
     def id_const(self) -> str:
-        stem = {"LABEL": "LBL", "BUTTON": "BTN", "EDITBOX": "EDIT"}[self.kind.value]
+        stem = {"LABEL": "LBL", "BUTTON": "BTN", "EDITBOX": "EDIT", "CHECKBOX": "CHK", "LIST": "LIST", "BITMAP": "BMP"}[self.kind.value]
         upper = self.name.upper()
         # Avoid ID_BTN_BTN_OK when the name already carries the widget prefix.
         if upper.startswith(stem + "_"):
@@ -119,6 +134,10 @@ class Control:
     @property
     def maxlen_const(self) -> str:
         return f"{self.name.upper()}_MAXLEN"
+
+    @property
+    def image_symbol(self) -> str:
+        return f"{self.name}_image"
 
 
 @dataclass
@@ -220,6 +239,10 @@ class MetadataManager:
         caption: Optional[str] = None,
         name: Optional[str] = None,
         maxlen: int = 32,
+        checked: bool = False,
+        items: Optional[List[str]] = None,
+        selected: int = 0,
+        asset_path: str = "",
         action_id: Optional[int] = None,
     ) -> Control:
         """Place a control and allocate its ActionID.
@@ -245,6 +268,10 @@ class MetadataManager:
             h=int(h),
             caption=caption,
             maxlen=int(maxlen),
+            checked=bool(checked),
+            items=list(items or []),
+            selected=int(selected),
+            asset_path=asset_path,
         )
         self.controls.append(control)
         return control
@@ -277,7 +304,7 @@ class MetadataManager:
         if not win.caption.strip():
             problems.append("Window caption is empty.")
 
-        gadgets = [c for c in self.controls if c.kind.interactive]
+        gadgets = [c for c in self.controls if c.kind.uses_gadget]
         labels = self.by_kind(ControlType.LABEL)
         if len(gadgets) > MAX_GADGETS:
             problems.append(
@@ -322,6 +349,23 @@ class MetadataManager:
                     problems.append(f"'{c.name}' maxlen {c.maxlen} leaves no room for text + NUL.")
                 if c.w < CHAR_W + 4:
                     problems.append(f"'{c.name}' is too narrow to show a single character.")
+            if c.kind is ControlType.LIST:
+                if not c.items:
+                    problems.append(f"'{c.name}' must contain at least one item.")
+                if not 0 <= c.selected < len(c.items):
+                    problems.append(f"'{c.name}' selected item must be within its item list.")
+                if c.h < CHAR_H + 4:
+                    problems.append(f"'{c.name}' is too short to show a list row.")
+                elif len(c.items) > (c.h - 4) // CHAR_H:
+                    problems.append(f"'{c.name}' has more items than its fixed-height list can display.")
+            if c.kind is ControlType.BITMAP:
+                asset = Path(c.asset_path)
+                if not c.asset_path:
+                    problems.append(f"'{c.name}' has no PNG or BMP asset path.")
+                elif asset.suffix.lower() not in {".png", ".bmp"}:
+                    problems.append(f"'{c.name}' asset must be a PNG or BMP file.")
+                elif not asset.is_file():
+                    problems.append(f"'{c.name}' asset path does not exist: {c.asset_path}")
 
         for i, a in enumerate(self.controls):
             for b in self.controls[i + 1 :]:
@@ -339,6 +383,9 @@ class MetadataManager:
             ControlType.LABEL: f"Label {n}",
             ControlType.BUTTON: f"Button{n}",
             ControlType.EDITBOX: "",
+            ControlType.CHECKBOX: f"Check {n}",
+            ControlType.LIST: "",
+            ControlType.BITMAP: "",
         }[kind]
 
     @staticmethod
@@ -349,10 +396,16 @@ class MetadataManager:
             return (w or max(CHAR_W, len(caption) * CHAR_W), h or CHAR_H)
         if kind is ControlType.BUTTON:
             return (w or max(56, len(caption) * CHAR_W + 16), h or 18)
+        if kind is ControlType.CHECKBOX:
+            return (w or max(80, len(caption) * CHAR_W + 14), h or 14)
+        if kind is ControlType.LIST:
+            return (w or 160, h or 44)
+        if kind is ControlType.BITMAP:
+            return (w or 32, h or 32)
         return (w or 160, h or 14)
 
     def _unique_name(self, kind: ControlType) -> str:
-        stem = {"LABEL": "lbl", "BUTTON": "btn", "EDITBOX": "edit"}[kind.value]
+        stem = {"LABEL": "lbl", "BUTTON": "btn", "EDITBOX": "edit", "CHECKBOX": "chk", "LIST": "list", "BITMAP": "bmp"}[kind.value]
         taken = {c.name for c in self.controls}
         i = 1
         while f"{stem}_{i}" in taken:

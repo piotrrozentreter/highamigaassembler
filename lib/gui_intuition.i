@@ -282,6 +282,18 @@ GFLG_SELECTED       EQU $0080
 GFLG_DISABLED       EQU $0100
 GFLG_TABCYCLE       EQU $0200       ; V36+
 
+; struct Image - 20 bytes (graphics/gfx.i)
+IMG_LEFTEDGE        EQU 0            ; WORD
+IMG_TOPEDGE         EQU 2            ; WORD
+IMG_WIDTH           EQU 4            ; WORD
+IMG_HEIGHT          EQU 6            ; WORD
+IMG_DEPTH           EQU 8            ; UBYTE
+IMG_IMAGEDATA       EQU 10           ; APTR, word aligned
+IMG_PLANEPICK       EQU 14           ; UBYTE
+IMG_PLANEONOFF      EQU 15           ; UBYTE
+IMG_NEXTIMAGE       EQU 16           ; APTR
+IMG_SIZEOF          EQU 20
+
 ; -----------------------------------------------------------------------------
 ; graphics draw modes
 ; -----------------------------------------------------------------------------
@@ -301,6 +313,13 @@ GUI_EVT_STRING      EQU 4
 GUI_EVT_KEY         EQU 5
 GUI_EVT_MOUSE       EQU 6
 GUI_EVT_REFRESH     EQU 7
+GUI_EVT_CHECKBOX    EQU 8
+GUI_EVT_LIST        EQU 9
+
+GUI_WIDGET_BUTTON   EQU 0
+GUI_WIDGET_CHECKBOX EQU 1
+GUI_WIDGET_LIST     EQU 2
+GUI_WIDGET_BITMAP   EQU 3
 
 ; -----------------------------------------------------------------------------
 ; Static pool sizes (section 4.4)

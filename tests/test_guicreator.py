@@ -122,6 +122,25 @@ def test_hasmeta_round_trips_exactly():
         assert a.maxlen == b.maxlen
 
 
+def test_hasmeta_round_trips_checkbox_list_and_bitmap(tmp_path):
+    from PIL import Image
+
+    asset = tmp_path / "icon.png"
+    Image.new("RGBA", (16, 8), (0, 0, 0, 255)).save(asset)
+    original = MetadataManager()
+    original.window.width, original.window.height = 320, 160
+    original.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
+    original.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy|Mode", "Hard"], selected=1)
+    original.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset))
+
+    reloaded = hasmeta.loads(hasmeta.render(original, "widgets"))
+    assert [(c.kind, c.checked, c.items, c.selected, c.asset_path) for c in reloaded] == [
+        (ControlType.CHECKBOX, True, [], 0, ""),
+        (ControlType.LIST, False, ["Easy|Mode", "Hard"], 1, ""),
+        (ControlType.BITMAP, False, [], 0, str(asset)),
+    ]
+
+
 def test_hasmeta_emits_required_sections():
     text = hasmeta.render(make_form(), "login")
     for token in (
@@ -149,6 +168,14 @@ def test_shipped_example_layout_is_valid():
     assert m.validate() == []
 
 
+def test_bitmap_assets_must_exist_and_use_a_supported_format():
+    m = MetadataManager()
+    m.window.width, m.window.height = 320, 160
+    m.add(ControlType.BITMAP, 12, 22, name="bmp_missing", asset_path="missing.gif")
+    problems = m.validate()
+    assert any("PNG or BMP" in problem for problem in problems)
+
+
 # ---------------------------------------------------------------------------
 # .has emission
 # ---------------------------------------------------------------------------
@@ -168,6 +195,24 @@ def test_has_emits_writable_buffers_for_each_editbox():
     assert "edit_name_buf.b: 32" in text
     assert "edit_name_undo.b: 32" in text, "each string gadget needs its own undo buffer"
     assert "bss_chip" not in text and "data_chip" not in text
+
+
+def test_has_emits_new_widget_calls_events_and_bitmap_data(tmp_path):
+    from PIL import Image
+
+    asset = tmp_path / "icon.bmp"
+    Image.new("RGBA", (16, 8), (0, 0, 0, 255)).save(asset)
+    m = MetadataManager()
+    m.window.width, m.window.height = 320, 160
+    m.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
+    m.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy", "Hard"], selected=1)
+    m.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset))
+
+    text = has_export.render(m, "widgets")
+    assert "GuiAddCheckBox" in text and "GuiAddList" in text and "GuiAddBitmap" in text
+    assert "GUI_EVT_CHECKBOX = 8" in text and "GUI_EVT_LIST     = 9" in text
+    assert "dc.w 0,0,16,8" in text and "dc.w $FFFF" in text
+    assert text.index("call GuiAddBitmap") < text.index("win = GuiShow()")
 
 
 def test_has_adds_widgets_before_show():
@@ -212,6 +257,39 @@ def test_generated_source_compiles(tmp_path, cpu):
     result = subprocess.run(
         [sys.executable, "-m", "hasc.cli", str(src), "--cpu", cpu,
          "-o", str(tmp_path / f"form_{cpu}.s")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("cpu", ["68000", "68020"])
+def test_generated_new_widgets_source_compiles(tmp_path, cpu):
+    from PIL import Image
+
+    asset = tmp_path / "icon.png"
+    Image.new("RGBA", (16, 8), (0, 0, 0, 255)).save(asset)
+    m = MetadataManager()
+    m.window.width, m.window.height = 320, 160
+    m.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
+    m.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy", "Hard"], selected=1)
+    m.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset))
+    src = tmp_path / "widgets.has"
+    has_export.save(m, src)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "hasc.cli", str(src), "--cpu", cpu,
+         "-o", str(tmp_path / f"widgets_{cpu}.s")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assembly = tmp_path / f"widgets_{cpu}.s"
+    result = subprocess.run(
+        ["vasmm68k_mot", f"-m{cpu}", "-Fhunk", "-I", str(ROOT / "lib"),
+         "-o", str(tmp_path / f"widgets_{cpu}.o"), str(assembly)],
         cwd=ROOT,
         capture_output=True,
         text=True,
