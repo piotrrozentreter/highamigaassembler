@@ -4,6 +4,42 @@
 ;
 ; System-friendly Intuition GUI runtime for HAS. All values are taken from
 ; docs/GUI_INTUITION_RUNTIME_SPEC.md sections 2 and 3.
+;
+; -----------------------------------------------------------------------------
+; !!! NDK CROSS-CHECK REQUIRED !!!
+;
+; This file was authored on a Windows host where the NDK 3.2 include tree
+; (NDK3.2/Include/include_i/...) is NOT mounted, so none of the values below
+; could be diffed against the official includes. Before shipping, verify on a
+; machine that has the NDK. Locate it first rather than assuming a path:
+;
+;   NDK=$(dirname "$(find / -name intuition.i -path '*include_i*' 2>/dev/null | head -1)")/..
+;
+; then diff these against the EQUs below:
+;
+;   intuition/intuition.i   : NW_* (NewWindow, 48 bytes)
+;                             GG_* (Gadget, 44 bytes)
+;                             BD_* (Border, 16 bytes)
+;                             IT_* (IntuiText, 20 bytes)
+;                             SI_* (StringInfo, 36 bytes)
+;                             IM_* (IntuiMessage, 52 bytes)
+;                             IDCMP_*, WFLG_*, GTYP_*, GACT_*, GFLG_*
+;   intuition/intuition_lib.i : every _LVOxxx below
+;   graphics/text.i         : JAM1 / JAM2 / COMPLEMENT / INVERSVID
+;   exec/ports.i            : MP_SIGBIT
+;   intuition/screens.i     : WBENCHSCREEN (nw_Type)
+;
+; Check _LVOENDREFRESH (-366) first: a transcription slip there produces a
+; hang at runtime, not an assembler error.
+;
+; Then confirm there is no name collision when the real includes are also on
+; the path:
+;   vasmm68k_mot -m68000 -Fhunk -I lib -I "$NDK" -o /tmp/gi.o lib/gui_intuition.s
+;
+; Delete this whole block once the values are confirmed.
+;
+; The Window tail layout (WD_RPORT 50, WD_BORDERLEFT 54, WD_USERPORT 86) is
+; documented as stable across V33..V40 but should still be confirmed.
 ; =============================================================================
 
     ifnd GUI_INTUITION_I
@@ -123,8 +159,8 @@ BD_XY               EQU 8           ; APTR -> WORD pairs
 BD_NEXTBORDER       EQU 12          ; APTR
 BD_SIZEOF           EQU 16
 
-GUI_BORDER_POINTS   EQU 3           ; 3 points per 3D bevel segment
-GUI_BORDXY_SIZEOF   EQU 24          ; 2 segments * 3 points * 2 words
+GUI_BORDER_POINTS   EQU 5           ; polyline is NOT auto-closed
+GUI_BORDXY_SIZEOF   EQU 20          ; 5 points * 2 words
 
 ; -----------------------------------------------------------------------------
 ; struct IntuiText - 20 bytes

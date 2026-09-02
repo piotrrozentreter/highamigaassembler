@@ -414,7 +414,7 @@ GuiAddButton:
     move.w d4,GG_WIDTH(a0)
     move.w d5,GG_HEIGHT(a0)
     move.w #GFLG_GADGHCOMP,GG_FLAGS(a0)
-    move.w #GACT_RELVERIFY|GACT_IMMEDIATE,GG_ACTIVATION(a0)
+    move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
     move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
     move.l a1,GG_GADGETRENDER(a0)
     clr.l GG_SELECTRENDER(a0)
@@ -1559,17 +1559,19 @@ gui_clear_client_area:
     moveq #0,d0
     jsr _LVOSetAPen(a6)
 
-    ; Compute client rectangle: xmin, ymin, xmax, ymax
+    ; The window RastPort is client-relative without GIMMEZEROZERO.
+    ; Clear from its origin, not from the outer-window border offsets.
     move.l gui_window,a2
     move.l gui_gfx_base,a6
 
-    moveq #0,d0
-    move.b WD_BORDERLEFT(a2),d0     ; d0 = xmin
-    moveq #0,d1
-    move.b WD_BORDERTOP(a2),d1      ; d1 = ymin
+    moveq #0,d0                     ; d0 = xmin
+    moveq #0,d1                     ; d1 = ymin
 
     moveq #0,d2
     move.w WD_WIDTH(a2),d2
+    moveq #0,d4
+    move.b WD_BORDERLEFT(a2),d4
+    sub.w d4,d2
     moveq #0,d4
     move.b WD_BORDERRIGHT(a2),d4
     sub.w d4,d2
@@ -1577,6 +1579,9 @@ gui_clear_client_area:
 
     moveq #0,d3
     move.w WD_HEIGHT(a2),d3
+    moveq #0,d4
+    move.b WD_BORDERTOP(a2),d4
+    sub.w d4,d3
     move.b WD_BORDERBOTTOM(a2),d4
     sub.w d4,d3
     subq.w #1,d3                    ; d3 = ymax

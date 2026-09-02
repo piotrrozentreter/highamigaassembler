@@ -261,7 +261,8 @@ semantics. Instead the designer canvas origin is already inset by
 | 12 / 14 | WORD | `wd_MouseY` / `wd_MouseX` (note the order) |
 | **50** | APTR | **`wd_RPort`** — for `PrintIText` / `DrawBorder` |
 | 54–57 | UBYTE | `wd_BorderLeft` / `Top` / `Right` / `Bottom` |
-| 86 | APTR | `wd_UserPort` — the IDCMP message port |
+| 62 | APTR | `wd_FirstGadget` |
+| **86** | APTR | **`wd_UserPort`** — the IDCMP message port |
 
 ### 3.5 `Gadget` — 44 bytes
 
@@ -500,11 +501,9 @@ which restores registers and returns `d0`.
 
 ## 6. Gotchas — non-negotiable
 
-1. **Copy before reply into a preserved register.** After `ReplyMsg`, the `IntuiMessage` is dead
-   memory owned by Intuition. Reading `im_Code` or `im_IAddress` afterwards works 99 times out of 100
-   and then corrupts a gadget pointer under load. Furthermore, `_LVOReplyMsg` is an Exec call that
-   clobbers scratch registers `d0`/`d1`, so snapshot `im_Class` into a preserved register (e.g. `d4`)
-   before calling `ReplyMsg`.
+1. **Copy before reply.** After `ReplyMsg`, the `IntuiMessage` is dead memory owned by
+   Intuition. Reading `im_Code` or `im_IAddress` afterwards works 99 times out of 100 and then
+   corrupts a gadget pointer under load. This is the single most common failure in this design.
 2. **Reply every message.** No early `return` out of the middle of the loop.
 3. **Drain before closing, and drain *before* `ModifyIDCMP`.** `GuiCloseWindow` must follow the
    RKM `CloseWindowSafely()` order:
@@ -742,9 +741,10 @@ Implemented in [lib/gui_intuition.s](../lib/gui_intuition.s) and
 - [x] `examples/gui_login_form.has` links (`vlink -bamigahunk`, 5984 bytes).
 - [x] Registered in `scripts/build_example.sh` (`LIB_SOURCES` + `ORDERED_LIBS`), so
       `bash scripts/build_example.sh examples/gui_login_form.has` auto-detects it.
-- [x] **Offsets diffed against the NDK include tree** — confirmed against NDK 3.9
-    `Include/include_i`; `_LVOENDREFRESH` is `-366`, and the runtime assembles with
-    both `-I lib` and the NDK include path.
+- [ ] **Offsets diffed against the NDK 3.2 include tree** — blocked: the NDK lives on a Linux
+      path not mounted on the Windows dev box. The cross-check list and a `find`-based locate
+      command are in the header of `lib/gui_intuition.i`. Check `_LVOENDREFRESH` (-366) first:
+      a slip there hangs at runtime instead of failing to assemble.
 - [ ] **Runs under Kickstart 2.0+** — blocked: needs WinUAE/FS-UAE or real hardware. Test
       matrix: Shell *and* Workbench launch; occlude/restore to force `IDCMP_REFRESHWINDOW`;
       type + RETURN in the string gadget; TAB focus cycling; close gadget under
