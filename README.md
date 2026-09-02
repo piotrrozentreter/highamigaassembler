@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.9.6
+**Version:** 0.9.7
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -638,7 +638,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.9.6** - Active Development
+**Version 0.9.7** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 
@@ -801,10 +801,11 @@ The `tools/` directory contains Python utilities for converting graphics and ass
   - Example: `python3 tools/create_trackio_adf.py output.adf --asset 1:graphics.bin --asset 2:music.mod`
   - Documentation: [TRACKIO_LIBRARY.md](docs/TRACKIO_LIBRARY.md)
 
-### GUI Design Tools
+### GUI Creator
 
-- **`guicreator/`** - WYSIWYG GUI designer for Amiga forms (Tkinter)
-  - Place Buttons, EditBoxes and Labels on a retro Workbench-style canvas
+- **`guicreator/`** - Initial foundation for a broader Amiga GUI utility; currently a WYSIWYG GUI designer for Amiga forms (Tkinter)
+  - Place Buttons, CheckBoxes, EditBoxes, Labels, Lists, and display-only Bitmaps on a retro Workbench-style canvas
+  - Lists are fixed-row and single-select, without scrolling or multiselect; Bitmap clicks generate no handler
   - Exports `.hasmeta` layout metadata *and* a compilable `intuition.library` `.has` skeleton
   - Re-export preserves handler code between `// USER CODE BEGIN/END` markers
   - Example: `python3 -m guicreator` or `python3 -m guicreator --export-has form.hasmeta -o form.has`

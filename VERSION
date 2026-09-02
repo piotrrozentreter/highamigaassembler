@@ -1,9 +1,9 @@
 HAS - High Assembler for Motorola 68000 (Amiga)
-Version 0.9.6
+Version 0.9.7
 
 Status: Active Development
 
-Release Date: August 24, 2026
+Release Date: September 2, 2026
 
 Major Features in This Version:
 - Complete 68000 assembly code generation
@@ -27,6 +27,7 @@ Major Features in This Version:
 - Struct pointers with arrow operator (p->field)
 - Native keyword for zero-overhead assembly functions
 - Tile graphics importer tool
+- GUI Creator foundation for Amiga GUI form design
 
 Known Limitations:
 - No floating-point support

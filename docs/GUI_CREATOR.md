@@ -1,7 +1,8 @@
 # GUI Creator
 
-WYSIWYG GUI designer for Amiga forms. It is **not** a standalone application and it produces no
-executable of its own: it is an editor that emits structured metadata for the HAS/68000 pipeline.
+GUI Creator is the initial foundation for a broader Amiga GUI utility. Today it is a WYSIWYG
+designer for Amiga forms. It is **not** a standalone application and produces no executable of
+its own: it is an editor that emits structured metadata for the HAS/68000 pipeline.
 
 - **Tool:** `guicreator/` (Python 3.8+, Tkinter, no extra dependencies)
 - **Layout output:** `.hasmeta` — structured pseudo-code, also the designer's project format

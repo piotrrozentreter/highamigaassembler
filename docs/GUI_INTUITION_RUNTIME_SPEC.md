@@ -382,11 +382,11 @@ No gadget. Store an `IntuiText` plus the draw offsets `(x, y)` and the id. Rende
 
 ### 4.4 Additional widget contracts
 
-`GuiAddCheckBox()` creates a `GTYP_BOOLGADGET` with `GFLG_GADGHBOX` and
+`GuiAddCheckBox()` creates a `GTYP_BOOLGADGET` with `GFLG_GADGHNONE` and
 `GACT_RELVERIFY|GACT_TOGGLESELECT`; its caption starts at `(16,3)`. Intuition maintains
 `GFLG_SELECTED`, which `GuiGetCheckBox()` reads after `GUI_EVT_CHECKBOX`.
 
-`GuiAddList()` creates a `GTYP_BOOLGADGET` with `GFLG_GADGHBOX` and `GACT_RELVERIFY`. It displays
+`GuiAddList()` creates a `GTYP_BOOLGADGET` with `GFLG_GADGHNONE` and `GACT_RELVERIFY`. It displays
 the selected string from its pointer table at `(2,2)`. On `GADGETUP`, the runtime derives a row
 from `(im_MouseY - gg_TopEdge) / 8`; only an in-range row changes selection and yields
 `GUI_EVT_LIST`. It intentionally implements neither scrolling nor multiselect behavior.

@@ -4,6 +4,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-09-02
+
 ### Added
 
 - **GUI Creator and `lib/gui_intuition` now support CheckBox, List, and Bitmap widgets.**
@@ -44,7 +46,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - **Close Button Fix**: In `GuiWaitEvent`, `IM_CLASS` was stored in scratch register `d1` before calling `_LVOReplyMsg(a6)`. Since Exec library routines clobber scratch registers `d0`/`d1`, `_LVOReplyMsg` corrupted `d1`, causing `btst #IDCMPB_CLOSEWINDOW, d1` to check garbage and miss Close Gadget clicks. `IM_CLASS` is now safely snapshotted into preserved register `d4`.
   - **Window and Gadget Initial Rendering Fix**: Corrected the `Window` border offsets used by the client-area fill (`54..57`), fixed the per-widget two-border/coordinate pool strides, then installs and refreshes the built gadget list after clearing the opened window. Boolean gadget Borders are explicitly repainted and static text uses `graphics.library` after that refresh. The renderer now preserves text coordinates and redraw-loop state across graphics-library calls, so GUI Creator forms no longer depend on a later Workbench redraw or corrupt their event loop before it starts.
   - **Window Client Area Background**: Added `gui_clear_client_area` helper that uses `_LVOSetAPen(rp, 0)` and `_LVORectFill` to clear the client-relative rectangle `(0, 0)` to `(client width - 1, client height - 1)` with Pen 0 (Grey). Called automatically during `GuiShow`, `GuiRedraw`, and `IDCMP_REFRESHWINDOW`, eliminating un-cleared screen background / blue canvas bleed.
-  - **Button Event Delivery**: Boolean gadgets now use `GACT_RELVERIFY` only, so a completed click reports `IDCMP_GADGETUP` and is delivered to the generated `on_button()` handler. This matches the GUI Creator event-loop contract.
+  - **Button Event Delivery**: Buttons use `GACT_RELVERIFY|GACT_IMMEDIATE`: the completed click reports `IDCMP_GADGETUP` and is delivered to the generated `on_button()` handler, while `GACT_IMMEDIATE` exposes the press state for rendering. This matches the GUI Creator event-loop contract.
   - **3D Widget Styling**: Upgraded `GuiAddButton` to generate two chained `Border` polylines (Pen 2 White highlight for top/left, Pen 1 Black shadow for bottom/right) for classic Amiga 2.0+ 3D raised buttons with centered text. Upgraded `GuiAddEditBox` to recessed 3D borders (Pen 1 Black top/left shadow, Pen 2 White bottom/right highlight).
   - **Screen Pens**: Updated `GuiBeginWindow` to set `nw_DetailPen = $FF` and `nw_BlockPen = $FF` in `NewWindow`, allowing Intuition to use native screen pens across all Workbench screen color schemes.
 
