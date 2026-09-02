@@ -232,18 +232,20 @@ In order, for the lifetime of a generated form:
 
 ### 3.5 Memory placement
 
-Everything the generator emits is CPU-accessed only — nothing is DMA'd by the custom chips —
-so it all goes in plain fast RAM:
+Almost everything the generator emits is CPU-accessed only, so it goes in plain fast RAM. The
+one exception is **bitmap pixel data**: `intuition.library/DrawImage` renders a `struct Image`
+through the **blitter**, which can only read **chip RAM**, so the pixel data must be `data_chip`.
 
 | Emitted | Section | Why |
 | --- | --- | --- |
 | Window title, label texts, button/check box captions, list item strings | `data` | read-only, must outlive the window |
-| List pointer tables and embedded monochrome `Image`/bitplane data | inline `asm` after generated procedures | address-bearing static data; CPU-accessed only, never at the code entry point |
+| List pointer tables and `struct Image` headers | inline `asm` after generated procedures | address-bearing static data; CPU-accessed only, never at the code entry point |
+| Bitmap pixel data (`*_image_data`) | `data_chip` | `DrawImage` reads it via the blitter — fast RAM renders as garbage/stripes |
 | `NAME_buf`, `NAME_undo` | `bss` | `si_Buffer`/`si_UndoBuffer` must be **writable** |
 | `Gadget`/`Border`/`IntuiText`/`StringInfo` pools | `bss` (in `lib/gui_intuition.s`) | static, no `AllocMem` |
 
-`data_chip` / `bss_chip` must **not** be used: Intuition renders through the window's `RastPort`
-and manages its own chip memory.
+Only bitmap pixel data uses chip RAM. The `struct Image` header, gadget pools, strings and
+buffers all stay in fast RAM.
 
 ---
 

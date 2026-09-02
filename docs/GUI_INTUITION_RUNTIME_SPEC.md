@@ -563,8 +563,8 @@ which restores registers and returns `d0`.
 6. **List order matters twice:** hit-test priority for overlapping gadgets (first match wins)
    and TAB cycle order for `GFLG_TABCYCLE`. Emit in the designer's declared order.
 7. **`si_Buffer` and `si_UndoBuffer` must be writable** — HAS `data`/`bss`, never a shared
-   string literal, never a stack buffer. Plain fast RAM: nothing here is DMA'd by the custom
-   chips, so do **not** use `data_chip`/`bss_chip`.
+   string literal, never a stack buffer. These are CPU-accessed, so fast RAM is correct.
+   (The one thing that must be chip RAM is bitmap pixel data — `DrawImage` blits it.)
 8. **All strings must outlive the window.** Intuition keeps the pointers.
 9. **Refresh is your job for anything you drew yourself.** `SMART_REFRESH` redraws gadgets but
    not `PrintIText` labels. If you request `IDCMP_REFRESHWINDOW` you **must** answer it with

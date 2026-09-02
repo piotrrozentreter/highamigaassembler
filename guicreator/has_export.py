@@ -58,6 +58,7 @@ class HasEmitter:
         out += self._code_section()
         out += self._data_section()
         out += self._bss_section()
+        out += self._chip_section()
         return "\n".join(out).rstrip() + "\n"
 
     # -- sections ----------------------------------------------------------
@@ -495,7 +496,7 @@ class HasEmitter:
         return lines
 
     @staticmethod
-    def _bitmap_asm(c: Control) -> List[str]:
+    def _bitmap_words(c: Control) -> List[int]:
         try:
             from PIL import Image
         except ImportError as exc:
@@ -512,7 +513,7 @@ class HasEmitter:
             pixels = [image.getpixel((x, y)) for y in range(c.h) for x in range(c.w)]
 
         row_words = (c.w + 15) // 16
-        words = []
+        words: List[int] = []
         for y in range(c.h):
             for word_index in range(row_words):
                 word = 0
@@ -523,21 +524,39 @@ class HasEmitter:
                         if alpha >= 128 and red + green + blue < 384:
                             word |= 1 << (15 - bit)
                 words.append(word)
+        return words
 
-        output = [
+    @staticmethod
+    def _bitmap_asm(c: Control) -> List[str]:
+        # Only the struct Image lives here; its ImageData points into chip RAM
+        # (see _chip_section) because DrawImage renders through the blitter.
+        return [
             f"    {c.image_symbol}:",
             f"        dc.w 0,0,{c.w},{c.h}",
-            "        dc.b 1,0",
+            "        dc.w 1",
             f"        dc.l {c.image_symbol}_data",
             "        dc.b 1,0",
             "        dc.l 0",
             "        even",
-            f"    {c.image_symbol}_data:",
         ]
-        for offset in range(0, len(words), 8):
-            output.append("        dc.w " + ",".join(f"${word:04X}" for word in words[offset : offset + 8]))
-        output += ["        even"]
-        return output
+
+    def _chip_section(self) -> List[str]:
+        if not self.bitmaps:
+            return []
+        lines = [
+            "// =============================================================================",
+            "// Bitmap pixel data. CHIP RAM: intuition.library/DrawImage renders struct Image",
+            "// through the blitter, which can only read chip memory.",
+            "// =============================================================================",
+            f"data_chip {self.module}_images:",
+        ]
+        for c in self.bitmaps:
+            words = self._bitmap_words(c)
+            values = ", ".join(f"${w:04X}" for w in words)
+            lines.append(f"    {c.image_symbol}_data.w = {values}")
+        lines.append("")
+        return lines
+
 
     def _asset_asm(self) -> List[str]:
         if not self.lists and not self.bitmaps:

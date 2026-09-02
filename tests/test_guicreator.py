@@ -227,7 +227,10 @@ def test_has_emits_new_widget_calls_events_and_bitmap_data(tmp_path):
     text = has_export.render(m, "widgets")
     assert "GuiAddCheckBox" in text and "GuiAddList" in text and "GuiAddBitmap" in text
     assert "GUI_EVT_CHECKBOX = 8" in text and "GUI_EVT_LIST     = 9" in text
-    assert "dc.w 0,0,16,8" in text and "dc.w $FFFF" in text
+    assert "dc.w 0,0,16,8" in text, "struct Image header"
+    # DrawImage renders through the blitter, so pixel data must be in chip RAM.
+    assert "data_chip widgets_images:" in text
+    assert "bmp_icon_image_data.w = " in text and "$FFFF" in text
     assert text.index("call GuiAddBitmap") < text.index("win = GuiShow()")
     assert text.index("jsr WBStartup") < text.index("    bmp_icon_image:")
     assert "assets_end" not in text

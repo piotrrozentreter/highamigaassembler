@@ -162,7 +162,7 @@ BD_NEXTBORDER       EQU 12          ; APTR
 BD_SIZEOF           EQU 16
 
 GUI_BORDER_POINTS   EQU 5           ; polyline is NOT auto-closed
-GUI_BORDXY_SIZEOF   EQU 20          ; 5 points * 2 words
+GUI_BORDXY_SIZEOF   EQU 24          ; two 3-point borders * 2 words = 12 words
 
 ; -----------------------------------------------------------------------------
 ; struct IntuiText - 20 bytes

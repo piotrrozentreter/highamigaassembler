@@ -65,6 +65,12 @@ gui_int_name:
 gui_gfx_name:
     dc.b "graphics.library",0
     even
+gui_chk_x:
+    dc.b "x",0
+    even
+gui_chk_sp:
+    dc.b " ",0
+    even
 
 gui_int_base:
     dc.l 0                          ; IntuitionBase
@@ -131,6 +137,10 @@ gui_list_count:
     ds.w GUI_MAX_GADGETS
 gui_list_selected:
     ds.w GUI_MAX_GADGETS
+gui_chk_it:
+    ds.b IT_SIZEOF
+gui_list_it:
+    ds.b IT_SIZEOF
 
 ; =============================================================================
 ; Code
@@ -429,8 +439,8 @@ GuiAddButton:
     move.w d0,GG_TOPEDGE(a0)
     move.w d4,GG_WIDTH(a0)
     move.w d5,GG_HEIGHT(a0)
-    move.w #GFLG_GADGHCOMP,GG_FLAGS(a0)
-    move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
+    move.w #GFLG_GADGHNONE,GG_FLAGS(a0)   ; no complement flash (renders orange on the WB palette)
+    move.w #GACT_RELVERIFY|GACT_IMMEDIATE,GG_ACTIVATION(a0)   ; IMMEDIATE gives us GADGETDOWN for the press
     move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
     move.l a1,GG_GADGETRENDER(a0)
     clr.l GG_SELECTRENDER(a0)
@@ -697,15 +707,36 @@ GuiAddCheckBox:
     move.w d0,GG_WIDTH(a0)
     move.l 24(a5),d0
     move.w d0,GG_HEIGHT(a0)
-    move.w #GFLG_GADGHBOX,GG_FLAGS(a0)
+    move.w #GFLG_GADGHNONE,GG_FLAGS(a0)   ; state shown by the drawn check mark, not a box highlight
     tst.l 32(a5)
     beq .unchecked
     or.w #GFLG_SELECTED,GG_FLAGS(a0)
 .unchecked:
     move.w #GACT_RELVERIFY|GACT_TOGGLESELECT,GG_ACTIVATION(a0)
     move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
-    clr.l GG_GADGETRENDER(a0)
+    ; square check-box drawn as the GadgetRender border on the left
+    move.l a1,GG_GADGETRENDER(a0)
     clr.l GG_SELECTRENDER(a0)
+    clr.w BD_LEFTEDGE(a1)
+    clr.w BD_TOPEDGE(a1)
+    move.b #1,BD_FRONTPEN(a1)
+    clr.b BD_BACKPEN(a1)
+    move.b #JAM1,BD_DRAWMODE(a1)
+    move.b #5,BD_COUNT(a1)
+    move.l a2,BD_XY(a1)
+    clr.l BD_NEXTBORDER(a1)
+    move.l 24(a5),d0
+    subq.w #1,d0                    ; d0 = box side (height-1), square
+    clr.w 0(a2)
+    clr.w 2(a2)
+    move.w d0,4(a2)
+    clr.w 6(a2)
+    move.w d0,8(a2)
+    move.w d0,10(a2)
+    clr.w 12(a2)
+    move.w d0,14(a2)
+    clr.w 16(a2)
+    clr.w 18(a2)
     move.l a3,GG_GADGETTEXT(a0)
     move.b #1,IT_FRONTPEN(a3)
     clr.b IT_BACKPEN(a3)
@@ -766,24 +797,35 @@ GuiAddList:
     move.w d0,GG_WIDTH(a0)
     move.l 24(a5),d0
     move.w d0,GG_HEIGHT(a0)
-    move.w #GFLG_GADGHBOX,GG_FLAGS(a0)
+    move.w #GFLG_GADGHNONE,GG_FLAGS(a0)   ; we render the rows ourselves; no box highlight
     move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
     move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
-    clr.l GG_GADGETRENDER(a0)
+    ; rectangle frame around the list as GadgetRender
+    move.l a1,GG_GADGETRENDER(a0)
     clr.l GG_SELECTRENDER(a0)
-    move.l a3,GG_GADGETTEXT(a0)
-    move.b #1,IT_FRONTPEN(a3)
-    clr.b IT_BACKPEN(a3)
-    move.b #JAM1,IT_DRAWMODE(a3)
-    clr.b IT_PAD(a3)
-    move.w #2,IT_LEFTEDGE(a3)
-    move.w #2,IT_TOPEDGE(a3)
-    clr.l IT_ITEXTFONT(a3)
-    move.w d4,d0
-    lsl.w #2,d0
-    move.l d6,a6
-    move.l (a6,d0.w),IT_ITEXT(a3)
-    clr.l IT_NEXTTEXT(a3)
+    clr.w BD_LEFTEDGE(a1)
+    clr.w BD_TOPEDGE(a1)
+    move.b #1,BD_FRONTPEN(a1)
+    clr.b BD_BACKPEN(a1)
+    move.b #JAM1,BD_DRAWMODE(a1)
+    move.b #5,BD_COUNT(a1)
+    move.l a2,BD_XY(a1)
+    clr.l BD_NEXTBORDER(a1)
+    move.l 20(a5),d0
+    subq.w #1,d0                    ; d0 = w-1
+    move.l 24(a5),d1
+    subq.w #1,d1                    ; d1 = h-1
+    clr.w 0(a2)
+    clr.w 2(a2)
+    move.w d0,4(a2)
+    clr.w 6(a2)
+    move.w d0,8(a2)
+    move.w d1,10(a2)
+    clr.w 12(a2)
+    move.w d1,14(a2)
+    clr.w 16(a2)
+    clr.w 18(a2)
+    clr.l GG_GADGETTEXT(a0)         ; rows are drawn by gui_redraw_lists
     clr.l GG_SPECIALINFO(a0)
     move.l 8(a5),d0
     move.w d0,GG_GADGETID(a0)
@@ -924,8 +966,8 @@ GuiShow:
     jsr _LVORefreshGList(a6)
 
 .gsh_labels:
-    bsr gui_redraw_buttons
     bsr gui_redraw_lists
+    bsr gui_redraw_checkboxes
     bsr gui_redraw_labels
 
     move.l gui_window,d0
@@ -1055,35 +1097,31 @@ GuiWaitEvent:
     beq .gwe_is_list
     cmp.w #GUI_WIDGET_BITMAP,d1
     beq .gwe_none
+    move.l d3,a0                     ; button released: pop it back up
+    moveq #0,d1
+    bsr gui_button_render
     moveq #GUI_EVT_BUTTON,d0
     bra .gwe_out
 .gwe_is_str:
     moveq #GUI_EVT_STRING,d0
     bra .gwe_out
 .gwe_is_checkbox:
+    bsr gui_redraw_checkboxes        ; reflect the toggled state immediately
     moveq #GUI_EVT_CHECKBOX,d0
     bra .gwe_out
 .gwe_is_list:
+    ; d0 = slot*2 (word-array index), a0 = list gadget
     move.w d0,d1
     move.w gui_evt_my,d0
     sub.w GG_TOPEDGE(a0),d0
-    subq.w #2,d0
+    subq.w #2,d0                    ; drop the top frame inset
     bmi .gwe_none
-    lsr.w #3,d0
-    add.w d1,d1
+    lsr.w #3,d0                     ; d0 = row (Topaz-8 rows)
     lea gui_list_count,a1
     cmp.w (a1,d1.w),d0
     bge .gwe_none
     lea gui_list_selected,a1
-    move.w d0,(a1,d1.w)
-    lsl.w #1,d0
-    move.w d1,d2
-    add.w d2,d2
-    lea gui_list_labels,a1
-    move.l (a1,d2.w),a1
-    move.l GG_GADGETTEXT(a0),a2
-    move.l (a1,d0.w),IT_ITEXT(a2)
-    bsr gui_refresh_gadget
+    move.w d0,(a1,d1.w)            ; selected[slot] = row (same slot*2 index redraw reads)
     bsr gui_redraw_lists
     moveq #GUI_EVT_LIST,d0
     bra .gwe_out
@@ -1095,6 +1133,9 @@ GuiWaitEvent:
     moveq #0,d0
     move.w GG_GADGETID(a0),d0
     move.l d0,gui_evt_id
+    move.l d3,a0                     ; button pressed: draw it recessed
+    moveq #1,d1
+    bsr gui_button_render
 .gwe_press_out:
     moveq #GUI_EVT_PRESS,d0
     bra .gwe_out
@@ -1121,8 +1162,8 @@ GuiWaitEvent:
     moveq #-1,d0
     jsr _LVORefreshGList(a6)
 .gwer_labels:
-    bsr gui_redraw_buttons
     bsr gui_redraw_lists
+    bsr gui_redraw_checkboxes
     bsr gui_redraw_labels
     move.l gui_int_base,a6
     move.l gui_window,a0
@@ -1490,8 +1531,8 @@ GuiRedraw:
     jsr _LVORefreshGList(a6)
 
 .grd_labels:
-    bsr gui_redraw_buttons
     bsr gui_redraw_lists
+    bsr gui_redraw_checkboxes
     bsr gui_redraw_labels
 
 .grd_done:
@@ -1737,71 +1778,55 @@ gui_redraw_labels:
     rts
 
 ; -----------------------------------------------------------------------------
-; gui_redraw_buttons
-; Input:  none
+; gui_button_render
+; Input:  a0 = gadget, d1 = pressed flag (0 = raised, non-zero = pressed)
 ; Output: none
-; Description: Draws Border and IntuiText imagery for bool gadgets after a
-;              client-area clear. Intuition retains the active gadget list and
-;              handles their selection state and IDCMP events.
-; Clobbers: d0-d3, a0-a3, a6
+; Description: Redraws a button's 3D border either raised (white top-left,
+;              black bottom-right) or recessed (swapped), giving a press
+;              animation without the WB complement colour. No-op unless the
+;              gadget is a GUI_WIDGET_BUTTON.
+; Clobbers: nothing (saves/restores everything).
 ; -----------------------------------------------------------------------------
-gui_redraw_buttons:
-    move.l gui_rport,d0
-    beq .grb_done
-    move.l gui_int_base,d0
-    beq .grb_done
-    move.w gui_ngads,d4
-    beq .grb_done
-    subq.w #1,d4
-    lea gui_gadgets,a3
-
-.grb_loop:
-    move.w GG_GADGETTYPE(a3),d2
-    and.w #GTYP_GTYPEMASK,d2
-    cmp.w #GTYP_BOOLGADGET,d2
-    bne .grb_next
-
-    move.l a3,a0
-    bsr gui_get_slot_index
+gui_button_render:
+    movem.l d0-d7/a0-a6,-(sp)
+    move.l a0,a3                    ; a3 = gadget
+    move.w d1,d5                    ; d5 = pressed flag
+    bsr gui_get_slot_index          ; d0 = slot (a0 still = gadget)
     tst.w d0
-    bmi .grb_next
+    bmi .gbr_done
+    move.w d0,d2                    ; d2 = slot
     add.w d0,d0
-    lea gui_widget_kind,a0
-    move.w (a0,d0.w),d2
-    cmp.w #GUI_WIDGET_BITMAP,d2
-    beq .grb_next
-    cmp.w #GUI_WIDGET_LIST,d2
-    beq .grb_next
-    cmp.w #GUI_WIDGET_BUTTON,d2
-    bne .grb_text
-
+    lea gui_widget_kind,a1
+    cmp.w #GUI_WIDGET_BUTTON,(a1,d0.w)
+    bne .gbr_done
+    move.l gui_rport,d0
+    beq .gbr_done
+    move.l gui_int_base,d0
+    beq .gbr_done
+    move.w d2,d0
+    mulu.w #BD_SIZEOF*2,d0
+    lea gui_borders,a1
+    add.l d0,a1                     ; a1 = border1 (top-left highlight)
+    lea BD_SIZEOF(a1),a2            ; a2 = border2 (bottom-right shadow)
+    tst.w d5
+    beq .gbr_raised
+    move.b #1,BD_FRONTPEN(a1)       ; pressed: top-left black
+    move.b #2,BD_FRONTPEN(a2)       ; bottom-right white
+    bra .gbr_draw
+.gbr_raised:
+    move.b #2,BD_FRONTPEN(a1)       ; raised: top-left white
+    move.b #1,BD_FRONTPEN(a2)       ; bottom-right black
+.gbr_draw:
     move.l gui_int_base,a6
     move.l gui_rport,a0
-    move.l GG_GADGETRENDER(a3),a1
+    ; border1's BD_NEXTBORDER chains to border2, so one DrawBorder draws both
     move.w GG_LEFTEDGE(a3),d0
     ext.l d0
     move.w GG_TOPEDGE(a3),d1
     ext.l d1
     jsr _LVODrawBorder(a6)
-
-.grb_text:
-    move.l gui_int_base,a6
-    move.l gui_rport,a0
-    move.l GG_GADGETTEXT(a3),a1
-    move.l a1,d0
-    tst.l d0
-    beq .grb_next
-    move.w GG_LEFTEDGE(a3),d0
-    ext.l d0
-    move.w GG_TOPEDGE(a3),d1
-    ext.l d1
-    jsr _LVOPrintIText(a6)
-
-.grb_next:
-    lea GG_SIZEOF(a3),a3
-    dbra d4,.grb_loop
-
-.grb_done:
+.gbr_done:
+    movem.l (sp)+,d0-d7/a0-a6
     rts
 
 ; -----------------------------------------------------------------------------
@@ -1834,7 +1859,7 @@ gui_redraw_lists:
     lea gui_list_labels,a1
     move.w d5,d0
     lsl.w #2,d0
-    move.l (a1,d0.w),a1
+    move.l (a1,d0.w),a4             ; a4 = label table (survives PrintIText, unlike a1)
     lea gui_list_selected,a0
     move.w d5,d0
     add.w d0,d0
@@ -1842,15 +1867,21 @@ gui_redraw_lists:
     moveq #0,d7
 
 .grls_row:
-    move.l GG_GADGETTEXT(a3),a2
+    lea gui_list_it,a2
+    move.b #1,IT_FRONTPEN(a2)
+    clr.b IT_BACKPEN(a2)
+    clr.b IT_PAD(a2)
+    move.w #4,IT_LEFTEDGE(a2)      ; inset text from the frame
+    clr.l IT_ITEXTFONT(a2)
+    clr.l IT_NEXTTEXT(a2)
     move.w d7,d0
     lsl.w #2,d0
-    move.l (a1,d0.w),IT_ITEXT(a2)
+    move.l (a4,d0.w),IT_ITEXT(a2)
     move.w d7,d0
     lsl.w #3,d0
     addq.w #2,d0
     move.w d0,IT_TOPEDGE(a2)
-    move.b #JAM1,IT_DRAWMODE(a2)
+    move.b #JAM2,IT_DRAWMODE(a2)   ; JAM2 fills the cell background so re-select clears the old row
     cmp.w d5,d7
     bne .grls_draw
     or.b #INVERSVID,IT_DRAWMODE(a2)
@@ -1870,6 +1901,59 @@ gui_redraw_lists:
     lea GG_SIZEOF(a3),a3
     dbra d4,.grls_gadget
 .grls_done:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_redraw_checkboxes
+; Draws the check mark (JAM2 'x' when selected, ' ' clears it otherwise) inside
+; each check-box's square. Called on show, on refresh, and after every toggle.
+; -----------------------------------------------------------------------------
+gui_redraw_checkboxes:
+    move.l gui_rport,d0
+    beq .grck_done
+    move.l gui_int_base,d0
+    beq .grck_done
+    move.w gui_ngads,d4
+    beq .grck_done
+    subq.w #1,d4
+    lea gui_gadgets,a3
+.grck_loop:
+    move.l a3,a0
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .grck_next
+    add.w d0,d0
+    lea gui_widget_kind,a0
+    cmp.w #GUI_WIDGET_CHECKBOX,(a0,d0.w)
+    bne .grck_next
+    lea gui_chk_it,a2
+    move.b #1,IT_FRONTPEN(a2)
+    clr.b IT_BACKPEN(a2)
+    move.b #JAM2,IT_DRAWMODE(a2)
+    clr.b IT_PAD(a2)
+    move.w #3,IT_LEFTEDGE(a2)
+    move.w #2,IT_TOPEDGE(a2)
+    clr.l IT_ITEXTFONT(a2)
+    lea gui_chk_sp,a0
+    move.w GG_FLAGS(a3),d0
+    and.w #GFLG_SELECTED,d0
+    beq .grck_setit
+    lea gui_chk_x,a0
+.grck_setit:
+    move.l a0,IT_ITEXT(a2)
+    clr.l IT_NEXTTEXT(a2)
+    move.l gui_int_base,a6
+    move.l gui_rport,a0
+    move.l a2,a1
+    move.w GG_LEFTEDGE(a3),d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    ext.l d1
+    jsr _LVOPrintIText(a6)
+.grck_next:
+    lea GG_SIZEOF(a3),a3
+    dbra d4,.grck_loop
+.grck_done:
     rts
 
 ; -----------------------------------------------------------------------------
