@@ -1368,43 +1368,49 @@ class CodeGen:
             # Must evaluate left first and conditionally skip right if possible
             if expr.op == '&&':
                 # Logical AND with short-circuit: if left is false, don't evaluate right
+                # Capture the label id before evaluating either side, since evaluating
+                # them may itself allocate labels and bump self.label_counter.
+                and_label = self.label_counter
+                self.label_counter += 1
                 # Evaluate left into reg_left
                 code += self._emit_expr(expr.left, params, locals_info, reg_left, reg_right, target_type=target_type, frame_reg=frame_reg)
                 # Test if left is zero (false)
                 code.append(f"    tst.l {reg_left}")
-                code.append(f"    beq.s .and_false_{self.label_counter}")
+                code.append(f"    beq.s .and_false_{and_label}")
                 # Left is true, evaluate right into reg_left
                 code += self._emit_expr(expr.right, params, locals_info, reg_left, reg_right, target_type=target_type, frame_reg=frame_reg)
                 # Test if right is zero (false)
                 code.append(f"    tst.l {reg_left}")
-                code.append(f"    beq.s .and_false_{self.label_counter}")
+                code.append(f"    beq.s .and_false_{and_label}")
                 # Both true: result = 1
                 code.append(f"    move.l #1,{reg_left}")
-                code.append(f"    bra.s .and_done_{self.label_counter}")
-                code.append(f".and_false_{self.label_counter}:")
+                code.append(f"    bra.s .and_done_{and_label}")
+                code.append(f".and_false_{and_label}:")
                 code.append(f"    move.l #0,{reg_left}")
-                code.append(f".and_done_{self.label_counter}:")
-                self.label_counter += 1
+                code.append(f".and_done_{and_label}:")
                 return code
             elif expr.op == '||':
                 # Logical OR with short-circuit: if left is true, don't evaluate right
+                # Capture the label id before evaluating either side, since evaluating
+                # them may itself allocate labels and bump self.label_counter.
+                or_label = self.label_counter
+                self.label_counter += 1
                 # Evaluate left into reg_left
                 code += self._emit_expr(expr.left, params, locals_info, reg_left, reg_right, target_type=target_type, frame_reg=frame_reg)
                 # Test if left is non-zero (true)
                 code.append(f"    tst.l {reg_left}")
-                code.append(f"    bne.s .or_true_{self.label_counter}")
+                code.append(f"    bne.s .or_true_{or_label}")
                 # Left is false, evaluate right into reg_left
                 code += self._emit_expr(expr.right, params, locals_info, reg_left, reg_right, target_type=target_type, frame_reg=frame_reg)
                 # Test if right is non-zero (true)
                 code.append(f"    tst.l {reg_left}")
-                code.append(f"    bne.s .or_true_{self.label_counter}")
+                code.append(f"    bne.s .or_true_{or_label}")
                 # Both false: result = 0
                 code.append(f"    move.l #0,{reg_left}")
-                code.append(f"    bra.s .or_done_{self.label_counter}")
-                code.append(f".or_true_{self.label_counter}:")
+                code.append(f"    bra.s .or_done_{or_label}")
+                code.append(f".or_true_{or_label}:")
                 code.append(f"    move.l #1,{reg_left}")
-                code.append(f".or_done_{self.label_counter}:")
-                self.label_counter += 1
+                code.append(f".or_done_{or_label}:")
                 return code
 
             # Evaluate left side into reg_left
@@ -2304,17 +2310,20 @@ class CodeGen:
         # Handle these before general evaluation to avoid evaluating both sides
         if expr.op == '&&':
             # Logical AND: if left is false, skip right and don't branch to true_label
+            # Capture the label id before evaluating either side, since evaluating
+            # them may itself allocate labels and bump self.label_counter.
+            skip_and_label = self.label_counter
+            self.label_counter += 1
             code += self._emit_expr(expr.left, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
             code.append(f"    tst.l d0")
-            code.append(f"    beq .skip_and_{self.label_counter}")  # Left is false -> skip right, don't branch to true
+            code.append(f"    beq .skip_and_{skip_and_label}")  # Left is false -> skip right, don't branch to true
             # Left is true, evaluate right
             code += self._emit_expr(expr.right, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
             code.append(f"    tst.l d0")
-            code.append(f"    beq .skip_and_{self.label_counter}")  # Right is false -> don't branch to true
+            code.append(f"    beq .skip_and_{skip_and_label}")  # Right is false -> don't branch to true
             # Both true -> branch to true_label
             code.append(f"    bra {true_label}")
-            code.append(f".skip_and_{self.label_counter}:")
-            self.label_counter += 1
+            code.append(f".skip_and_{skip_and_label}:")
             return code
         elif expr.op == '||':
             # Logical OR: if left is true, branch to true_label without evaluating right
@@ -2439,15 +2448,16 @@ class CodeGen:
             return code
         elif expr.op == '||':
             # Logical OR: if left is true, skip right evaluation and don't branch to false_label
+            or_skip_label = self.label_counter  # capture before evaluating right (which may bump the counter)
+            self.label_counter += 1
             code += self._emit_expr(expr.left, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
             code.append(f"    tst.l d0")
-            code.append(f"    bne .or_skip_{self.label_counter}")  # Left is true -> skip right, don't jump to false
+            code.append(f"    bne .or_skip_{or_skip_label}")  # Left is true -> skip right, don't jump to false
             # Left is false, evaluate right
             code += self._emit_expr(expr.right, params, locals_info, "d0", "d1", target_type=None, frame_reg=frame_reg)
             code.append(f"    tst.l d0")
             code.append(f"    beq {false_label}")  # Right is also false -> whole expression is false
-            code.append(f".or_skip_{self.label_counter}:")
-            self.label_counter += 1
+            code.append(f".or_skip_{or_skip_label}:")
             return code
 
         # Evaluate left side
