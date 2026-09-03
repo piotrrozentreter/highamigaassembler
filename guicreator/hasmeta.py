@@ -27,7 +27,7 @@ from .model import (
     WindowSpec,
 )
 
-META_VERSION = "2.1"
+META_VERSION = "2.2"
 
 _ATTR_RE = re.compile(
     r'(\w+)\s*=\s*(?:"([^"]*)"|(\$[0-9A-Fa-f]+|-?\d+|[A-Za-z_]\w*))'
@@ -185,6 +185,7 @@ def _control_line(c: Control) -> str:
         parts.append(f"SELECTED={c.selected}")
     else:
         parts.append(f'ASSET="{_esc(c.asset_path)}"')
+        parts.append(f"COLORS={c.bitmap_colors}")
     return "{CALL_HAS_CMD: ADD_CONTROL(" + ", ".join(parts) + ")}"
 
 
@@ -270,6 +271,7 @@ def _apply_control(manager: MetadataManager, attrs: Dict[str, str]) -> None:
         items=_decode_items(attrs),
         selected=_as_int(attrs.get("SELECTED", ""), 0),
         asset_path=attrs.get("ASSET", ""),
+        bitmap_colors=_as_int(attrs.get("COLORS", ""), 2),
         action_id=_as_int(attrs.get("ID", ""), 0) or None,
     )
 

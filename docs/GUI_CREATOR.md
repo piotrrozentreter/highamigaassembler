@@ -53,7 +53,7 @@ vlink -bamigahunk build/gui_login_form.o build/gui_intuition.o build/wbstartup.o
 | Window flags | `WFLG_DRAGBAR` / `DEPTHGADGET` / `CLOSEGADGET` / `ACTIVATE` / `SIZEGADGET` |
 | Canvas | Click to select, drag to move, drag the corner handle to resize, arrows to nudge |
 | TAB order | List order = Intuition gadget list order = hit-test priority and TAB cycle |
-| Properties | Symbol name, caption/text, X/Y/W/H; MaxLen (EditBox); checked state (CheckBox); `|`-separated items and selected row (List); PNG/BMP asset path (Bitmap) |
+| Properties | Symbol name, caption/text, X/Y/W/H; MaxLen (EditBox); checked state (CheckBox); `|`-separated items and selected row (List); PNG/BMP asset path and colour count (Bitmap) |
 | Validation | Live problem list; export warns before writing an invalid layout |
 
 The dashed rectangle on the canvas is the **client area**. Widgets must stay inside it: window
@@ -82,7 +82,7 @@ BEGIN_GUI_LAYOUT
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=BUTTON, ID=3, X=116, Y=64, W=88, H=18, NAME="btn_ok", CAPT="OK")}
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=CHECKBOX, ID=4, X=12, Y=64, W=88, H=14, NAME="chk_remember", CAPT="Remember", CHECKED=1)}
     {CALL_HAS_CMD: ADD_CONTROL(TYPE=LIST, ID=5, X=12, Y=88, W=120, H=28, NAME="list_mode", ITEMS64="RWFzeQBIYXJk", SELECTED=0)}
-    {CALL_HAS_CMD: ADD_CONTROL(TYPE=BITMAP, ID=6, X=160, Y=88, W=32, H=32, NAME="bmp_logo", ASSET="assets/logo.png")}
+    {CALL_HAS_CMD: ADD_CONTROL(TYPE=BITMAP, ID=6, X=160, Y=88, W=32, H=32, NAME="bmp_logo", ASSET="assets/logo.png", COLORS=16)}
 END_GUI_LAYOUT
 
 ; --- EVENT HANDLER DEFINITIONS ---
@@ -178,11 +178,13 @@ Coordinate caveats the metadata deliberately hides from the designer:
 - **Lists:** `ITEMS64` is a base64-encoded, NUL-separated string list and `SELECTED` is a zero-based initial row.
   Clicking a visible row changes the selection and emits an event. Lists are intentionally
   single-select, fixed-row controls: there is no scrolling or multiselect behavior.
-- **Bitmaps:** `ASSET` must name a PNG or BMP. Export requires Pillow, resizes the source to the
-  control's `W,H` using nearest-neighbor sampling, and embeds a monochrome one-bit `Image`:
-  opaque pixels with RGB sum below 384 become foreground pixels; transparent and lighter pixels
-  become background. The exporter generates no bitmap handler; bitmap `GADGETUP` events are
-  ignored by the runtime.
+- **Bitmaps:** `ASSET` must name a PNG or BMP. `COLORS` may be `2`, `8`, `16`, or `32`, mapping
+  to 1, 3, 4, or 5 Intuition `Image` bitplanes. Export requires Pillow, resizes the source to
+  the control's `W,H` using nearest-neighbor sampling, and Floyd-Steinberg dithers it to the
+  selected indexed depth. Transparent pixels become pen 0. The exported `Image` uses Workbench
+  screen pens; it does not install a private palette, so the visible colours depend on the
+  Workbench screen depth and palette. The exporter generates no bitmap handler; bitmap
+  `GADGETUP` events are ignored by the runtime.
 - **All coordinates are window-relative**, i.e. `(0,0)` is under the drag bar. `WFLG_GIMMEZEROZERO`
   is deliberately not used, so the canvas origin is pre-inset by `(4, 11)`.
 

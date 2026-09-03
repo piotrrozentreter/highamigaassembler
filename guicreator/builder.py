@@ -14,6 +14,7 @@ from typing import List, Optional
 
 from . import has_export, hasmeta
 from .model import (
+    BITMAP_COLOR_DEPTHS,
     BORDER_TOP,
     CHAR_H,
     CHAR_W,
@@ -205,7 +206,13 @@ class GuiCreatorApp(tk.Tk):
 
         self.prop_box = ttk.LabelFrame(panel, text="Properties", padding=6)
         self.prop_box.pack(fill="x")
-        self.prop_vars = {k: tk.StringVar() for k in ("name", "caption", "x", "y", "w", "h", "maxlen", "items", "selected", "asset")}
+        self.prop_vars = {
+            k: tk.StringVar()
+            for k in (
+                "name", "caption", "x", "y", "w", "h", "maxlen",
+                "items", "selected", "asset", "bitmap_colors",
+            )
+        }
         self.prop_rows = {}
         for row, (key, label) in enumerate(
             [
@@ -219,11 +226,22 @@ class GuiCreatorApp(tk.Tk):
                 ("items", "List items (|)"),
                 ("selected", "Selected row"),
                 ("asset", "PNG/BMP asset"),
+                ("bitmap_colors", "Bitmap colors"),
             ]
         ):
             lbl = ttk.Label(self.prop_box, text=label)
             lbl.grid(row=row, column=0, sticky="w", pady=1)
-            entry = ttk.Entry(self.prop_box, textvariable=self.prop_vars[key], width=18)
+            if key == "bitmap_colors":
+                entry = ttk.Combobox(
+                    self.prop_box,
+                    textvariable=self.prop_vars[key],
+                    values=[str(value) for value in BITMAP_COLOR_DEPTHS],
+                    width=16,
+                    state="readonly",
+                )
+                entry.bind("<<ComboboxSelected>>", lambda e: self._apply_props())
+            else:
+                entry = ttk.Entry(self.prop_box, textvariable=self.prop_vars[key], width=18)
             entry.grid(row=row, column=1, sticky="ew", pady=1)
             entry.bind("<Return>", lambda e: self._apply_props())
             entry.bind("<FocusOut>", lambda e: self._apply_props())
@@ -606,6 +624,7 @@ class GuiCreatorApp(tk.Tk):
             self.prop_vars["items"].set("|".join(s.items))
             self.prop_vars["selected"].set(str(s.selected))
             self.prop_vars["asset"].set(s.asset_path)
+            self.prop_vars["bitmap_colors"].set(str(s.bitmap_colors))
             self.info.set(
                 f"{s.kind.value}  ActionID={s.action_id}\n"
                 f"const {s.id_const} = {s.action_id};\n"
@@ -618,10 +637,20 @@ class GuiCreatorApp(tk.Tk):
         state = "normal" if (s is not None and s.kind is ControlType.EDITBOX) else "disabled"
         for widget in self.prop_rows["maxlen"]:
             widget.configure(state=state)
-        for key, allowed in (("items", ControlType.LIST), ("selected", ControlType.LIST), ("asset", ControlType.BITMAP)):
-            state = "normal" if (s is not None and s.kind is allowed) else "disabled"
-            for widget in self.prop_rows[key]:
-                widget.configure(state=state)
+        for key, allowed in (
+            ("items", ControlType.LIST),
+            ("selected", ControlType.LIST),
+            ("asset", ControlType.BITMAP),
+            ("bitmap_colors", ControlType.BITMAP),
+        ):
+            enabled = s is not None and s.kind is allowed
+            label, widget = self.prop_rows[key]
+            label.configure(state="normal" if enabled else "disabled")
+            if key == "bitmap_colors" and enabled:
+                widget_state = "readonly"
+            else:
+                widget_state = "normal" if enabled else "disabled"
+            widget.configure(state=widget_state)
         self._suspend_sync = False
 
     def _apply_props(self) -> None:
@@ -640,6 +669,9 @@ class GuiCreatorApp(tk.Tk):
         s.items = [item.strip() for item in self.prop_vars["items"].get().split("|") if item.strip()]
         s.selected = max(0, _int_or(self.prop_vars["selected"].get(), s.selected))
         s.asset_path = self.prop_vars["asset"].get().strip()
+        bitmap_colors = _int_or(self.prop_vars["bitmap_colors"].get(), s.bitmap_colors)
+        if bitmap_colors in BITMAP_COLOR_DEPTHS:
+            s.bitmap_colors = bitmap_colors
         self._refresh_all()
 
     def _sync_list(self) -> None:

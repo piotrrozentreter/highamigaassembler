@@ -393,9 +393,10 @@ from `(im_MouseY - gg_TopEdge) / 8`; only an in-range row changes selection and 
 
 `GuiAddBitmap()` creates a `GTYP_BOOLGADGET` with `GFLG_GADGIMAGE` and places the supplied
 `graphics/Image` in `gg_GadgetRender`. The GUI Creator exporter accepts PNG/BMP source assets and
-embeds a resized monochrome one-bit `Image`; this conversion is a generator limitation, not a
-general colour bitmap API. The generator emits no bitmap handler, and the runtime ignores bitmap
-`GADGETUP` events.
+embeds a resized, Floyd-Steinberg dithered Intuition `Image` at selectable 2, 8, 16, or 32 colour
+depths. These are Workbench screen pen indices, not an embedded palette; the image renders through
+the current Workbench screen colours and depth. The generator emits no bitmap handler, and the
+runtime ignores bitmap `GADGETUP` events.
 
 ### 4.5 Static storage budget
 
