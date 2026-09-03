@@ -131,13 +131,13 @@ def test_hasmeta_round_trips_checkbox_list_and_bitmap(tmp_path):
     original.window.width, original.window.height = 320, 160
     original.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
     original.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy|Mode", "Hard"], selected=1)
-    original.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset))
+    original.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset), bitmap_colors=16)
 
     reloaded = hasmeta.loads(hasmeta.render(original, "widgets"))
-    assert [(c.kind, c.checked, c.items, c.selected, c.asset_path) for c in reloaded] == [
-        (ControlType.CHECKBOX, True, [], 0, ""),
-        (ControlType.LIST, False, ["Easy|Mode", "Hard"], 1, ""),
-        (ControlType.BITMAP, False, [], 0, str(asset)),
+    assert [(c.kind, c.checked, c.items, c.selected, c.asset_path, c.bitmap_colors) for c in reloaded] == [
+        (ControlType.CHECKBOX, True, [], 0, "", 2),
+        (ControlType.LIST, False, ["Easy|Mode", "Hard"], 1, "", 2),
+        (ControlType.BITMAP, False, [], 0, str(asset), 16),
     ]
 
 
@@ -192,6 +192,17 @@ def test_bitmap_assets_must_exist_and_use_a_supported_format():
     assert any("PNG or BMP" in problem for problem in problems)
 
 
+def test_bitmap_color_setting_is_validated(tmp_path):
+    from PIL import Image
+
+    asset = tmp_path / "icon.png"
+    Image.new("RGBA", (16, 1), (0, 0, 0, 255)).save(asset)
+    m = MetadataManager()
+    m.window.width, m.window.height = 320, 160
+    m.add(ControlType.BITMAP, 12, 22, 16, 1, name="bmp_icon", asset_path=str(asset), bitmap_colors=4)
+    assert any("bitmap colors" in problem for problem in m.validate())
+
+
 # ---------------------------------------------------------------------------
 # .has emission
 # ---------------------------------------------------------------------------
@@ -234,6 +245,22 @@ def test_has_emits_new_widget_calls_events_and_bitmap_data(tmp_path):
     assert text.index("call GuiAddBitmap") < text.index("win = GuiShow()")
     assert text.index("jsr WBStartup") < text.index("    bmp_icon_image:")
     assert "assets_end" not in text
+
+
+def test_has_emits_selected_bitmap_depth_and_planepick(tmp_path):
+    from PIL import Image
+
+    asset = tmp_path / "icon.png"
+    Image.new("RGBA", (16, 1), (0, 0, 0, 255)).save(asset)
+    m = MetadataManager()
+    m.window.width, m.window.height = 320, 160
+    m.add(ControlType.BITMAP, 12, 22, 16, 1, name="bmp_icon", asset_path=str(asset), bitmap_colors=32)
+
+    text = has_export.render(m, "bitmap32")
+    assert "dc.w 0,0,16,1\n        dc.w 5" in text
+    assert "dc.b $1F,0" in text
+    words = re.search(r"bmp_icon_image_data\.w = (.*)", text).group(1).split(", ")
+    assert len(words) == 5, "32-colour Image data needs 5 bitplanes"
 
 
 def test_has_adds_widgets_before_show():

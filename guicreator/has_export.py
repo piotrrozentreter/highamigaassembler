@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .model import (
+    BITMAP_COLOR_DEPTHS,
+    DEFAULT_BITMAP_COLORS,
     DEFAULT_IDCMP,
     Control,
     ControlType,
@@ -505,26 +507,51 @@ class HasEmitter:
         source = Path(c.asset_path)
         if source.suffix.lower() not in {".png", ".bmp"}:
             raise ValueError(f"Bitmap '{source}' must be a PNG or BMP file.")
+        colors = (
+            c.bitmap_colors if c.bitmap_colors in BITMAP_COLOR_DEPTHS else DEFAULT_BITMAP_COLORS
+        )
+        depth = BITMAP_COLOR_DEPTHS[colors]
         with Image.open(source) as image:
             image = image.convert("RGBA")
             if image.size != (c.w, c.h):
                 resampling = getattr(Image, "Resampling", Image).NEAREST
                 image = image.resize((c.w, c.h), resampling)
-            pixels = [image.getpixel((x, y)) for y in range(c.h) for x in range(c.w)]
+            alpha = image.getchannel("A")
+            rgb = Image.new("RGB", image.size, (255, 255, 255))
+            rgb.paste(image.convert("RGB"), mask=alpha)
+            dither = getattr(getattr(Image, "Dither", Image), "FLOYDSTEINBERG", 3)
+            method = getattr(getattr(Image, "Quantize", Image), "MEDIANCUT", 0)
+            indexed = rgb.quantize(colors=colors, method=method, dither=dither)
+            raw_indices = _image_pixels(indexed)
+            alpha_values = _image_pixels(alpha)
+            remap = _workbench_pen_remap(
+                indexed.getpalette() or [], raw_indices, alpha_values, colors
+            )
+            pixels = [
+                0 if alpha_value < 128 else remap.get(index, min(index, colors - 1))
+                for index, alpha_value in zip(raw_indices, alpha_values)
+            ]
 
         row_words = (c.w + 15) // 16
         words: List[int] = []
-        for y in range(c.h):
-            for word_index in range(row_words):
-                word = 0
-                for bit in range(16):
-                    x = word_index * 16 + bit
-                    if x < c.w:
-                        red, green, blue, alpha = pixels[y * c.w + x]
-                        if alpha >= 128 and red + green + blue < 384:
+        for plane in range(depth):
+            mask = 1 << plane
+            for y in range(c.h):
+                for word_index in range(row_words):
+                    word = 0
+                    for bit in range(16):
+                        x = word_index * 16 + bit
+                        if x < c.w and pixels[y * c.w + x] & mask:
                             word |= 1 << (15 - bit)
-                words.append(word)
+                    words.append(word)
         return words
+
+    @staticmethod
+    def _bitmap_depth(c: Control) -> int:
+        colors = (
+            c.bitmap_colors if c.bitmap_colors in BITMAP_COLOR_DEPTHS else DEFAULT_BITMAP_COLORS
+        )
+        return BITMAP_COLOR_DEPTHS[colors]
 
     @staticmethod
     def _bitmap_asm(c: Control) -> List[str]:
@@ -533,9 +560,9 @@ class HasEmitter:
         return [
             f"    {c.image_symbol}:",
             f"        dc.w 0,0,{c.w},{c.h}",
-            "        dc.w 1",
+            f"        dc.w {HasEmitter._bitmap_depth(c)}",
             f"        dc.l {c.image_symbol}_data",
-            "        dc.b 1,0",
+            f"        dc.b ${(1 << HasEmitter._bitmap_depth(c)) - 1:02X},0",
             "        dc.l 0",
             "        even",
         ]
@@ -600,6 +627,37 @@ class HasEmitter:
             seed = seed if seed is not None else [f"// TODO: {hint}"]
             body = "\n".join(pad + line for line in seed)
         return f"{pad}// USER CODE BEGIN {key}\n{body.rstrip()}\n{pad}// USER CODE END {key}"
+
+
+def _workbench_pen_remap(
+    palette: List[int], indices: List[int], alpha_values: List[int], colors: int
+) -> Dict[int, int]:
+    used = sorted({index for index, alpha in zip(indices, alpha_values) if alpha >= 128})
+    if not used:
+        return {}
+
+    def brightness(index: int) -> int:
+        offset = index * 3
+        if offset + 2 >= len(palette):
+            return 0
+        red, green, blue = palette[offset], palette[offset + 1], palette[offset + 2]
+        return red * 299 + green * 587 + blue * 114
+
+    ordered = sorted(used, key=brightness, reverse=True)
+    if len(ordered) == 1:
+        pen = 0 if brightness(ordered[0]) >= 384000 else colors - 1
+        return {ordered[0]: pen}
+    return {
+        index: round(rank * (colors - 1) / (len(ordered) - 1))
+        for rank, index in enumerate(ordered)
+    }
+
+
+def _image_pixels(image) -> List[int]:
+    flattened = getattr(image, "get_flattened_data", None)
+    if flattened is not None:
+        return list(flattened())
+    return list(image.getdata())
 
 
 def _has_str(text: str) -> str:

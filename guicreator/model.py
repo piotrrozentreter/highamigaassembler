@@ -32,6 +32,11 @@ MIN_WINDOW_H = 26
 MAX_GADGETS = 32
 MAX_LABELS = 32
 
+# Bitmap widgets emit classic Intuition Image bitplanes. The colour count is
+# the number of Workbench screen pens the generated image can address.
+BITMAP_COLOR_DEPTHS = {2: 1, 8: 3, 16: 4, 32: 5}
+DEFAULT_BITMAP_COLORS = 2
+
 # Topaz-8 cell metrics, used for auto-sizing labels and centring captions.
 CHAR_W = 8
 CHAR_H = 8
@@ -92,6 +97,7 @@ class Control:
     items: List[str] = field(default_factory=list)
     selected: int = 0
     asset_path: str = ""
+    bitmap_colors: int = DEFAULT_BITMAP_COLORS
 
     @property
     def right(self) -> int:
@@ -243,6 +249,7 @@ class MetadataManager:
         items: Optional[List[str]] = None,
         selected: int = 0,
         asset_path: str = "",
+        bitmap_colors: int = DEFAULT_BITMAP_COLORS,
         action_id: Optional[int] = None,
     ) -> Control:
         """Place a control and allocate its ActionID.
@@ -272,6 +279,7 @@ class MetadataManager:
             items=list(items or []),
             selected=int(selected),
             asset_path=asset_path,
+            bitmap_colors=int(bitmap_colors),
         )
         self.controls.append(control)
         return control
@@ -366,6 +374,8 @@ class MetadataManager:
                     problems.append(f"'{c.name}' asset must be a PNG or BMP file.")
                 elif not asset.is_file():
                     problems.append(f"'{c.name}' asset path does not exist: {c.asset_path}")
+                if c.bitmap_colors not in BITMAP_COLOR_DEPTHS:
+                    problems.append(f"'{c.name}' bitmap colors must be 2, 8, 16, or 32.")
 
         for i, a in enumerate(self.controls):
             for b in self.controls[i + 1 :]:

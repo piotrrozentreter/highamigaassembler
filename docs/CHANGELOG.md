@@ -6,6 +6,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **GUI Creator bitmap colour-depth setting:** Bitmap widgets now store a `COLORS` value in
+  `.hasmeta` and the designer exposes 2, 8, 16, and 32 colour choices. Export uses Pillow
+  Floyd-Steinberg dithering and emits 1, 3, 4, or 5 bitplane Intuition `Image` data in chip RAM.
+  The generated image renders on Workbench using the current screen pens; it does not install a
+  private bitmap palette.
+
 - **Bounds-safe planar drawing primitives in `lib/graphics.s`:** `POINT` and `PLOT` alias
   `SetPixel(x, y, color)`; `LINE(x0, y0, x1, y1, color)` draws Bresenham lines;
   `RECTANGLE(x, y, width, height, color)` draws outline rectangles; and
