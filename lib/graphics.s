@@ -48,6 +48,11 @@ WAITBLIT:MACRO
     XDEF SwapScreen
     XDEF ClearScreen
     XDEF SetPixel
+    XDEF POINT
+    XDEF PLOT
+    XDEF LINE
+    XDEF RECTANGLE
+    XDEF CIRCLE
     XDEF SetFont
     XDEF SetTextMode
     XDEF Print
@@ -90,6 +95,299 @@ SetGraphicsMode:
 ; -----------------------------------------------------------------------------
 SetPixel:
     jmp _SetPixel
+
+; -----------------------------------------------------------------------------
+; Function: POINT / PLOT
+; Input: 8(a6)=x, 12(a6)=y, 16(a6)=color
+; Output: d0=0 on success, -1 when the pixel is outside an active mode 0/1 screen
+; Description: Public aliases for the bounds-checked pixel plotting implementation.
+; -----------------------------------------------------------------------------
+POINT:
+PLOT:
+    jmp _SetPixel
+
+; -----------------------------------------------------------------------------
+; Function: LINE
+; Input: 8(a6)=x0, 12(a6)=y0, 16(a6)=x1, 20(a6)=y1, 24(a6)=color
+; Output: d0=0
+; Description: Draws a Bresenham line. Pixels outside the active screen are clipped.
+; -----------------------------------------------------------------------------
+LINE:
+    link a6,#-16
+    movem.l d1-d7/a0-a5,-(sp)
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l 16(a6),d3
+    move.l 20(a6),d4
+    move.l 24(a6),d5
+    move.l d5,d0
+    bsr _gfx_can_plot
+    tst.l d0
+    bmi .line_error
+
+    move.l d3,d6
+    sub.l d1,d6
+    bpl.s .line_dx_ready
+    neg.l d6
+.line_dx_ready:
+    move.l d6,-4(a6)
+    cmp.l d1,d3
+    blt.s .line_sx_negative
+    move.l #1,-12(a6)
+    bra.s .line_sx_ready
+.line_sx_negative:
+    move.l #-1,-12(a6)
+.line_sx_ready:
+
+    move.l d4,d6
+    sub.l d2,d6
+    bpl.s .line_dy_ready
+    neg.l d6
+.line_dy_ready:
+    neg.l d6
+    move.l d6,-8(a6)
+    cmp.l d2,d4
+    blt.s .line_sy_negative
+    move.l #1,-16(a6)
+    bra.s .line_sy_ready
+.line_sy_negative:
+    move.l #-1,-16(a6)
+.line_sy_ready:
+    move.l -4(a6),d7
+    add.l -8(a6),d7
+.line_loop:
+    move.l d5,-(sp)
+    move.l d2,-(sp)
+    move.l d1,-(sp)
+    jsr PLOT
+    lea 12(sp),sp
+    cmp.l d3,d1
+    bne.s .line_step
+    cmp.l d4,d2
+    beq.s .line_done
+.line_step:
+    move.l d7,d6
+    add.l d6,d6
+    cmp.l -8(a6),d6
+    blt.s .line_skip_x
+    add.l -8(a6),d7
+    add.l -12(a6),d1
+.line_skip_x:
+    cmp.l -4(a6),d6
+    bgt.s .line_skip_y
+    add.l -4(a6),d7
+    add.l -16(a6),d2
+.line_skip_y:
+    bra.s .line_loop
+.line_done:
+    moveq #0,d0
+    bra.s .line_exit
+.line_error:
+    moveq #-1,d0
+.line_exit:
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: RECTANGLE
+; Input: 8(a6)=x, 12(a6)=y, 16(a6)=width, 20(a6)=height, 24(a6)=color
+; Output: d0=0 on success, -1 for a non-positive width or height
+; Description: Draws an outline rectangle. Pixels outside the active screen are clipped.
+; -----------------------------------------------------------------------------
+RECTANGLE:
+    link a6,#0
+    movem.l d1-d7/a0-a5,-(sp)
+    move.l 16(a6),d0
+    ble .rectangle_error
+    move.l 20(a6),d0
+    ble .rectangle_error
+    move.l 24(a6),d0
+    bsr _gfx_can_plot
+    tst.l d0
+    bmi .rectangle_error
+
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l 16(a6),d3
+    subq.l #1,d3
+    add.l d1,d3
+    move.l 20(a6),d4
+    subq.l #1,d4
+    add.l d2,d4
+
+    move.l 24(a6),-(sp)
+    move.l d2,-(sp)
+    move.l d3,-(sp)
+    move.l d2,-(sp)
+    move.l d1,-(sp)
+    jsr LINE
+    lea 20(sp),sp
+
+    move.l 24(a6),-(sp)
+    move.l d4,-(sp)
+    move.l d3,-(sp)
+    move.l d4,-(sp)
+    move.l d1,-(sp)
+    jsr LINE
+    lea 20(sp),sp
+
+    move.l 24(a6),-(sp)
+    move.l d4,-(sp)
+    move.l d1,-(sp)
+    move.l d2,-(sp)
+    move.l d1,-(sp)
+    jsr LINE
+    lea 20(sp),sp
+
+    move.l 24(a6),-(sp)
+    move.l d4,-(sp)
+    move.l d3,-(sp)
+    move.l d2,-(sp)
+    move.l d3,-(sp)
+    jsr LINE
+    lea 20(sp),sp
+    moveq #0,d0
+    bra.s .rectangle_done
+.rectangle_error:
+    moveq #-1,d0
+.rectangle_done:
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: CIRCLE
+; Input: 8(a6)=cx, 12(a6)=cy, 16(a6)=radius, 20(a6)=color
+; Output: d0=0 on success, -1 for a negative radius
+; Description: Draws an outline circle with the midpoint circle algorithm.
+;              Pixels outside the active screen are clipped.
+; -----------------------------------------------------------------------------
+CIRCLE:
+    link a6,#0
+    movem.l d1-d7/a0-a5,-(sp)
+    move.l 8(a6),d1
+    move.l 12(a6),d2
+    move.l 16(a6),d3
+    move.l 20(a6),d4
+    move.l d4,d0
+    bsr _gfx_can_plot
+    tst.l d0
+    bmi.s .circle_error
+    tst.l d3
+    blt.s .circle_error
+    move.l d3,d5
+    moveq #0,d6
+    moveq #1,d7
+    sub.l d3,d7
+.circle_loop:
+    bsr.s _gfx_circle_points
+    addq.l #1,d6
+    tst.l d7
+    bge.s .circle_keep_x
+    move.l d6,d0
+    add.l d6,d0
+    addq.l #1,d0
+    add.l d0,d7
+    bra.s .circle_check
+.circle_keep_x:
+    subq.l #1,d5
+    move.l d6,d0
+    sub.l d5,d0
+    add.l d0,d0
+    addq.l #1,d0
+    add.l d0,d7
+.circle_check:
+    cmp.l d5,d6
+    ble.s .circle_loop
+    moveq #0,d0
+    bra.s .circle_done
+.circle_error:
+    moveq #-1,d0
+.circle_done:
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+; Plot the eight symmetric points for CIRCLE.
+; d1=cx, d2=cy, d4=color, d5=x, d6=y; d0 and d3 are scratch.
+_gfx_circle_points:
+    move.l d1,d0
+    add.l d5,d0
+    move.l d2,d3
+    add.l d6,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    sub.l d5,d0
+    move.l d2,d3
+    add.l d6,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    add.l d5,d0
+    move.l d2,d3
+    sub.l d6,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    sub.l d5,d0
+    move.l d2,d3
+    sub.l d6,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    add.l d6,d0
+    move.l d2,d3
+    add.l d5,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    sub.l d6,d0
+    move.l d2,d3
+    add.l d5,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    add.l d6,d0
+    move.l d2,d3
+    sub.l d5,d3
+    bsr.s _gfx_plot_d0_d3
+    move.l d1,d0
+    sub.l d6,d0
+    move.l d2,d3
+    sub.l d5,d3
+    bsr.s _gfx_plot_d0_d3
+    rts
+
+_gfx_plot_d0_d3:
+    move.l d4,-(sp)
+    move.l d3,-(sp)
+    move.l d0,-(sp)
+    jsr PLOT
+    lea 12(sp),sp
+    rts
+
+; Validate the active planar mode, screen pointer, and palette color in d0.
+; Returns d0=0 when plotting can proceed, -1 otherwise. Clobbers d7/a0.
+_gfx_can_plot:
+    move.l d0,d7
+    move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .gcp_lores
+    cmp.w #1,d0
+    bne.s .gcp_error
+    cmp.l #16,d7
+    bge.s .gcp_error
+    bra.s .gcp_color_ready
+.gcp_lores:
+    cmp.l #32,d7
+    bge.s .gcp_error
+.gcp_color_ready:
+    tst.l d7
+    blt.s .gcp_error
+    move.l gfx_current_screen_ptr,a0
+    cmpa.l #0,a0
+    beq.s .gcp_error
+    moveq #0,d0
+    rts
+.gcp_error:
+    moveq #-1,d0
+    rts
 
 ; -----------------------------------------------------------------------------
 ; Function: ClearScreen
@@ -1162,7 +1460,11 @@ _SetPixel:
     move.l 16(a6),d2
     move.w gfx_current_mode,d7
     tst.w d7
-    bne.w .sp_hires
+     beq.w .sp_lores
+     cmp.w #1,d7
+     beq.w .sp_hires
+     bra.w .sp_out_of_bounds
+ .sp_lores:
     ; LORES mode (320x256x32)
     cmp.l #320,d0
     bge .sp_out_of_bounds
@@ -1172,9 +1474,13 @@ _SetPixel:
     blt .sp_out_of_bounds
     tst.l d1
     blt .sp_out_of_bounds
+    tst.l d2
+    blt .sp_out_of_bounds
     cmp.l #32,d2
     bge .sp_out_of_bounds
     move.l gfx_current_screen_ptr,a0
+    cmpa.l #0,a0
+    beq .sp_out_of_bounds
     moveq #40,d3
     moveq #5,d4
     moveq #0,d5
@@ -1225,9 +1531,13 @@ _SetPixel:
     blt .sp_out_of_bounds
     tst.l d1
     blt .sp_out_of_bounds
+    tst.l d2
+    blt .sp_out_of_bounds
     cmp.l #16,d2
     bge .sp_out_of_bounds
     move.l gfx_current_screen_ptr,a0
+    cmpa.l #0,a0
+    beq .sp_out_of_bounds
     moveq #80,d3
     moveq #4,d4
     moveq #0,d5
