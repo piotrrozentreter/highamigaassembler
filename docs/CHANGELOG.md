@@ -4,6 +4,16 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **Bounds-safe planar drawing primitives in `lib/graphics.s`:** `POINT` and `PLOT` alias
+  `SetPixel(x, y, color)`; `LINE(x0, y0, x1, y1, color)` draws Bresenham lines;
+  `RECTANGLE(x, y, width, height, color)` draws outline rectangles; and
+  `CIRCLE(cx, cy, radius, color)` draws midpoint circles. They support mode 0
+  (320x256x32) and mode 1 (640x256x16), clipping composite-shape pixels at the screen edge.
+  Pixel plotting now also rejects negative colors, HAM6 mode, and calls before a screen buffer
+  is initialized instead of writing invalid memory.
+
 ## [0.9.7] - 2026-09-02
 
 ### Added

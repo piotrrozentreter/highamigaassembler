@@ -1,0 +1,33 @@
+// Regression caller for bounds-safe graphics primitives in both supported planar modes.
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func ClearScreen() -> int;
+    extern func POINT(x: int, y: int, color: int) -> int;
+    extern func PLOT(x: int, y: int, color: int) -> int;
+    extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int;
+    extern func CIRCLE(cx: int, cy: int, radius: int, color: int) -> int;
+
+    public main;
+
+    proc main() -> int {
+        // expect: mode 0 accepts its last pixel and palette index 31
+        call SetGraphicsMode(0);
+        call ClearScreen();
+        call POINT(0, 0, 31);
+        call PLOT(319, 255, 31);
+        call LINE(0, 255, 319, 0, 31);
+        call RECTANGLE(1, 1, 318, 254, 15);
+        call CIRCLE(160, 128, 64, 7);
+
+        // expect: mode 1 accepts its last pixel and palette index 15
+        call SetGraphicsMode(1);
+        call ClearScreen();
+        call POINT(0, 0, 15);
+        call PLOT(639, 255, 15);
+        call LINE(0, 255, 639, 0, 15);
+        call RECTANGLE(1, 1, 638, 254, 7);
+        call CIRCLE(320, 128, 96, 3);
+
+        return 0;
+    }

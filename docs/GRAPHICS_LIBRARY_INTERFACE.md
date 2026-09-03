@@ -30,6 +30,11 @@ code main:
     extern func SetGraphicsMode(mode: int) -> int;
     extern func ClearScreen() -> int;
     extern func SetPixel(x: int, y: int, color: int) -> int;
+    extern func POINT(x: int, y: int, color: int) -> int;
+    extern func PLOT(x: int, y: int, color: int) -> int;
+    extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int;
+    extern func CIRCLE(cx: int, cy: int, radius: int, color: int) -> int;
     extern func Text(x: int, y: int, msg: int, color: int) -> int;
     extern func Print(msg: int, color: int) -> int;
     extern func SwapScreen() -> int;
@@ -127,6 +132,28 @@ Draws a pixel at (x, y) with the specified color.
 ```has
 call SetPixel(160, 128, 31);  // White pixel at center
 ```
+
+#### POINT(x: int, y: int, color: int) -> int and PLOT(x: int, y: int, color: int) -> int
+Aliases for `SetPixel`. Use either name to set one pixel with the same bounds and color checks.
+
+#### LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int
+Draws an inclusive line from `(x0, y0)` to `(x1, y1)` using Bresenham's integer algorithm.
+Pixels outside the screen are skipped, so a partially offscreen line never writes outside the
+active framebuffer.
+
+#### RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int
+Draws an outline rectangle. `width` and `height` are positive pixel extents; a non-positive
+value returns `-1`. Use `FillRect` from `lib/gui.s` when a filled rectangle is required.
+Pixels outside the screen are skipped.
+
+#### CIRCLE(cx: int, cy: int, radius: int, color: int) -> int
+Draws an outline circle using the midpoint circle algorithm. A negative radius returns `-1`.
+Pixels outside the screen are skipped.
+
+`SetPixel`, `POINT`, `PLOT`, `LINE`, `RECTANGLE`, and `CIRCLE` support only graphics mode 0
+(320x256x32) and mode 1 (640x256x16). They return `-1` without drawing in HAM6 mode, before a
+screen buffer has been initialized, or when `SetPixel`/`POINT`/`PLOT` receives invalid coordinates
+or color. Valid colors are 0-31 in mode 0 and 0-15 in mode 1.
 
 ### Text Functions
 
