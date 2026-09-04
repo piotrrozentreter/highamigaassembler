@@ -12,6 +12,7 @@ Run with:
     python -m pytest tests/test_codegen_basic.py -v
 """
 
+from collections import Counter
 import re
 import sys
 import os
@@ -21,19 +22,20 @@ from hasc import ast
 from hasc import parser as has_parser
 from hasc import codegen as has_codegen
 from hasc import validator as has_validator
+from hasc.target import CpuTarget, TargetSpec
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def compile_src(src: str) -> str:
+def compile_src(src: str, target=None) -> str:
     """Parse, validate, generate assembly for a HAS source string.
     Returns the full, peephole-optimized assembly text."""
     mod = has_parser.parse(src)
     validator = has_validator.Validator(mod)
     validator.validate()
-    cg = has_codegen.CodeGen(mod)
+    cg = has_codegen.CodeGen(mod, target) if target else has_codegen.CodeGen(mod)
     return cg.gen()
 
 
@@ -58,6 +60,17 @@ def assert_contains(asm: str, pattern: str):
     """Assert that assembly text contains a regex pattern."""
     if not re.search(pattern, asm, re.MULTILINE):
         raise AssertionError(f"Assembly does not contain pattern:\n{pattern}\n\nGot:\n{asm}")
+
+
+def assert_internal_branch_targets_defined(asm: str):
+    """Assert that each branch target emitted in a generated procedure is defined."""
+    label_definitions = re.findall(r'^\s*([.\w]+):', asm, re.MULTILINE)
+    defined_labels = set(label_definitions)
+    branch_targets = set(re.findall(r'^\s*b(?:ra|[a-z]{2})(?:\.[bwls])?\s+([.\w]+)', asm, re.MULTILINE))
+    undefined_targets = branch_targets - defined_labels
+    assert not undefined_targets, f"Undefined internal branch labels: {sorted(undefined_targets)}"
+    duplicate_labels = sorted(label for label, count in Counter(label_definitions).items() if count > 1)
+    assert not duplicate_labels, f"Duplicate internal labels: {duplicate_labels}"
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +496,78 @@ code main:
         assert_contains(body, r"move\.l 8\(a6\),d0\s+beq endif")
         assert_contains(body, r"move\.l 8\(a6\),d0\s+seq d0\s+andi\.l #\$FF,d0\s+neg\.b d0")
         assert "not.l d0" not in body
+
+    def test_else_if_and_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte) -> void {
+        if (a != 0) {
+        } else if (a == 0 && b == 0) {
+        }
+    }
+        """
+        assert_internal_branch_targets_defined(proc_body(compile_src(src), "test"))
+
+    def test_else_if_or_with_nested_and_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte, c: byte) -> void {
+        if (a != 0) {
+        } else if (a == 0 || (b == 0 && c == 0)) {
+        }
+    }
+        """
+        body = proc_body(compile_src(src), "test")
+        assert_internal_branch_targets_defined(body)
+        assert len(re.findall(r'^\s*\.or_skip_\d+:', body, re.MULTILINE)) == 1
+
+    def test_else_if_and_after_or_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte, c: byte) -> void {
+        if (a != 0 || b != 0) {
+        } else if (b == 0 && c == 0) {
+        }
+    }
+        """
+        assert_internal_branch_targets_defined(proc_body(compile_src(src), "test"))
+
+    def test_nested_boolean_value_expression_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte, c: byte, d: byte) -> int {
+        return a != 0 && (b != 0 || (c != 0 && d != 0));
+    }
+        """
+        for cpu in CpuTarget:
+            body = proc_body(compile_src(src, TargetSpec.for_cpu(cpu)), "test")
+            assert_internal_branch_targets_defined(body)
+            assert_contains(body, r"beq\.w \.and_false_\d+")
+            assert_contains(body, r"bne\.w \.or_true_\d+")
+
+    def test_do_while_nested_boolean_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte, c: byte) -> void {
+        do {
+        } while (a != 0 && (b != 0 || c != 0));
+    }
+        """
+        for cpu in CpuTarget:
+            body = proc_body(compile_src(src, TargetSpec.for_cpu(cpu)), "test")
+            assert_internal_branch_targets_defined(body)
+
+    def test_while_nested_boolean_defines_all_branch_targets(self):
+        src = """
+code main:
+    proc test(a: byte, b: byte, c: byte, d: byte) -> void {
+        while (a != 0 || (b != 0 && (c != 0 || d != 0))) {
+        }
+    }
+        """
+        for cpu in CpuTarget:
+            body = proc_body(compile_src(src, TargetSpec.for_cpu(cpu)), "test")
+            assert_internal_branch_targets_defined(body)
 
 
 # ---------------------------------------------------------------------------
