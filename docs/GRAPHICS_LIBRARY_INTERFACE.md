@@ -33,6 +33,7 @@ code main:
     extern func POINT(x: int, y: int, color: int) -> int;
     extern func PLOT(x: int, y: int, color: int) -> int;
     extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func BLITLINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
     extern func RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int;
     extern func CIRCLE(cx: int, cy: int, radius: int, color: int) -> int;
     extern func Text(x: int, y: int, msg: int, color: int) -> int;
@@ -141,8 +142,27 @@ Draws an inclusive line from `(x0, y0)` to `(x1, y1)` using Bresenham's integer 
 Pixels outside the screen are skipped, so a partially offscreen line never writes outside the
 active framebuffer.
 
-#### RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int
-Draws an outline rectangle. `width` and `height` are positive pixel extents; a non-positive
+#### BLITLINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int
+Draws the same inclusive line as `LINE`, but using the blitter's hardware line mode instead of
+the CPU. This is much faster for long lines, since the blitter walks the line while the CPU is
+free.
+
+Blitter line mode has no hardware clipping and would otherwise corrupt chip RAM, so the segment
+is clipped with the Cohen-Sutherland algorithm before any blit is started. A line that is
+entirely offscreen draws nothing and returns `0`.
+
+Differences from `LINE` worth knowing:
+- It requires blitter DMA and system takeover (`TakeSystem`), so it works in mode 0 and mode 1 only.
+- It is **not blitter-reentrant**: do not call it from an interrupt that can preempt another blit.
+- Coordinates outside `-4096..4096` return `-1`, whereas `LINE` still clips and draws them.
+- Because clipping happens up front rather than per pixel, a clipped line can differ from `LINE`
+  by about one pixel.
+
+```has
+call BLITLINE(0, 0, 319, 255, 31);
+```
+
+#### RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> intDraws an outline rectangle. `width` and `height` are positive pixel extents; a non-positive
 value returns `-1`. Use `FillRect` from `lib/gui.s` when a filled rectangle is required.
 Pixels outside the screen are skipped.
 

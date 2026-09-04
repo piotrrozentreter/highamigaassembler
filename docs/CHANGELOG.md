@@ -6,6 +6,17 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`BLITLINE(x0, y0, x1, y1, color)` in `lib/graphics.s`:** a hardware line drawn with the
+  blitter's line mode, as an alternative to the CPU Bresenham `LINE`. Blitter line mode has no
+  hardware clipping, so the segment is clipped with Cohen-Sutherland before any blit; a fully
+  offscreen line draws nothing and returns 0. One blit per bitplane sets or clears that plane's
+  bit, so it supports the same mode 0 and mode 1 screens and colors as `LINE`.
+  It requires blitter DMA and system takeover, is not blitter-reentrant, and returns `-1` for
+  coordinates outside +/-4096 (where `LINE` would still clip and draw). `lib/hardware.i` gained
+  the `BLTBDAT` and `BLTADAT` register definitions this needs.
+
+### Added
+
 - **GUI Creator bitmap colour-depth setting:** Bitmap widgets now store a `COLORS` value in
   `.hasmeta` and the designer exposes 2, 8, 16, and 32 colour choices. Export uses Pillow
   Floyd-Steinberg dithering and emits 1, 3, 4, or 5 bitplane Intuition `Image` data in chip RAM.

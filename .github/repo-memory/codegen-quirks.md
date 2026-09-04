@@ -1,8 +1,9 @@
-﻿# hasc/codegen.py quirks and conventions (discovered while implementing Scc/DBcc fast paths)
+# hasc/codegen.py quirks and conventions (discovered while implementing Scc/DBcc fast paths)
 
 > Committed export of the agent's repo memory (`/memories/repo/codegen-quirks.md`). The live memory
 > store is per-machine and not in git, so this file is the only copy that travels between the Linux
 > and Windows dev machines. Re-export after adding notes; treat drift between the two as a bug.
+
 
 ## Parser: comparison operators are now eagerly normalized (updated 2026-07-27)
 - `hasc/parser.py` `ASTBuilder` now defines `eq`, `ne`, `lt`, `le`, `gt`, `ge`, so all six
@@ -622,6 +623,42 @@
 - Isolation-test methodology that worked: build tiny single-feature .has (mintest bare exe,
   mintestwb + WBStartup, guiempty window-only, guilabel/guibutton one-widget) and bisect on the
   emulator. Each round-trip localized one bug.
+
+## Graphics drawing primitives + blitter LINE (2026-09-03/04)
+- `lib/graphics.s` now exports `POINT`/`PLOT` (aliases of `_SetPixel`), `LINE` (CPU Bresenham),
+  `RECTANGLE` (outline; `FillRect` in gui.s stays the filled one), `CIRCLE` (midpoint), and
+  `BLITLINE` (blitter line mode). Shared preflight `_gfx_can_plot` validates mode/screen-ptr/color.
+- Fixed in `_SetPixel`: it mapped ANY nonzero `gfx_current_mode` to the hires path, so HAM6 (mode 2)
+  wrote a 4-plane/80-byte model into a 6-plane buffer. Now explicitly mode 0 / mode 1 / else reject.
+  Also added negative-color and null-`gfx_current_screen_ptr` guards.
+- **`tst.l a0` (TST with An) is 68020+**, vasm -m68000 rejects it. Use `cmpa.l #0,a0` for a
+  null address-register check. (Same family as the earlier `tst.l a0` interrupt-dispatch bug.)
+- Hand-written lib routines grow: `bra.s`/`bcc.s` to a routine's error exit repeatedly went
+  "branch destination out of range" as code was added. Prefer unsuffixed branches for
+  error/exit targets in long routines.
+- **Blitter line mode (BLITLINE) verified recipe** (AHRM ch.6): BLTCON0 = `(x0&15)<<12 | $0B00 |
+  minterm` (USEA|USEC|USED, **no USEB**); minterm `$CA` = set bit, `$2A` = clear bit (with
+  BLTBDAT=$FFFF). BLTCON1 = octant | `$01`(LINE) | `$40`(SIGN if accumulator<0). BLTADAT=`$8000`,
+  BLTBDAT=`$FFFF`, BLTAFWM=BLTALWM=`$FFFF`. Accumulator `4*dmin-2*dmax` goes in **BLTAPTL**
+  (`BLTAPT+2`) with BLTAPTH=0. BLTAMOD=`4*(dmin-dmax)`, BLTBMOD=`4*dmin`. BLTCMOD=BLTDMOD=bytes
+  per **pixel row** (200 lores / 320 hires - the interleaved stride, NOT the plane row width).
+  **BLTCPT must equal BLTDPT.** BLTSIZE=`((dmax+1)<<6)|2` - width field must be exactly 2.
+- Octant table indexed by `(dy<0) | (y-dominant)<<1 | (dx<0)<<2`:
+  `dc.b $10,$18,$00,$04,$14,$1C,$08,$0C` (bits 4/3/2 = SUD/SUL/AUL).
+- **Blitter line mode CANNOT clip** - unclipped coords corrupt chip RAM (copper lists live in
+  `SECTION copper,DATA_C`). Cohen-Sutherland clip BEFORE computing octant/accumulator. Bound the
+  clip loop iterations: integer truncation can in principle ping-pong, and a hang in takeover mode
+  locks the machine. Clip math uses `muls.w`/`divs.w`, so reject coords beyond +/-4096 to keep
+  operands 16-bit; `ext.l` after `divs.w` to drop the remainder.
+- One blit per plane (colour = 4-5 blits); re-init BLTAPT/BLTCON1/BLTCPT/BLTDPT every plane
+  because the blitter destroys the accumulator and SIGN during the blit. WAITBLIT between blits.
+- `lib/hardware.i` was missing `BLTBDAT ($072)` and `BLTADAT ($074)` - added. It still lacks
+  BLTCDAT/BLTDDAT/BLTAPTL (use `BLTAPT+2`).
+- VS Code reports ~95 bogus C/C++ "compile errors" for `lib/hardware.i` (it parses `.i` as C++).
+  Ignore them; validate `.i`/`.s` with vasm only.
+- Tests: `tests/test_graphics_primitives_api.py` (source-level contract: XDEFs, extern decls,
+  clip-before-BLTSIZE ordering, line-mode register values, octant table bytes).
+  Example/caller: `examples/tests/compiler/graphics_primitives_test.has`.
 
 ## SetTextMode graphics.s feature + subagent bug caught (2026-08-21)
 - Added `SetTextMode(mode: int) -> int` to lib/graphics.s (XDEF + `gfx_text_mode` word var

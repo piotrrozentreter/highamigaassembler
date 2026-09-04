@@ -51,6 +51,7 @@ WAITBLIT:MACRO
     XDEF POINT
     XDEF PLOT
     XDEF LINE
+    XDEF BLITLINE
     XDEF RECTANGLE
     XDEF CIRCLE
     XDEF SetFont
@@ -360,6 +361,336 @@ _gfx_plot_d0_d3:
     move.l d0,-(sp)
     jsr PLOT
     lea 12(sp),sp
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: BLITLINE
+; Input: 8(a6)=x0, 12(a6)=y0, 16(a6)=x1, 20(a6)=y1, 24(a6)=color
+; Output: d0=0 on success, -1 on invalid state or out-of-range coordinates
+; Description: Draws a solid line using the blitter's line mode (BLTCON1 LINE).
+; Notes: Line mode has no hardware clipping, so the segment is clipped with
+;        Cohen-Sutherland first; an entirely offscreen line returns 0.
+;        One blit per bitplane sets or clears that plane's bit for the color.
+;        Requires a5=$DFF000 and blitter DMA, so mode 0/1 only. Not reentrant:
+;        never call it from an interrupt that can preempt another blit.
+; -----------------------------------------------------------------------------
+;   -4(a6)=x0     -8(a6)=y0    -12(a6)=x1        -16(a6)=y1
+;  -20(a6)=bytes per plane row -24(a6)=bytes per pixel row (blit modulo)
+;  -28(a6)=plane count         -36(a6)=start address
+;  -40(a6)=color   -42(a6)=accumulator  -44(a6)=BLTAMOD  -46(a6)=BLTBMOD
+;  -48(a6)=BLTCON1 -50(a6)=BLTSIZE     -52(a6)=clip iteration guard
+;  a3=max x, a4=max y while clipping
+BLITLINE:
+    link a6,#-52
+    movem.l d1-d7/a0-a5,-(sp)
+
+    move.l 24(a6),d0
+    bsr _gfx_can_plot
+    tst.l d0
+    bmi .bl_error
+    move.l 24(a6),-40(a6)
+
+    ; Clip math below is 16-bit, so refuse wildly out-of-range coordinates.
+    move.l 8(a6),d0
+    bsr _gfx_coord_ok
+    bmi .bl_error
+    move.l 12(a6),d0
+    bsr _gfx_coord_ok
+    bmi .bl_error
+    move.l 16(a6),d0
+    bsr _gfx_coord_ok
+    bmi .bl_error
+    move.l 20(a6),d0
+    bsr _gfx_coord_ok
+    bmi .bl_error
+
+    move.l 8(a6),-4(a6)
+    move.l 12(a6),-8(a6)
+    move.l 16(a6),-12(a6)
+    move.l 20(a6),-16(a6)
+
+    move.w gfx_current_mode,d0
+    tst.w d0
+    bne.s .bl_hires
+    move.l #40,-20(a6)
+    move.l #200,-24(a6)
+    move.l #5,-28(a6)
+    move.l #319,a3
+    bra.s .bl_mode_ready
+.bl_hires:
+    move.l #80,-20(a6)
+    move.l #320,-24(a6)
+    move.l #4,-28(a6)
+    move.l #639,a3
+.bl_mode_ready:
+    move.l #255,a4
+
+    ; ---- Cohen-Sutherland clip against the active screen ----
+    ; Truncating integer intersections can need a retry, so bound the loop:
+    ; a hang here would lock a takeover-mode machine with no way to recover.
+    move.w #8,-52(a6)
+.bl_clip_loop:
+    subq.w #1,-52(a6)
+    bmi .bl_no_draw
+    move.l -4(a6),d0
+    move.l -8(a6),d1
+    bsr _gfx_outcode
+    move.l d2,d3                    ; d3 = outcode of first point
+    move.l -12(a6),d0
+    move.l -16(a6),d1
+    bsr _gfx_outcode                ; d2 = outcode of second point
+    move.l d3,d4
+    or.l d2,d4
+    beq.s .bl_clip_done             ; both endpoints inside
+    move.l d3,d4
+    and.l d2,d4
+    bne .bl_no_draw                 ; both endpoints beyond the same edge
+    tst.l d3
+    beq.s .bl_clip_second
+    move.l d3,d5
+    move.l -4(a6),d0
+    move.l -8(a6),d1
+    move.l -12(a6),d2
+    move.l -16(a6),d3
+    bsr _gfx_clip_point
+    move.l d0,-4(a6)
+    move.l d1,-8(a6)
+    bra.s .bl_clip_loop
+.bl_clip_second:
+    move.l d2,d5
+    move.l -12(a6),d0
+    move.l -16(a6),d1
+    move.l -4(a6),d2
+    move.l -8(a6),d3
+    bsr _gfx_clip_point
+    move.l d0,-12(a6)
+    move.l d1,-16(a6)
+    bra.s .bl_clip_loop
+.bl_clip_done:
+
+    ; ---- Octant selection: d2=dmax, d3=dmin, d4=octant table index ----
+    move.l -4(a6),d0
+    move.l -8(a6),d1
+    move.l -12(a6),d2
+    move.l -16(a6),d3
+    sub.l d0,d2                     ; dx
+    sub.l d1,d3                     ; dy
+    moveq #0,d4
+    tst.l d3
+    bge.s .bl_dy_positive
+    neg.l d3
+    addq.l #1,d4
+.bl_dy_positive:
+    tst.l d2
+    bge.s .bl_dx_positive
+    neg.l d2
+    addq.l #4,d4
+.bl_dx_positive:
+    cmp.l d3,d2
+    bge.s .bl_x_dominant
+    exg d2,d3
+    addq.l #2,d4
+.bl_x_dominant:
+    lea gfx_line_octants(pc),a0
+    moveq #0,d5
+    move.b (a0,d4.l),d5
+    or.w #1,d5                      ; LINE mode
+
+    ; accumulator = 4*dmin - 2*dmax; SIGN set when it is negative
+    move.l d3,d6
+    lsl.l #2,d6
+    move.l d2,d7
+    add.l d7,d7
+    sub.l d7,d6
+    tst.l d6
+    bge.s .bl_sign_clear
+    or.w #$40,d5
+.bl_sign_clear:
+    move.w d6,-42(a6)
+    move.w d5,-48(a6)
+
+    move.l d3,d7                    ; BLTAMOD = 4*(dmin - dmax)
+    sub.l d2,d7
+    lsl.l #2,d7
+    move.w d7,-44(a6)
+    move.l d3,d7                    ; BLTBMOD = 4*dmin
+    lsl.l #2,d7
+    move.w d7,-46(a6)
+    move.l d2,d7                    ; BLTSIZE = (dmax+1) rows, width field must be 2
+    addq.l #1,d7
+    lsl.l #6,d7
+    or.w #2,d7
+    move.w d7,-50(a6)
+
+    ; start address = screen + y0*rowbytes + word-aligned x0 byte offset
+    move.l gfx_current_screen_ptr,d0
+    move.l -8(a6),d1
+    move.l -24(a6),d2
+    muls.w d2,d1
+    add.l d1,d0
+    move.l -4(a6),d1
+    lsr.l #4,d1
+    add.l d1,d1
+    add.l d1,d0
+    move.l d0,-36(a6)
+
+    move.l -4(a6),d5                ; d5 = shift | USEA|USEC|USED
+    and.w #15,d5
+    ror.w #4,d5
+    or.w #$0B00,d5
+
+    ; ---- One line blit per bitplane ----
+    moveq #0,d4
+.bl_plane_loop:
+    move.l -40(a6),d3
+    btst d4,d3
+    beq.s .bl_plane_clear
+    move.w #$00CA,d6                ; D = A + C   (set the pen bit)
+    bra.s .bl_minterm_ready
+.bl_plane_clear:
+    move.w #$002A,d6                ; D = ~(A&B) & C   (clear the pen bit)
+.bl_minterm_ready:
+    or.w d5,d6
+
+    move.l -36(a6),d0
+    move.l d4,d1
+    move.l -20(a6),d2
+    muls.w d2,d1
+    add.l d1,d0
+    move.l d0,a2
+
+    WAITBLIT
+    move.w #$FFFF,BLTAFWM(a5)
+    move.w #$FFFF,BLTALWM(a5)
+    move.w #$8000,BLTADAT(a5)       ; single pen bit
+    move.w #$FFFF,BLTBDAT(a5)       ; solid texture
+    move.w -44(a6),BLTAMOD(a5)
+    move.w -46(a6),BLTBMOD(a5)
+    move.l -24(a6),d0
+    move.w d0,BLTCMOD(a5)
+    move.w d0,BLTDMOD(a5)
+    move.w #0,BLTAPT(a5)            ; accumulator lives in BLTAPTL, high word must be 0
+    move.w -42(a6),BLTAPT+2(a5)
+    move.l a2,BLTCPT(a5)
+    move.l a2,BLTDPT(a5)            ; D must equal C for a normal line
+    move.w -48(a6),BLTCON1(a5)
+    move.w d6,BLTCON0(a5)
+    move.w -50(a6),BLTSIZE(a5)      ; starts the blit
+
+    addq.l #1,d4
+    cmp.l -28(a6),d4
+    blt .bl_plane_loop
+    WAITBLIT
+    moveq #0,d0
+    bra.s .bl_exit
+.bl_no_draw:                        ; clipped away entirely, or clipping did not converge
+    moveq #0,d0
+    bra.s .bl_exit
+.bl_error:
+    moveq #-1,d0
+.bl_exit:
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+; BLTCON1 octant bits, indexed by (dy<0) | (x-dominant)<<1 | (dx<0)<<2.
+gfx_line_octants:
+    dc.b $10,$18,$00,$04,$14,$1C,$08,$0C
+    even
+
+; Returns d0=0 when |d0| fits the 16-bit clip arithmetic, -1 otherwise.
+_gfx_coord_ok:
+    cmp.l #4096,d0
+    bgt.s .gco_bad
+    cmp.l #-4096,d0
+    blt.s .gco_bad
+    moveq #0,d0
+    rts
+.gco_bad:
+    moveq #-1,d0
+    rts
+
+; Cohen-Sutherland outcode for (d0=x, d1=y) into d2, against a3=max x, a4=max y.
+_gfx_outcode:
+    moveq #0,d2
+    tst.l d0
+    bge.s .gou_x_high
+    bset #0,d2
+    bra.s .gou_y
+.gou_x_high:
+    cmp.l a3,d0
+    ble.s .gou_y
+    bset #1,d2
+.gou_y:
+    tst.l d1
+    bge.s .gou_y_high
+    bset #2,d2
+    rts
+.gou_y_high:
+    cmp.l a4,d1
+    ble.s .gou_done
+    bset #3,d2
+.gou_done:
+    rts
+
+; Move (d0,d1) onto the screen edge selected by outcode d5, along the segment
+; toward (d2,d3). Returns the clipped point in d0/d1. Clobbers d4/d6/d7.
+; Bounds come from a3=max x, a4=max y.
+_gfx_clip_point:
+    btst #3,d5
+    bne.s .gcl_bottom
+    btst #2,d5
+    bne.s .gcl_top
+    btst #1,d5
+    bne.s .gcl_right
+    move.l d0,d7                    ; left edge: x = 0
+    neg.l d7
+    bsr.s _gfx_interp_y
+    moveq #0,d0
+    rts
+.gcl_right:
+    move.l a3,d7                    ; right edge: x = max x
+    sub.l d0,d7
+    bsr.s _gfx_interp_y
+    move.l a3,d0
+    rts
+.gcl_top:
+    move.l d1,d7                    ; top edge: y = 0
+    neg.l d7
+    bsr.s _gfx_interp_x
+    moveq #0,d1
+    rts
+.gcl_bottom:
+    move.l a4,d7                    ; bottom edge: y = max y
+    sub.l d1,d7
+    bsr.s _gfx_interp_x
+    move.l a4,d1
+    rts
+
+; d1 += (d3-d1) * d7 / (d2-d0). The divisor is non-zero because a segment
+; crossing a vertical edge cannot be vertical.
+_gfx_interp_y:
+    move.l d3,d4
+    sub.l d1,d4
+    muls.w d7,d4
+    move.l d2,d6
+    sub.l d0,d6
+    divs.w d6,d4
+    ext.l d4                        ; keep the quotient, drop the remainder
+    add.l d4,d1
+    rts
+
+; d0 += (d2-d0) * d7 / (d3-d1). The divisor is non-zero because a segment
+; crossing a horizontal edge cannot be horizontal.
+_gfx_interp_x:
+    move.l d2,d4
+    sub.l d0,d4
+    muls.w d7,d4
+    move.l d3,d6
+    sub.l d1,d6
+    divs.w d6,d4
+    ext.l d4                        ; keep the quotient, drop the remainder
+    add.l d4,d0
     rts
 
 ; Validate the active planar mode, screen pointer, and palette color in d0.
