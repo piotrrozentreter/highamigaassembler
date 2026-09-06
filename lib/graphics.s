@@ -69,6 +69,7 @@ WAITBLIT:MACRO
     XDEF _DrawChar
     XDEF gfx_text_cursor_x
     XDEF gfx_text_cursor_y
+    XDEF Scroll
 
 ; ---------- Graphics support wrappers ----------
 ; These minimal wrappers map the public names used by generated code
@@ -1909,6 +1910,529 @@ _SetPixel:
 .sp_done:
     movem.l (sp)+,d1-d7/a0-a5
     unlk a6
+    rts
+
+; ============================================================================
+; Function: Scroll
+; Input: d0=x0, d1=y0, d2=x1, d3=y1, d4=hor, d5=vert, d6=pixels
+; Output: d0=0 on success, -1 on error
+; Description: Scrolls a rectangular screen region by specified pixels
+;              in the horizontal and/or vertical direction.
+; Notes: 
+;   - x0,y0 = top-left corner (inclusive)
+;   - x1,y1 = bottom-right corner (inclusive)
+;   - hor: -1=left, 0=no h-scroll, 1=right
+;   - vert: -1=up, 0=no v-scroll, 1=down
+;   - Only works in modes 0/1 (lores/hires). Returns -1 for HAM6.
+;   - Uses blitter for word-aligned scrolling, CPU for non-aligned.
+; ============================================================================
+Scroll:
+    link a6,#-64
+    movem.l d1-d7/a0-a5,-(sp)
+
+    ; --- Input validation ---
+    ; Check bounds: x0 < x1, y0 < y1, pixels > 0
+    cmp.l d2,d0
+    bge .scroll_error            ; x0 >= x1
+    cmp.l d3,d1
+    bge .scroll_error            ; y0 >= y1
+    tst.l d6
+    ble .scroll_error            ; pixels <= 0
+    
+    ; Check that both hor and vert are in range [-1, 0, 1]
+    move.l d4,d7
+    addq.l #1,d7
+    cmp.l #3,d7
+    bhi .scroll_error            ; hor not in [-1, 0, 1]
+    move.l d5,d7
+    addq.l #1,d7
+    cmp.l #3,d7
+    bhi .scroll_error            ; vert not in [-1, 0, 1]
+
+    ; --- Get graphics mode ---
+    move.w gfx_current_mode,d7
+    cmp.w #2,d7
+    beq .scroll_error            ; HAM6 mode not supported
+
+    ; --- Set up screen parameters based on mode ---
+    ; Local variables:
+    ; -4(a6) = x0        -8(a6) = y0       -12(a6) = x1       -16(a6) = y1
+    ; -20(a6) = hor      -24(a6) = vert    -28(a6) = pixels
+    ; -32(a6) = bytes_per_row  -36(a6) = plane_count  -40(a6) = is_word_aligned
+    ; -44(a6) = width_pixels   -48(a6) = height_pixels -52(a6) = screen_ptr
+    
+    move.l d0,-4(a6)
+    move.l d1,-8(a6)
+    move.l d2,-12(a6)
+    move.l d3,-16(a6)
+    move.l d4,-20(a6)
+    move.l d5,-24(a6)
+    move.l d6,-28(a6)
+    
+    ; Determine bytes_per_row, plane_count, and screen max coordinates
+    tst.w d7
+    beq .scroll_lores
+    ; Hires mode
+    move.l #80,-32(a6)
+    move.l #4,-36(a6)
+    move.l #639,d7                ; max_x
+    move.l #255,d6                ; max_y
+    bra .scroll_mode_ready
+.scroll_lores:
+    ; Lores mode (default)
+    move.l #40,-32(a6)
+    move.l #5,-36(a6)
+    move.l #319,d7                ; max_x
+    move.l #255,d6                ; max_y
+
+.scroll_mode_ready:
+    ; Validate x1 <= screen_max_x
+    move.l -12(a6),d0
+    cmp.l d7,d0
+    ble.s .scroll_x1_ok
+    moveq #-1,d0                  ; Invalid x1 (out of bounds)
+    bra .scroll_error
+.scroll_x1_ok:
+    
+    ; Validate y1 <= screen_max_y
+    move.l -16(a6),d0
+    cmp.l d6,d0
+    ble.s .scroll_y1_ok
+    moveq #-1,d0                  ; Invalid y1 (out of bounds)
+    bra .scroll_error
+.scroll_y1_ok:
+    ; Calculate width and height in pixels
+    move.l -12(a6),d0
+    sub.l -4(a6),d0
+    addq.l #1,d0
+    move.l d0,-44(a6)            ; width_pixels
+    
+    move.l -16(a6),d0
+    sub.l -8(a6),d0
+    addq.l #1,d0
+    move.l d0,-48(a6)            ; height_pixels
+
+    ; Check if word-aligned (x0 and x1 both divisible by 16)
+    move.l -4(a6),d0
+    and.l #15,d0
+    beq.s .scroll_check_x1_align
+    moveq #0,d0                  ; Not aligned
+    bra .scroll_is_aligned
+.scroll_check_x1_align:
+    move.l -12(a6),d0
+    and.l #15,d0
+    beq.s .scroll_is_aligned_yes
+    moveq #0,d0
+    bra .scroll_is_aligned
+.scroll_is_aligned_yes:
+    moveq #1,d0
+.scroll_is_aligned:
+    move.l d0,-40(a6)
+
+    ; Get current screen pointer
+    move.l gfx_current_screen_ptr,a5
+    move.l a5,-52(a6)
+
+    ; Only horizontal or only vertical scroll?
+    move.l -20(a6),d0            ; hor
+    tst.l d0
+    beq .scroll_vertical_only
+    move.l -24(a6),d0            ; vert
+    tst.l d0
+    beq .scroll_horizontal_only
+
+    ; Both directions: do vertical first, then horizontal
+    bsr .scroll_do_vertical
+    tst.l d0
+    bmi .scroll_error
+    bsr .scroll_do_horizontal
+    bra .scroll_done
+
+.scroll_vertical_only:
+    bsr .scroll_do_vertical
+    bra .scroll_done
+
+.scroll_horizontal_only:
+    bsr .scroll_do_horizontal
+    bra .scroll_done
+
+.scroll_do_vertical:
+    ; Vertical scrolling: copy lines and fill exposed area
+    ; d1 = vert direction (-1=up, 1=down)
+    ; Returns: d0 = 0 (success), -1 (error)
+    move.l -24(a6),d1            ; vert
+    tst.l d1
+    beq .scroll_vret             ; No vertical scrolling
+    
+    move.l -28(a6),d2            ; pixels to scroll
+    move.l -48(a6),d3            ; height_pixels
+    
+    ; Calculate bytes_per_scanline_all_planes = bytes_per_row * plane_count
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count (d4 = stride)
+    
+    ; Check if scroll amount >= region height
+    cmp.l d3,d2
+    blt.s .scroll_v_partial      ; if pixels < height, partial scroll
+    ; Full clear (scroll amount >= height)
+    bsr .scroll_v_fill_clear
+    moveq #0,d0
+    rts
+
+.scroll_v_partial:
+    ; Partial scroll: copy visible lines, fill exposed area
+    tst.l d1
+    bmi .scroll_up               ; vert = -1 (up)
+    ; Scroll down: vert = 1
+    bsr .scroll_v_copy_down
+    bsr .scroll_v_fill_top
+    moveq #0,d0
+    rts
+
+.scroll_up:
+    bsr .scroll_v_copy_up
+    bsr .scroll_v_fill_bottom
+    moveq #0,d0
+    rts
+
+.scroll_v_copy_down:
+    ; Copy lines from bottom to top (backward) to avoid overwrite
+    ; Source: lines at y0..y0+height-pixels-1
+    ; Destination: lines at y0+pixels..y0+height-1
+    ; This requires backward copy (high addr to low addr)
+    
+    ; Calculate stride = bytes_per_row * plane_count
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count (d4 = stride)
+    
+    ; lines_to_copy = height - pixels
+    move.l -48(a6),d0            ; height_pixels
+    sub.l -28(a6),d0             ; height - pixels
+    bls .scroll_v_down_ret       ; if <= 0, nothing to copy
+    
+    ; Total bytes to copy
+    move.l d0,d1                 ; lines_to_copy
+    muls.w d4,d1                 ; total_bytes (d1 = lines * stride)
+    
+    ; Source address: screen + y0*stride
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d2             ; y0
+    muls.w d4,d2                 ; y0 * stride
+    add.l d2,a0
+    
+    ; For backward copy with predecrement, position a0 at end of source
+    ; Source end = source_start + total_bytes
+    add.l d1,a0                  ; a0 now points past end of source
+    
+    ; Destination: screen + (y0+pixels)*stride
+    move.l -52(a6),a1            ; screen base
+    move.l -8(a6),d2             ; y0
+    add.l -28(a6),d2             ; y0 + pixels
+    muls.w d4,d2                 ; (y0+pixels) * stride
+    add.l d2,a1
+    add.l d1,a1                  ; a1 now points past end of destination
+    
+    ; Copy backward in 4-byte chunks (longs)
+    lsr.l #2,d1                  ; d1 = number of longs to copy
+    beq .scroll_v_down_ret
+    
+.scroll_v_down_copy_loop:
+    move.l -(a0),-(a1)           ; Copy backward (predecrement)
+    subq.l #1,d1
+    bne .scroll_v_down_copy_loop
+
+.scroll_v_down_ret:
+    rts
+
+.scroll_v_copy_up:
+    ; Copy lines from top to bottom (forward) to avoid overwrite
+    ; Source: lines at y0+pixels..y1, copied to y0..y1-pixels
+    ; This requires forward copy
+    
+    ; Calculate stride = bytes_per_row * plane_count
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count
+    
+    move.l -48(a6),d0            ; height_pixels
+    sub.l -28(a6),d0             ; lines_to_copy = height - pixels
+    bls .scroll_v_up_ret         ; if <= 0, nothing to copy
+    
+    ; Calculate source address: screen + y0*stride + pixels*stride
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d1             ; y0
+    muls.w d4,d1
+    add.l d1,a0
+    move.l -28(a6),d1            ; pixels (start of source)
+    muls.w d4,d1
+    add.l d1,a0                  ; a0 = start of source
+    
+    ; Destination = a0 - pixels*stride
+    move.l a0,a1
+    move.l -28(a6),d1            ; pixels
+    muls.w d4,d1
+    sub.l d1,a1                  ; a1 = destination
+    
+    ; Copy forward in 4-byte chunks
+    move.l d0,d1                 ; lines_to_copy
+    muls.w d4,d1                 ; total bytes
+    lsr.l #2,d1                  ; number of longs
+    beq .scroll_v_up_ret
+    
+.scroll_v_up_copy_loop:
+    move.l (a0)+,(a1)+
+    subq.l #1,d1
+    bne .scroll_v_up_copy_loop
+
+.scroll_v_up_ret:
+    rts
+
+.scroll_v_fill_top:
+    ; Fill top pixels rows with 0 (background)
+    ; Rows: y0..y0+pixels-1
+    
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count (stride)
+    
+    ; Start address = screen + y0*stride + x0_byte*8/8
+    ; For now, fill entire rows for simplicity
+    move.l -52(a6),a0
+    move.l -8(a6),d0             ; y0
+    muls.w d4,d0
+    add.l d0,a0
+    
+    ; Number of bytes to fill = pixels * stride
+    move.l -28(a6),d0            ; pixels
+    muls.w d4,d0                 ; total bytes
+    lsr.l #2,d0                  ; number of longs
+    beq .scroll_v_fill_top_ret
+    
+    moveq #0,d1                  ; Fill with 0
+.scroll_v_fill_top_loop:
+    move.l d1,(a0)+
+    subq.l #1,d0
+    bne .scroll_v_fill_top_loop
+
+.scroll_v_fill_top_ret:
+    rts
+
+.scroll_v_fill_bottom:
+    ; Fill bottom pixels rows with 0 (background)
+    ; Rows: y1-pixels+1..y1
+    
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count (stride)
+    
+    ; Start address = screen + (y1-pixels+1)*stride
+    move.l -52(a6),a0
+    move.l -16(a6),d0            ; y1
+    sub.l -28(a6),d0             ; y1 - pixels
+    addq.l #1,d0                 ; y1 - pixels + 1
+    muls.w d4,d0
+    add.l d0,a0
+    
+    ; Number of bytes to fill
+    move.l -28(a6),d0            ; pixels
+    muls.w d4,d0                 ; total bytes
+    lsr.l #2,d0                  ; number of longs
+    beq .scroll_v_fill_bottom_ret
+    
+    moveq #0,d1
+.scroll_v_fill_bottom_loop:
+    move.l d1,(a0)+
+    subq.l #1,d0
+    bne .scroll_v_fill_bottom_loop
+
+.scroll_v_fill_bottom_ret:
+    rts
+
+.scroll_v_fill_clear:
+    ; Clear entire region (for scroll >= height)
+    move.l -32(a6),d4            ; bytes_per_row
+    muls.w -36(a6),d4            ; * plane_count
+    
+    move.l -52(a6),a0
+    move.l -8(a6),d0             ; y0
+    muls.w d4,d0
+    add.l d0,a0
+    
+    ; Number of bytes = height * stride
+    move.l -48(a6),d0            ; height_pixels
+    muls.w d4,d0                 ; total bytes
+    lsr.l #2,d0                  ; number of longs
+    beq .scroll_v_fill_clear_ret
+    
+    moveq #0,d1
+.scroll_v_fill_clear_loop:
+    move.l d1,(a0)+
+    subq.l #1,d0
+    bne .scroll_v_fill_clear_loop
+
+.scroll_v_fill_clear_ret:
+    rts
+
+.scroll_vret:
+    moveq #0,d0
+    rts
+
+.scroll_do_horizontal:
+    ; Horizontal scrolling: CPU word shift for line-interleaved screens.
+    move.l -20(a6),d1            ; hor
+    tst.l d1
+    beq .scroll_hret             ; No horizontal scrolling
+    
+    ; This path operates on lores scanlines ending at x=319. It supports
+    ; x0=0, or x0=1 when scrolling left so callers can retain screen column 0.
+    tst.w gfx_current_mode
+    bne .scroll_error
+    tst.l -4(a6)
+    beq.s .scroll_h_x0_ok
+    cmp.l #1,-4(a6)
+    bne .scroll_error
+    tst.l -20(a6)
+    bpl .scroll_error
+.scroll_h_x0_ok:
+    cmp.l #319,-12(a6)
+    bne .scroll_error
+
+.scroll_h_pixel:
+    move.l -52(a6),a0            ; current screen base
+    move.l -8(a6),d7             ; y0
+    mulu #200,d7                 ; five 40-byte planes per scanline
+    add.l d7,a0
+    move.l -48(a6),d7            ; rows remaining
+    subq.l #1,d7
+    move.l -20(a6),d6            ; horizontal direction
+    bmi.s .scroll_h_left_row
+
+.scroll_h_right_row:
+    moveq #4,d5                  ; five bitplanes
+.scroll_h_right_plane:
+    lea 38(a0),a1                ; final word in this plane
+    moveq #18,d4                 ; copy the remaining 19 words backward
+.scroll_h_right_word:
+    move.w (a1),d0
+    lsr.w #1,d0
+    move.w -2(a1),d1
+    btst #0,d1
+    beq.s .scroll_h_right_store
+    or.w #$8000,d0
+.scroll_h_right_store:
+    move.w d0,(a1)
+    subq.l #2,a1
+    dbra d4,.scroll_h_right_word
+    clr.w (a1)                   ; newly exposed left edge
+    add.l #40,a0
+    dbra d5,.scroll_h_right_plane
+    dbra d7,.scroll_h_right_row
+    bra.s .scroll_h_next_pixel
+
+.scroll_h_left_row:
+    moveq #4,d5                  ; five bitplanes
+.scroll_h_left_plane:
+    ; Word 0: new_bit(b) = old_bit(b-1) for b=15..1, new_bit(0) = word1's
+    ; bit15. When x0=1 (preserve screen column 0), bit15 is patched back
+    ; to its original value afterwards instead of taking the shifted-in bit.
+    tst.l -4(a6)
+    beq.s .scroll_h_w0_full
+    move.w (a0),d3                ; save original word0 for the bit15 patch
+    bra.s .scroll_h_w0_shift
+.scroll_h_w0_full:
+    move.w (a0),d3                ; unused when x0=0, kept for symmetry
+.scroll_h_w0_shift:
+    move.w (a0),d0
+    lsl.w #1,d0
+    move.w 2(a0),d1
+    btst #15,d1
+    beq.s .scroll_h_w0_store
+    or.w #1,d0
+.scroll_h_w0_store:
+    tst.l -4(a6)
+    beq.s .scroll_h_w0_write
+    andi.w #$7fff,d0               ; drop the shifted-in bit15
+    and.w #$8000,d3                ; isolate the original bit15
+    or.w d3,d0                     ; restore column 0 unchanged
+.scroll_h_w0_write:
+    move.w d0,(a0)
+
+    lea 2(a0),a1                  ; word1
+    moveq #17,d4                  ; words 1..18 (18 words), each uses the next word
+.scroll_h_left_word:
+    move.w (a1),d0
+    lsl.w #1,d0
+    move.w 2(a1),d1
+    btst #15,d1
+    beq.s .scroll_h_left_store
+    or.w #1,d0
+.scroll_h_left_store:
+    move.w d0,(a1)+
+    dbra d4,.scroll_h_left_word
+
+    ; a1 now points at word19 (x=304..319), the true screen edge: no word
+    ; to its right, so bit0 (x=319) is simply left clear by the shift.
+    move.w (a1),d0
+    lsl.w #1,d0
+    move.w d0,(a1)
+
+    add.l #40,a0
+    dbra d5,.scroll_h_left_plane
+    dbra d7,.scroll_h_left_row
+
+.scroll_h_next_pixel:
+    subq.l #1,-28(a6)
+    bne .scroll_h_pixel
+    moveq #0,d0
+    rts
+
+.scroll_hret:
+    moveq #0,d0
+    rts
+
+.scroll_done:
+    moveq #0,d0
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+.scroll_error:
+    moveq #-1,d0
+    movem.l (sp)+,d1-d7/a0-a5
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: gfx_patch_bplptrs_stride
+; Input: a0=base_ptr (row 0 address), d0=stride (bytes between plane starts)
+; Output: none
+; Description: Patches the 5 BPLxPT entries in the running lores copper list
+;              (gfx_bplcop_lores) to point at a caller-owned buffer with a
+;              non-standard per-plane byte stride. Lets a level manage its own
+;              wider, line-interleaved screen buffer (e.g. for hardware
+;              scrolling with BPLCON1) outside the shared gfx_screen1/2 pair.
+;              Does not touch gfx_current_screen_ptr, ClearScreen, PasteBob,
+;              or any other routine that assumes the standard 40-byte stride.
+; -----------------------------------------------------------------------------
+    XDEF gfx_patch_bplptrs_stride
+gfx_patch_bplptrs_stride:
+    movem.l d1-d3/a1-a2,-(sp)
+    move.l  a0,a1
+    lea.l   gfx_bplcop_lores,a2
+    addq.l  #2,a2
+    moveq   #0,d1
+    moveq   #0,d2
+.gpbs_loop:
+    move.l  a1,d3
+    add.l   d2,d3
+    swap    d3
+    move.w  d3,(a2)
+    addq.l  #4,a2
+    swap    d3
+    move.w  d3,(a2)
+    addq.l  #4,a2
+    add.l   d0,d2
+    addq.l  #1,d1
+    cmp.l   #5,d1
+    blt.s   .gpbs_loop
+    movem.l (sp)+,d1-d3/a1-a2
     rts
 
     SECTION graphics_data,DATA

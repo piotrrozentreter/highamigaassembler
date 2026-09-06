@@ -1,0 +1,30 @@
+data test_data:
+    test_word.w = $1234
+
+code main:
+
+extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int, 
+                   __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int, 
+                   __reg(d6) pixels: int) -> int;
+
+extern func SetGraphicsMode(__reg(d0) mode: int) -> int;
+extern func ClearScreen() -> int;
+
+proc test_scroll() -> int {
+    var result: int;
+    
+    result = SetGraphicsMode(0);
+    if (result != 0) {
+        return -1;
+    }
+    
+    result = ClearScreen();
+    
+    result = Scroll(0, 0, 319, 255, 0, -1, 10);
+    
+    if (result == 0) {
+        return 0;
+    } else {
+        return -1;
+    }
+}

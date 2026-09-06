@@ -15,6 +15,18 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   coordinates outside +/-4096 (where `LINE` would still clip and draw). `lib/hardware.i` gained
   the `BLTBDAT` and `BLTADAT` register definitions this needs.
 
+- **`Scroll(x0, y0, x1, y1, hor, vert, pixels)` in `lib/graphics.s`:** scrolls a rectangular
+  screen region vertically by copying scanlines and filling newly exposed rows with black (color 0).
+  Supports mode 0 (320×256×32 lores) and mode 1 (640×256×16 hires); returns `-1` for HAM6 mode
+  or invalid coordinates. Parameters are register-based (`d0`–`d6`) for minimal function-call overhead.
+  Input validation ensures `x0 < x1`, `y0 < y1`, `pixels > 0`, and `hor`/`vert` ∈ {-1, 0, 1}.
+  **Vertical scrolling:** fully implemented with CPU-based forward/backward copy to avoid data
+  corruption. **Horizontal scrolling:** stubbed (returns 0 but performs no operation); future versions
+  will accelerate with the Blitter. Fill color is always black; no option to customize. 
+  New docs: [SCROLL_FUNCTION.md](../docs/SCROLL_FUNCTION.md),
+  [SCROLL_EXAMPLES.md](../docs/SCROLL_EXAMPLES.md), [examples/scroll_demo.has](../examples/scroll_demo.has),
+  [examples/scroll_comprehensive_test.has](../examples/scroll_comprehensive_test.has).
+
 ### Added
 
 - **GUI Creator bitmap colour-depth setting:** Bitmap widgets now store a `COLORS` value in

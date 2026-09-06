@@ -97,6 +97,7 @@ OUT_EXE="$BUILD/$BASE_NAME.exe"
 
 # Exclude alternate font object to avoid duplicate symbol 'fonts'.
 LIB_SOURCES=(
+    "$LIB_DIR/debug.s"
     "$LIB_DIR/gui.s"
     "$LIB_DIR/gui_keyboard.s"
     "$LIB_DIR/graphics.s"
@@ -242,6 +243,7 @@ done
 
 # Deterministic library order (only include those requested).
 ORDERED_LIBS=(
+    "$LIB_DIR/debug.s"
     "$LIB_DIR/helpers.s"
     "$LIB_DIR/takeover.s"
     "$LIB_DIR/graphics.s"
@@ -249,6 +251,7 @@ ORDERED_LIBS=(
     "$LIB_DIR/input.s"
     "$LIB_DIR/keyboard.s"
     "$LIB_DIR/sprite.s"
+    "$LIB_DIR/scroll.s"
     "$LIB_DIR/gui.s"
     "$LIB_DIR/gui_keyboard.s"
     "$LIB_DIR/str.s"

@@ -1,0 +1,521 @@
+// Scroll Function Demo - Comprehensive working example
+// This program demonstrates all major scroll usage patterns
+// Compile: python3 -m hasc.cli examples/scroll_demo.has -o /tmp/scroll_demo.s
+// Assemble: vasmm68k_mot -Fhunkexe -o /tmp/scroll_demo.o /tmp/scroll_demo.s
+
+code main:
+    extern var fonts: int;
+    // Debug output is buffered and flushed to DOS after ReleaseSystem.
+    extern func DebugSetEnabled(flag: int) -> int;
+    extern func DebugClear() -> int;
+    extern func DebugLogStr(msg: int) -> int;
+    extern func DebugLogInt(value: int) -> int;
+    extern func DebugFlushToDos() -> void;
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func SetFont(ptr: int) -> int;
+    extern func SetColor(id: int, col: int) -> int;
+    extern func Text(x: int, y: int, msg: int, color: int) -> int;
+    extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func ClearScreen() -> int;
+    extern func UpdateCopperList() -> int;
+    extern func SwapScreen() -> int;
+    extern func WaitVBlank() -> int;
+    extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int, 
+                       __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int, 
+                       __reg(d6) pixels: int) -> int;
+    
+    public main;
+    
+    // Call main and exit
+    asm {
+        jsr TakeSystem
+        jsr main
+        jsr ReleaseSystem
+        jsr DebugFlushToDos
+        rts
+    }
+    
+    
+    // ========================================================================
+    // DEMO 1: Basic full-screen scroll up
+    // ========================================================================
+    
+    proc demo_scroll_up(pixels: int) -> int {
+        // Scroll entire screen upward
+        // The bottom row is filled with black, and top row scrolls off
+        var result: int = Scroll(0, 0, 319, 255, 0, -1, pixels);
+        return result;
+    }
+    
+    
+    // ========================================================================
+    // DEMO 2: Full-screen scroll down
+    // ========================================================================
+    
+    proc demo_scroll_down(pixels: int) -> int {
+        // Scroll entire screen downward
+        // The top row is filled with black, and bottom row scrolls off
+        var result: int = Scroll(0, 0, 319, 255, 0, 1, pixels);
+        return result;
+    }
+    
+    
+    // ========================================================================
+    // DEMO 3: Scroll a sub-region (window)
+    // ========================================================================
+    
+    proc demo_scroll_window(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
+        // Scroll only a rectangular window within the screen
+        // The rest of the screen remains unchanged
+        // Useful for scrolling UI elements like text boxes, menus, or game areas
+        var result: int = Scroll(x0, y0, x1, y1, 0, -1, pixels);
+        return result;
+    }
+    
+    
+    // ========================================================================
+    // DEMO 4: Animation loop with continuous scrolling
+    // ========================================================================
+    
+    proc demo_animate_scroll_loop(num_frames: int, pixels_per_frame: int) -> int {
+        // Scroll repeatedly to create smooth animation
+        // In a real application, you would:
+        // - Draw new content after each scroll
+        // - Synchronize with VBlank
+        // - Swap display buffers
+        
+        var frame: int = 0;
+        var result: int;
+        
+        while (frame < num_frames) {
+            // Scroll up by pixels_per_frame
+            result = Scroll(0, 0, 319, 255, 0, -1, pixels_per_frame);
+            
+            if (result != 0) {
+                // Scroll failed (graphics mode may not be initialized)
+                return -1;
+            }
+            
+            frame = frame + 1;
+        }
+        
+        return 0;  // All frames completed successfully
+    }
+    
+    
+    // ========================================================================
+    // DEMO 5: Safe scroll with input validation
+    // ========================================================================
+    
+    proc demo_safe_scroll(pixels: int) -> int {
+        // Validate parameters before calling Scroll
+        
+        if (pixels <= 0) {
+            return -1;  // Pixel count must be positive
+        }
+        
+        if (pixels > 256) {
+            return -1;  // Prevent excessive scrolling
+        }
+        
+        // Attempt scroll
+        var result: int = Scroll(0, 0, 319, 255, 0, -1, pixels);
+        
+        if (result != 0) {
+            // Scroll failed (possible causes):
+            // - Graphics mode not initialized
+            // - HAM6 mode active (unsupported)
+            return -1;
+        }
+        
+        return 0;  // Success
+    }
+    
+    
+    // ========================================================================
+    // DEMO 6: Parallax scrolling (different scroll speeds for layers)
+    // ========================================================================
+    
+    proc demo_parallax_scroll(bg_pixels: int, fg_pixels: int) -> int {
+        // Scroll background and foreground at different rates
+        // for a classic parallax effect
+        
+        // Scroll background (top half) slower
+        var result: int = Scroll(0, 0, 319, 127, 0, -1, bg_pixels);
+        if (result != 0) {
+            return -1;
+        }
+        
+        // Scroll foreground (bottom half) faster
+        result = Scroll(0, 128, 319, 255, 0, -1, fg_pixels);
+        if (result != 0) {
+            return -1;
+        }
+        
+        return 0;  // Both scrolls successful
+    }
+    
+    
+    // ========================================================================
+    // DEMO 7: Error handling pattern
+    // ========================================================================
+    
+    proc demo_robust_scroll(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
+        // Comprehensive error checking before and after scroll
+        
+        // Pre-flight validation
+        if (pixels <= 0) {
+            return -1;  // Invalid pixel count
+        }
+        
+        if (x0 >= x1 || y0 >= y1) {
+            return -1;  // Invalid region (must be x0 < x1 and y0 < y1)
+        }
+        
+        // For lores mode, check bounds
+        if (x1 > 319 || y1 > 255) {
+            return -1;  // Coordinates out of bounds for lores
+        }
+        
+        // Attempt scroll
+        var result: int = Scroll(x0, y0, x1, y1, 0, -1, pixels);
+        
+        // Handle result
+        if (result != 0) {
+            return -1;  // Scroll failed
+        }
+        
+        return 0;  // Success
+    }
+    
+    
+    // ========================================================================
+    // DEMO 8: Scroll with pixel rendering
+    // ========================================================================
+    
+    proc demo_scroll_and_render(num_frames: int) -> int {
+        // Combine scrolling with pixel rendering
+        // This simulates a typical game loop where you:
+        // 1. Scroll the game area
+        // 2. Render new content (sprites, etc.)
+        // 3. Display the result
+        
+        var frame: int = 0;
+        var result: int;
+        var y_pos: int;
+        
+        while (frame < num_frames) {
+            // Scroll the game area up by 1 pixel per frame
+            result = Scroll(0, 0, 319, 255, 0, -1, 1);
+            if (result != 0) {
+                return -1;
+            }
+            
+            // In a real application, render new content here
+            // For example, draw pixels at the newly exposed rows
+            y_pos = 255;  // Bottom of screen
+            
+            // This would be a full sprite/tile renderer in a real game
+            // SetPixel(160, y_pos, 31);  // Example: white dot at bottom
+            
+            // Update display
+            UpdateCopperList();
+            SwapScreen();
+            
+            frame = frame + 1;
+        }
+        
+        return 0;
+    }
+    
+    
+    // ========================================================================
+    // DEMO 9: Edge cases and boundary testing
+    // ========================================================================
+    
+    proc demo_edge_case_full_height_scroll() -> int {
+        // Test scrolling by exactly the region height
+        // This should clear the entire region
+        var result: int = Scroll(0, 0, 319, 255, 0, -1, 256);
+        return result;
+    }
+    
+    proc demo_edge_case_single_pixel() -> int {
+        // Test scrolling by only 1 pixel
+        var result: int = Scroll(0, 0, 319, 255, 0, -1, 1);
+        return result;
+    }
+    
+    proc demo_edge_case_small_window() -> int {
+        // Test scrolling a very small window
+        var result: int = Scroll(100, 100, 120, 120, 0, -1, 5);
+        return result;
+    }
+    
+    
+    // ========================================================================
+    // DEMO 10: Scroll direction patterns
+    // ========================================================================
+    
+    proc demo_scroll_down_variant(pixels: int) -> int {
+        // Scroll downward instead of upward
+        // Top rows are filled with black
+        var result: int = Scroll(0, 0, 319, 255, 0, 1, pixels);
+        return result;
+    }
+
+
+    proc debug_scroll_result(label: int, result: int) -> void {
+        call DebugLogStr(label);
+        call DebugLogInt(result);
+    }
+
+
+    proc draw_scroll_pattern() -> int {
+        var y: int = 0;
+        var color: int = 1;
+        var band_line: int = 0;
+
+        while (y < 256) {
+            call LINE(0, y, 319, y, color);
+            y = y + 1;
+            band_line = band_line + 1;
+            if (band_line == 8) {
+                band_line = 0;
+                color = color + 1;
+                if (color == 8) {
+                    color = 1;
+                }
+            }
+        }
+
+        // A unique marker gives the scroll motion a fixed visual landmark.
+        call LINE(0, 255, 319, 255, 7);
+
+        return 0;
+    }
+
+
+    proc draw_text_scroll_content() -> int {
+        call Text(2, 2, &text_scroll_1, 1);
+        call Text(2, 6, &text_scroll_2, 2);
+        call Text(2, 10, &text_scroll_3, 3);
+        call Text(2, 14, &text_scroll_4, 4);
+        call Text(2, 18, &text_scroll_5, 5);
+        call Text(2, 22, &text_scroll_6, 6);
+        call Text(2, 26, &text_scroll_7, 7);
+        call Text(2, 30, &text_scroll_8, 1);
+        return 0;
+    }
+
+
+    proc demo_visual_scroll() -> int {
+        var frame: int = 0;
+        var text_tick: int = 0;
+        var result: int;
+
+        call DebugLogStr(&debug_visual_start);
+        result = draw_scroll_pattern();
+        if (result != 0) {
+            return result;
+        }
+
+        call SetFont(&fonts);
+        result = draw_text_scroll_content();
+        if (result != 0) {
+            return result;
+        }
+
+        call UpdateCopperList();
+        while (frame < 50) {
+            call WaitVBlank();
+            frame = frame + 1;
+        }
+
+        frame = 0;
+        while (frame < 180) {
+            call WaitVBlank();
+            result = Scroll(0, 0, 319, 255, 0, -1, 1);
+            if (result != 0) {
+                return result;
+            }
+
+            call UpdateCopperList();
+            text_tick = text_tick + 1;
+            if (text_tick == 8) {
+                call Text(2, 31, &text_scroll_stream, 1);
+                text_tick = 0;
+            }
+            frame = frame + 1;
+        }
+
+        call DebugLogStr(&debug_visual_done);
+        return 0;
+    }
+    
+    
+    // ========================================================================
+    // Main program
+    // ========================================================================
+    
+    proc main() -> int {
+        var result: int;
+        var test_count: int = 0;
+        var pass_count: int = 0;
+
+        call DebugClear();
+        call DebugSetEnabled(1);
+        call DebugLogStr(&debug_start);
+        
+        // Initialize graphics
+        result = SetGraphicsMode(0);  // Lores mode: 320x256x32 colors
+        if (result != 0) {
+            call DebugLogStr(&debug_graphics_failed);
+            call DebugLogInt(result);
+            return -1;  // Graphics mode not available
+        }
+        call DebugLogStr(&debug_graphics_ready);
+
+        call SetColor(0, $000);
+        call SetColor(1, $FFF);
+        call SetColor(2, $F00);
+        call SetColor(3, $0F0);
+        call SetColor(4, $00F);
+        call SetColor(5, $FF0);
+        call SetColor(6, $F0F);
+        call SetColor(7, $0FF);
+        call ClearScreen();
+
+        result = demo_visual_scroll();
+        call DebugLogStr(&debug_visual_result);
+        call DebugLogInt(result);
+        if (result != 0) {
+            return result;
+        }
+        
+        // ========================================================================
+        // Test Suite
+        // ========================================================================
+        
+        // Test 1: Basic full-screen scroll up
+        test_count = test_count + 1;
+        result = demo_scroll_up(16);
+        call debug_scroll_result(&debug_test_1, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 2: Full-screen scroll down
+        test_count = test_count + 1;
+        result = demo_scroll_down(16);
+        call debug_scroll_result(&debug_test_2, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 3: Scroll a sub-region
+        test_count = test_count + 1;
+        result = demo_scroll_window(50, 50, 270, 200, 10);
+        call debug_scroll_result(&debug_test_3, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 4: Safe scroll with validation
+        test_count = test_count + 1;
+        result = demo_safe_scroll(32);
+        call debug_scroll_result(&debug_test_4, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 5: Robust scroll with detailed error checking
+        test_count = test_count + 1;
+        result = demo_robust_scroll(0, 0, 319, 255, 8);
+        call debug_scroll_result(&debug_test_5, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 6: Edge case - scroll by region height (full clear)
+        test_count = test_count + 1;
+        result = demo_edge_case_full_height_scroll();
+        call debug_scroll_result(&debug_test_6, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 7: Edge case - single pixel scroll
+        test_count = test_count + 1;
+        result = demo_edge_case_single_pixel();
+        call debug_scroll_result(&debug_test_7, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 8: Edge case - small window scroll
+        test_count = test_count + 1;
+        result = demo_edge_case_small_window();
+        call debug_scroll_result(&debug_test_8, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 9: Parallax scrolling
+        test_count = test_count + 1;
+        result = demo_parallax_scroll(2, 4);
+        call debug_scroll_result(&debug_test_9, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Test 10: Scroll down variant
+        test_count = test_count + 1;
+        result = demo_scroll_down_variant(8);
+        call debug_scroll_result(&debug_test_10, result);
+        if (result == 0) {
+            pass_count = pass_count + 1;
+        }
+        
+        // Summary
+        if (pass_count == test_count) {
+            call DebugLogStr(&debug_done);
+            call DebugLogInt(pass_count);
+            return 0;  // All tests passed
+        } else {
+            call DebugLogStr(&debug_failed);
+            call DebugLogInt(pass_count);
+            return -1;  // Some tests failed
+        }
+    }
+
+data scroll_demo_debug_data:
+    debug_start.b = "scroll demo start",0
+    debug_graphics_ready.b = "graphics ready",0
+    debug_graphics_failed.b = "graphics setup failed",0
+    debug_visual_start.b = "visual scroll start",0
+    debug_visual_done.b = "visual scroll done",0
+    debug_visual_result.b = "visual scroll result",0
+    debug_test_1.b = "TEST 1: scrolling up",0
+    debug_test_2.b = "TEST 2: scrolling down",0
+    debug_test_3.b = "TEST 3: sub-region",0
+    debug_test_4.b = "TEST 4: safe scroll",0
+    debug_test_5.b = "TEST 5: robust scroll",0
+    debug_test_6.b = "TEST 6: full clear",0
+    debug_test_7.b = "TEST 7: one pixel",0
+    debug_test_8.b = "TEST 8: small window",0
+    debug_test_9.b = "TEST 9: parallax",0
+    debug_test_10.b = "TEST 10: scroll down",0
+    debug_done.b = "ALL TESTS RETURNED SUCCESS",0
+    debug_failed.b = "ONE OR MORE TESTS FAILED",0
+    text_scroll_1.b = "VERTICAL TEXT SCROLL DEMO",0
+    text_scroll_2.b = "The screen moves one pixel per frame.",0
+    text_scroll_3.b = "Each line stays in the bitplane screen.",0
+    text_scroll_4.b = "Scroll copies the planar rows upward.",0
+    text_scroll_5.b = "The exposed bottom rows are cleared.",0
+    text_scroll_6.b = "This is a real graphics scroll test.",0
+    text_scroll_7.b = "Watch the letters move off the top.",0
+    text_scroll_8.b = "Vertical scrolling complete.",0
+    text_scroll_stream.b = "NEW TEXT ENTERS FROM BELOW",0

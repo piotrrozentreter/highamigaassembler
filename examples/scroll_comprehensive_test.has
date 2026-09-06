@@ -1,0 +1,116 @@
+data test_scroll_data:
+    test_result.l = 0
+    test_count.l = 0
+    pass_count.l = 0
+    fail_count.l = 0
+
+code test_scroll:
+
+extern func SetGraphicsMode(__reg(d0) mode: int) -> int;
+extern func ClearScreen() -> int;
+extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int, 
+                   __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int, 
+                   __reg(d6) pixels: int) -> int;
+
+proc test_1_scroll_up() -> int {
+    var result: int = Scroll(0, 0, 319, 255, 0, -1, 10);
+    return result;
+}
+
+proc test_2_scroll_down() -> int {
+    var result: int = Scroll(0, 0, 319, 255, 0, 1, 16);
+    return result;
+}
+
+proc test_3_scroll_region() -> int {
+    var result: int = Scroll(40, 40, 280, 200, 0, -1, 5);
+    return result;
+}
+
+proc test_4_scroll_large() -> int {
+    var result: int = Scroll(0, 0, 319, 31, 0, -1, 32);
+    return result;
+}
+
+proc test_5_invalid_coords() -> int {
+    var result: int = Scroll(319, 0, 0, 255, 0, -1, 10);
+    return result;
+}
+
+proc test_6_zero_pixels() -> int {
+    var result: int = Scroll(0, 0, 319, 255, 0, -1, 0);
+    return result;
+}
+
+proc test_7_scroll_no_direction() -> int {
+    var result: int = Scroll(0, 0, 319, 255, 0, 0, 10);
+    return result;
+}
+
+proc run_all_tests() -> int {
+    var passed: int = 0;
+    var failed: int = 0;
+    var result: int;
+    
+    result = SetGraphicsMode(0);
+    if (result != 0) {
+        return -1;
+    }
+    
+    result = ClearScreen();
+    
+    result = test_1_scroll_up();
+    if (result == 0) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_2_scroll_down();
+    if (result == 0) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_3_scroll_region();
+    if (result == 0) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_4_scroll_large();
+    if (result == 0) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_5_invalid_coords();
+    if (result == -1) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_6_zero_pixels();
+    if (result == -1) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    result = test_7_scroll_no_direction();
+    if (result == 0) {
+        passed = passed + 1;
+    } else {
+        failed = failed + 1;
+    }
+    
+    if (failed == 0) {
+        return passed;
+    } else {
+        return -1;
+    }
+}
