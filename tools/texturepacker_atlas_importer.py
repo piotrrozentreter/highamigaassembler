@@ -319,6 +319,17 @@ def quantize_sprite_with_palette(
 # Label helpers
 # ---------------------------------------------------------------------------
 
+def _normalize_label_part(value: str, fallback: str) -> str:
+    """Convert one component of an assembly label to a safe identifier."""
+    value = re.sub(r'[^A-Za-z0-9_]+', '_', value)
+    value = re.sub(r'_+', '_', value).strip('_')
+    if not value:
+        value = fallback
+    if value[0].isdigit():
+        value = '_' + value
+    return value
+
+
 def _safe_label(name: str, prefix: str) -> str:
     """Convert a sprite name to a valid assembly label.
 
@@ -329,13 +340,7 @@ def _safe_label(name: str, prefix: str) -> str:
     """
     candidate = name.replace('\\', '/')
     candidate = re.sub(r'\.[^.\/]+$', '', candidate)  # drop final extension only
-    candidate = re.sub(r'[^A-Za-z0-9_]+', '_', candidate)
-    candidate = re.sub(r'_+', '_', candidate).strip('_')
-    if not candidate:
-        candidate = 'sprite'
-    if candidate[0].isdigit():
-        candidate = '_' + candidate
-    return f"{prefix}_{candidate}"
+    return f"{_normalize_label_part(prefix, 'atlas')}_{_normalize_label_part(candidate, 'sprite')}"
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +777,8 @@ def main() -> int:
     if args.shared_palette and not args.shared_palette_file:
         parser.error('--shared-palette requires --shared-palette-file')
 
-    shared_palette_label = f"{label_prefix}_palette" if args.shared_palette else None
+    palette_label = f"{_normalize_label_part(label_prefix, 'atlas')}_palette"
+    shared_palette_label = palette_label if args.shared_palette else None
 
     try:
         results, shared_palette, has_transparent = process_atlas(
@@ -801,8 +807,7 @@ def main() -> int:
     shared_pal_path: Optional[Path] = None
     if args.shared_palette_file:
         shared_pal_path = Path(args.shared_palette_file)
-        pal_label = f"{label_prefix}_palette"
-        write_shared_palette_file(shared_pal_path, pal_label, shared_palette, args.planes)
+        write_shared_palette_file(shared_pal_path, palette_label, shared_palette, args.planes)
 
     # Optional master include
     if args.master_include:

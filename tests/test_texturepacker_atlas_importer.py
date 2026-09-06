@@ -3,6 +3,7 @@ from pathlib import Path
 from PIL import Image
 
 from tools.texturepacker_atlas_importer import (
+    main as atlas_main,
     process_atlas,
     write_master_include,
     write_shared_palette_file,
@@ -34,6 +35,40 @@ def test_repeated_frames_are_separate_files_by_default(tmp_path: Path) -> None:
     assert len(results) == 2
     assert (tmp_path / "walk_walk_0.s").exists()
     assert (tmp_path / "walk_walk_1.s").exists()
+
+
+def test_hyphens_in_generated_labels_become_underscores(tmp_path: Path, monkeypatch) -> None:
+    atlas_path = tmp_path / "atlas-pack.png"
+    Image.new("RGBA", (1, 1), (255, 0, 0, 255)).save(atlas_path)
+    xml_path = tmp_path / "atlas-pack.xml"
+    xml_path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<TextureAtlas imagePath="atlas-pack.png">
+    <sprite n="enemy-heli.png" x="0" y="0" w="1" h="1"/>
+</TextureAtlas>
+""",
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "output"
+    palette_path = output_dir / "atlas-pack_palette.s"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "texturepacker_atlas_importer.py", str(xml_path), "--outdir", str(output_dir),
+            "--shared-palette", "--shared-palette-file", str(palette_path), "--force",
+        ],
+    )
+
+    assert atlas_main() == 0
+
+    assembly = (output_dir / "atlas_pack_enemy_heli.s").read_text(encoding="utf-8")
+    assert "atlas_pack_enemy_heli:" in assembly
+    assert "atlas-pack_enemy-heli:" not in assembly
+    palette = palette_path.read_text(encoding="utf-8")
+    assert "\tXDEF\tatlas_pack_palette" in palette
+    assert "atlas_pack_palette:" in palette
+    assert "atlas-pack_palette" not in palette
 
 
 def test_deduplicated_frames_emit_alias_labels_once(tmp_path: Path) -> None:
