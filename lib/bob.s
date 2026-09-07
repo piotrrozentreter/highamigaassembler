@@ -11,6 +11,7 @@
     XREF HeapFree
     XREF gfx_current_mode
     XREF gfx_current_screen_ptr
+    XREF gfx_active_playfield
 
 
 WAITBLIT:MACRO
@@ -55,6 +56,19 @@ WAITBLIT:MACRO
 CreateBob:
     link a6,#0
     movem.l d1-d7/a0-a4,-(sp)
+    ; BOB storage supports lores/hires/dual-playfield plane layouts; HAM6 has
+    ; no BOB plane-count mapping and must be rejected explicitly (not treated
+    ; as hires). Same mode order as _SetPixel/_gfx_can_plot in lib/graphics.s:
+    ; lores -> hires -> dual playfield -> else reject.
+    move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .cb_mode_ok
+    cmp.w #1,d0
+    beq.s .cb_mode_ok
+    cmp.w #3,d0
+    beq.s .cb_mode_ok
+    bra .cb_fail
+.cb_mode_ok:
     move.l 8(a6),a1        ; a1 = descriptor_ptr
     move.l 12(a6),d3       ; d3 = b parameter (0 or 1)
     ; read width/height/color_count from descriptor and save to non-clobbered registers
@@ -93,10 +107,15 @@ CreateBob:
     beq.s .cb_no_background  ; b=0, skip background allocation
 
     ; --- allocate per-instance background buffer ---
-    ; Determine planes/bytes per plane from current gfx mode
+    ; Determine planes/bytes per plane from current gfx mode. Entry already
+    ; guarantees mode is 0, 1, or 3 (see .cb_mode_ok above).
     move.w gfx_current_mode,d4
     tst.w d4
     beq.s .cb_lores
+    cmp.w #1,d4
+    beq.s .cb_hires
+    moveq #3,d4                 ; dual playfield: 3 owned planes (only remaining possibility)
+    bra.s .cb_pl_common
 .cb_hires:
     moveq #80,d5          ; bytes_per_plane
     moveq #4,d4           ; planes (reuse d4 for planes)
@@ -173,6 +192,17 @@ MirrorBobHorizontally:
     move.l d0,a4                   ; a4 = dst_data_ptr (for cleanup)
     move.l d0,a2                   ; a2 = dst_mask_ptr (for cleanup)
 
+    ; BOB storage supports lores/hires/dual-playfield plane layouts; HAM6 is
+    ; rejected explicitly (same mode order as CreateBob/_gfx_can_plot).
+    move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbh_mode_ok
+    cmp.w #1,d0
+    beq.s .mbh_mode_ok
+    cmp.w #3,d0
+    beq.s .mbh_mode_ok
+    bra .mbh_fail
+.mbh_mode_ok:
     move.l 8(a6),a0                ; a0 = source handle
     cmpa.l #0,a0
     beq .mbh_fail
@@ -199,17 +229,17 @@ MirrorBobHorizontally:
     ; Plane count must match display mode because BOBs are stored interleaved
     ; according to SetGraphicsMode, not according to source color_count.
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbh_data_5planes
     cmpi.w #1,d0
     beq.s .mbh_data_4planes
-    cmpi.w #2,d0
-    beq.s .mbh_data_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbh_have_planes_data
 .mbh_data_4planes:
     moveq #4,d0
     bra.s .mbh_have_planes_data
-.mbh_data_6planes:
-    moveq #6,d0
+.mbh_data_5planes:
+    moveq #5,d0
 .mbh_have_planes_data:
     move.w d7,d1
     mulu d0,d1                     ; d1 = pixel lines (height * planes)
@@ -229,17 +259,17 @@ MirrorBobHorizontally:
     ; Allocate mirrored mask block: header + row_bytes * (height * planes)
     ; Mask payload is row-interleaved like object data in this project.
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbh_mask_alloc_5planes
     cmpi.w #1,d0
     beq.s .mbh_mask_alloc_4planes
-    cmpi.w #2,d0
-    beq.s .mbh_mask_alloc_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbh_mask_alloc_have_planes
 .mbh_mask_alloc_4planes:
     moveq #4,d0
     bra.s .mbh_mask_alloc_have_planes
-.mbh_mask_alloc_6planes:
-    moveq #6,d0
+.mbh_mask_alloc_5planes:
+    moveq #5,d0
 .mbh_mask_alloc_have_planes:
     move.w d7,d1
     mulu d0,d1                     ; d1 = mask lines (height * planes)
@@ -309,17 +339,17 @@ MirrorBobHorizontally:
 
     ; Mirror object data payload (height * planes lines)
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbh_copy_5planes
     cmpi.w #1,d0
     beq.s .mbh_copy_4planes
-    cmpi.w #2,d0
-    beq.s .mbh_copy_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbh_have_planes_copy
 .mbh_copy_4planes:
     moveq #4,d0
     bra.s .mbh_have_planes_copy
-.mbh_copy_6planes:
-    moveq #6,d0
+.mbh_copy_5planes:
+    moveq #5,d0
 .mbh_have_planes_copy:
     move.w d7,d5
     mulu d0,d5                     ; d5 = total pixel lines
@@ -357,17 +387,17 @@ MirrorBobHorizontally:
 
 .mbh_copy_mask:
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbh_mask_copy_5planes
     cmpi.w #1,d0
     beq.s .mbh_mask_copy_4planes
-    cmpi.w #2,d0
-    beq.s .mbh_mask_copy_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbh_mask_copy_have_planes
 .mbh_mask_copy_4planes:
     moveq #4,d0
     bra.s .mbh_mask_copy_have_planes
-.mbh_mask_copy_6planes:
-    moveq #6,d0
+.mbh_mask_copy_5planes:
+    moveq #5,d0
 .mbh_mask_copy_have_planes:
     move.l 4(a0),a0                ; source mask payload
     addq.l #4,a0
@@ -445,6 +475,17 @@ MirrorBobVertically:
     move.l d0,a4                   ; a4 = dst_data_ptr (for cleanup)
     move.l d0,a2                   ; a2 = dst_mask_ptr (for cleanup)
 
+    ; BOB storage supports lores/hires/dual-playfield plane layouts; HAM6 is
+    ; rejected explicitly (same mode order as CreateBob/_gfx_can_plot).
+    move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbv_mode_ok
+    cmp.w #1,d0
+    beq.s .mbv_mode_ok
+    cmp.w #3,d0
+    beq.s .mbv_mode_ok
+    bra .mbv_fail
+.mbv_mode_ok:
     move.l 8(a6),a0                ; a0 = source handle
     cmpa.l #0,a0
     beq .mbv_fail
@@ -469,17 +510,17 @@ MirrorBobVertically:
 
     ; Allocate mirrored data block: header + row_bytes * (height * planes)
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbv_data_5planes
     cmpi.w #1,d0
     beq.s .mbv_data_4planes
-    cmpi.w #2,d0
-    beq.s .mbv_data_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbv_have_planes_data
 .mbv_data_4planes:
     moveq #4,d0
     bra.s .mbv_have_planes_data
-.mbv_data_6planes:
-    moveq #6,d0
+.mbv_data_5planes:
+    moveq #5,d0
 .mbv_have_planes_data:
     move.w d7,d1
     mulu d0,d1                     ; d1 = pixel lines (height * planes)
@@ -498,17 +539,17 @@ MirrorBobVertically:
 
     ; Allocate mirrored mask block: header + row_bytes * (height * planes)
     move.w gfx_current_mode,d0
+    tst.w d0
+    beq.s .mbv_mask_5planes
     cmpi.w #1,d0
     beq.s .mbv_mask_4planes
-    cmpi.w #2,d0
-    beq.s .mbv_mask_6planes
-    moveq #5,d0
+    moveq #3,d0                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbv_have_mask_planes
 .mbv_mask_4planes:
     moveq #4,d0
     bra.s .mbv_have_mask_planes
-.mbv_mask_6planes:
-    moveq #6,d0
+.mbv_mask_5planes:
+    moveq #5,d0
 .mbv_have_mask_planes:
     move.w d7,d1
     mulu d0,d1                     ; d1 = mask lines (height * planes)
@@ -571,17 +612,17 @@ MirrorBobVertically:
     add.w d2,d2                    ; d2 = bytes per plane-row
 
     move.w gfx_current_mode,d4
+    tst.w d4
+    beq.s .mbv_copy_5planes
     cmpi.w #1,d4
     beq.s .mbv_copy_4planes
-    cmpi.w #2,d4
-    beq.s .mbv_copy_6planes
-    moveq #5,d4
+    moveq #3,d4                    ; dual playfield: 3 owned planes (only remaining possibility)
     bra.s .mbv_have_planes
 .mbv_copy_4planes:
     moveq #4,d4
     bra.s .mbv_have_planes
-.mbv_copy_6planes:
-    moveq #6,d4
+.mbv_copy_5planes:
+    moveq #5,d4
 .mbv_have_planes:
     moveq #0,d1
     move.w d2,d1
@@ -843,12 +884,19 @@ SCREEN_WIDTH640      = 640
 SCREEN_HEIGHT        = 256
 BITPLANES320         = 5
 BITPLANES640         = 4
+BITPLANESDUALPF      = 3            ; dual playfield: 3 owned planes per playfield
 
 ; Registers used: a0,a1,a2,a5(CUSTOM-preserved),d0,d1,d2
 DrawBobWithMask:
     move.w gfx_current_mode,d6
     tst.w d6
-    bne DrawBobWithMaskHires
+    beq.s .dbm_lores_body
+    cmp.w #1,d6
+    beq DrawBobWithMaskHires
+    cmp.w #3,d6
+    beq DrawBobWithMaskDualpf
+    rts
+.dbm_lores_body:
     move.l gfx_current_screen_ptr,a2        ; APTR interleaved playfield
     mulu	#SCREEN_WIDTH320/8*BITPLANES320,d1		        ; Convert Y pos into offset
     add.l	d1,a2			                ; Add offset to destination
@@ -936,6 +984,62 @@ DrawBobWithMaskHires:
     move.w  d6,BLTSIZE(a5)
     rts
 
+; DrawBobWithMaskDualpf: dual-playfield sibling of DrawBobWithMaskHires - masks
+; the paste into only the active playfield's 3 owned planes.
+DrawBobWithMaskDualpf:
+    move.l gfx_current_screen_ptr,a2        ; APTR interleaved playfield
+    mulu	#240,d1		        ; Convert Y pos into offset (240 = one 6-plane scanline)
+    add.l	d1,a2			                ; Add offset to destination
+    ext.l	d0			                    ; Clear top bits of D0
+    ror.l	#4,d0			                ; Roll shift bits to top word
+    add.w	d0,d0			                ; Bottom word: convert to byte offset
+    adda.w	d0,a2			                ; Add byte offset to destination
+    ; d1 free here - only held the Y offset consumed by add.l above, never
+    ; read again in this routine - safe to reuse for the playfield byte
+    ; offset (0=PF1, 40=PF2).
+    moveq #0,d1
+    cmp.w #2,gfx_active_playfield
+    bne.s .dbmd_pf_ready
+    moveq #40,d1
+.dbmd_pf_ready:
+    adda.w	d1,a2
+    swap	d0			                    ; Move shift value to top word
+
+    ; Wait for blitter
+    WAITBLIT
+
+    move.l	a1,BLTAPT(a5)		        ; Source A = Mask
+    move.l	a0,BLTBPT(a5)		        ; Source B = Object
+    move.l	a2,BLTCPT(a5)		        ; Source C = Background
+    move.l	a2,BLTDPT(a5)		        ; Destination = Background
+    move.w	#$FFFF,BLTAFWM(a5)	        ; No first word masking
+    move.w	#$FFFF,BLTALWM(a5)	        ; No last word masking
+    move.w	d0,BLTCON1(a5)		        ; Use shift for source B
+    or.w	#$0FCA,d0		            ; USEA,B, C and D. Minterm $CA, D=AB+/AC
+    move.w	d0,BLTCON0(a5)
+    move.w	#0,BLTAMOD(a5)		        ; No modulo - data is contiguous per plane
+    move.w	#0,BLTBMOD(a5)		        ; No modulo - data is contiguous per plane
+
+    ; chunks = ceil(width/16); modulo = 80 - chunks*2 (dual playfield per-row
+    ; modulo base is 80: 3 owned planes * 80 = 240 = one full 6-plane scanline)
+    move.w  d4,d7                   ; d7 = width
+    addi.w  #15,d7
+    lsr.w   #4,d7                   ; d7 = chunks
+    move.w  d7,d3
+    add.w   d3,d3                   ; d3 = chunks*2 bytes
+    move.w  #80,d2
+    sub.w   d3,d2                   ; d2 = 80 - chunks*2
+    move.w  d2,BLTDMOD(a5)
+    move.w  d2,BLTCMOD(a5)
+
+    move.w  d5,d6                   ; d6 = height
+    mulu    #BITPLANESDUALPF,d6     ; d6 = height * planes (3 owned planes)
+    lsl.w   #6,d6                   ; shift into bits 15-6
+
+    or.w    d7,d6
+    move.w  d6,BLTSIZE(a5)
+    rts
+
 ; DrawBob: paste bob without mask (opaque copy)
 ; Expects same register convention as DrawBobWithMask320:
 ; A0 = object pixel data (skip header already done by caller)
@@ -944,7 +1048,13 @@ DrawBobWithMaskHires:
 DrawBob:
     move.w gfx_current_mode,d6
     tst.w d6
-    bne.s DrawBobHires
+    beq.s .db_lores_body
+    cmp.w #1,d6
+    beq.s DrawBobHires
+    cmp.w #3,d6
+    beq DrawBobDualpf
+    rts
+.db_lores_body:
     move.l gfx_current_screen_ptr,a2        ; APTR interleaved playfield
     mulu	#SCREEN_WIDTH320/8*BITPLANES320,d1		        ; Convert Y pos into offset
     add.l	d1,a2			    ; Add offset to destination
@@ -1026,6 +1136,59 @@ DrawBobHires:
     move.w  d6,BLTSIZE(a5)
 
     ;move.w	#(64*BITPLANES640)<<6|(80/16),BLTSIZE(a5)
+    rts
+
+; DrawBobDualpf: dual-playfield sibling of DrawBobHires - opaque paste into
+; only the active playfield's 3 owned planes.
+DrawBobDualpf:
+    move.l gfx_current_screen_ptr,a2        ; APTR interleaved playfield
+    mulu	#240,d1		    ; Convert Y pos into offset (240 = one 6-plane scanline)
+    add.l	d1,a2			    ; Add offset to destination
+    ext.l	d0					; Clear top bits of D0
+    ror.l	#4,d0				; Roll shift bits to top word
+    add.w	d0,d0				; Bottom word: convert to byte offset
+    adda.w	d0,a2				; Add byte offset to destination
+    ; d1 free here - only held the Y offset consumed by add.l above, never
+    ; read again in this routine - safe to reuse for the playfield byte
+    ; offset (0=PF1, 40=PF2).
+    moveq #0,d1
+    cmp.w #2,gfx_active_playfield
+    bne.s .dbd_pf_ready
+    moveq #40,d1
+.dbd_pf_ready:
+    adda.w	d1,a2
+    swap	d0					; Move shift value to top word
+
+    ; Wait for blitter
+    WAITBLIT
+
+    move.l	a0,BLTAPT(a5)		; Source A = Object (opaque source)
+    move.l	a2,BLTDPT(a5)		; Destination = Background
+    move.w	#$FFFF,BLTAFWM(a5)		; No first word masking
+    move.w	#$FFFF,BLTALWM(a5)		; No last word masking
+    or.w #$09F0,d0		        ; Minterm for D = A (opaque copy)
+    move.w	d0,BLTCON0(a5) 		; Use shift value in BLTCON0
+    move.w #0,BLTCON1(a5) 		; No shift in BLTCON1
+    move.w	#0,BLTAMOD(a5) 		; No modulo - data is contiguous per plane
+
+    ; BLTSIZE = ((height*planes) << 6) | (chunks)
+    ; chunks = ceil(width/16); modulo = 80 - chunks*2 (dual playfield per-row
+    ; modulo base is 80: 3 owned planes * 80 = 240 = one full 6-plane scanline)
+    move.w  d4,d7                   ; d7 = width
+    addi.w  #15,d7
+    lsr.w   #4,d7                   ; d7 = chunks
+    move.w  d7,d3
+    add.w   d3,d3                   ; d3 = chunks*2 bytes
+    move.w  #80,d2
+    sub.w   d3,d2                   ; d2 = 80 - chunks*2
+    move.w  d2,BLTDMOD(a5)
+
+    move.w  d5,d6                   ; d6 = height
+    mulu    #BITPLANESDUALPF,d6     ; d6 = height * planes (3 owned planes)
+    lsl.w   #6,d6                   ; shift into bits 15-6
+
+    or.w    d7,d6
+    move.w  d6,BLTSIZE(a5)
     rts
 
 ; PasteBob(handle, x, y, mode)
@@ -1128,6 +1291,56 @@ PrepBOBHires:
     move.w  d6,BLTSIZE(a5)
     rts
 
+; PrepBOBDualpf: dual-playfield sibling of PrepBOBHires - reads the
+; background from only the active playfield's 3 owned planes.
+PrepBOBDualpf:
+    move.l gfx_current_screen_ptr,a1        ; APTR interleaved playfield
+    MULU	#240,d1			; Convert Y pos into offset (240 = one 6-plane scanline)
+    ADD.L	d1,a1			; Add offset to destination
+    AND.W	#$FFF0,d0		; Position without shift
+    LSR.W	#3,d0			; Convert to byte offset
+    ADDA.W	d0,a1			; Add ofset to destination
+    ; d1 free here - only held the Y offset consumed by ADD.L above, never
+    ; read again in this routine - safe to reuse for the playfield byte
+    ; offset (0=PF1, 40=PF2).
+    moveq #0,d1
+    cmp.w #2,gfx_active_playfield
+    bne.s .pbd_pf_ready
+    moveq #40,d1
+.pbd_pf_ready:
+    ADDA.W	d1,a1
+
+    ; Wait for blitter
+    WAITBLIT
+
+    MOVE.L	a1,BLTAPT(a5)		; Source A = playfield
+    MOVE.L	a0,BLTDPT(a5)		; Destination = storage
+    MOVE.W	#$FFFF,BLTAFWM(a5)	; No first word masking
+    MOVE.W	#$FFFF,BLTALWM(a5)	; No last word masking
+    MOVE.W	#$09F0,BLTCON0(a5)	; USEA, USED. Minterm $F0, D=A
+    MOVE.W	#0,BLTCON1(a5)		; Data transfer, no fills
+    MOVE.W	#0,BLTDMOD(a5)		; Skip 0 bytes of the storage
+
+    ; BLTSIZE = ((height*planes) << 6) | (chunks)
+    ; chunks = ceil(width/16); modulo = 80 - chunks*2 (dual playfield per-row
+    ; modulo base is 80: 3 owned planes * 80 = 240 = one full 6-plane scanline)
+    move.w  d4,d7                   ; d7 = width
+    addi.w  #15,d7
+    lsr.w   #4,d7                   ; d7 = chunks
+    move.w  d7,d3
+    add.w   d3,d3                   ; d3 = chunks*2 bytes
+    move.w  #80,d2
+    sub.w   d3,d2                   ; d2 = 80 - chunks*2
+    move.w  d2,BLTAMOD(a5)
+
+    move.w  d5,d6                   ; d6 = height
+    mulu    #BITPLANESDUALPF,d6     ; d6 = height * planes (3 owned planes)
+    lsl.w   #6,d6                   ; shift into bits 15-6
+
+    or.w    d7,d6
+    move.w  d6,BLTSIZE(a5)
+    rts
+
 ;-----------------------------------------------------------
 ; INPUT:	A0   - APTR Storage space
 ; 		D0.W - X pos (hor) 
@@ -1138,7 +1351,13 @@ PrepBOBHires:
 PrepBOB:	
     move.w gfx_current_mode,d6
     tst.w d6
-    bne PrepBOBHires
+    beq.s .pb_lores_body
+    cmp.w #1,d6
+    beq PrepBOBHires
+    cmp.w #3,d6
+    beq PrepBOBDualpf
+    rts
+.pb_lores_body:
     move.l gfx_current_screen_ptr,a1        ; APTR interleaved playfield
     MULU	#SCREEN_WIDTH320/8*BITPLANES320,d1			; Convert Y pos into offset
     ADD.L	d1,a1			; Add offset to destination

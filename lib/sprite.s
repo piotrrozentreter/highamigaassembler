@@ -43,6 +43,7 @@
 	XREF gfx_sprcop_lores
 	XREF gfx_sprcop_hires
 	XREF gfx_sprcop_ham6
+	XREF gfx_sprcop_dualpf
 	XREF gfx_current_mode
 
 ; Maximum hardware sprites
@@ -416,6 +417,8 @@ Sprite_UpdatePointers:
 	beq.s .use_lores
 	cmp.w #1,d3
 	beq.s .use_hires
+	cmp.w #3,d3
+	beq.s .use_dualpf
 	lea gfx_sprcop_ham6,a3
 	bra.s .got_copper
 .use_lores:
@@ -423,6 +426,9 @@ Sprite_UpdatePointers:
 	bra.s .got_copper
 .use_hires:
 	lea gfx_sprcop_hires,a3
+	bra.s .got_copper
+.use_dualpf:
+	lea gfx_sprcop_dualpf,a3
 .got_copper:
 	addq.l #2,a3        ; Skip to first value word
 	

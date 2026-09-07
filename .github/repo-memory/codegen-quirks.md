@@ -872,6 +872,260 @@
   `SetFont` which correctly used `move.l 8(a6),d0`) - don't trust a subagent's asm output at
   face value even when it "assembles clean" (vasm won't catch this, it's a semantic bug).
 
+## Dual playfield graphics mode 3 (2026-09-07)
+- Added `SetGraphicsMode(3)`: classic OCS/ECS 320x256 dual playfield, 6 line-interleaved
+  bitplanes (40 bytes/plane/row like mode 0), hardware-split into PF1 (bitplanes 1,3,5) and PF2
+  (bitplanes 2,4,6), 7 visible colors + transparent per playfield (NOT 32 colors). BPLCON0=
+  `%0110011000000000` (6 planes, DBLPF, HAM off, COLOR_ON on). BPL1MOD/BPL2MOD=200
+  (formula confirmed: `(planes-1)*bytes_per_row`, matches mode0's 160=(5-1)*40 and
+  mode1's 240=(4-1)*80). New `SetActivePlayfield(1|2)` + `gfx_active_playfield` word select
+  which physical plane group (PF1=even slots 0/2/4, PF2=odd slots 1/3/5, zero-indexed within
+  the 6-plane interleaved buffer) subsequent SetPixel/LINE/RECTANGLE/CIRCLE/Text calls target.
+  Palette: COLOR0=backdrop, COLOR1-7=PF1 (code N->COLORN), COLOR8 unused (PF2 code 0 is always
+  transparent regardless of COLOR8), COLOR9-15=PF2 (code N->COLOR(8+N)). New `DISABLE_DUALPF`
+  flag mirrors DISABLE_320x256/640x256/HAM. Deliberately NOT supported in mode 3 (return -1):
+  `BLITLINE`, `Scroll()`, `CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically`; `lib/gui.s`
+  untouched/unverified. New example `examples/dual_playfield_demo.has`.
+- **`lib/scroll.s` is DEAD CODE, not linked** - it's a "Reference VASM Implementation Template"
+  (its own header says so) whose `Scroll:`/`ScrollInit:` bodies are pseudo-code stubs that
+  validate input then return success without ever blitting. The REAL, actively-used `Scroll()`
+  (with the `.scroll_do_vertical`/`.scroll_h_pixel` labels referenced elsewhere in this file's
+  history) lives in **`lib/graphics.s`** (`XDEF Scroll` in its header, real label ~line 1919).
+  `scripts/build_example.sh` auto-detects libs by mapping `extern func`-declared symbol names to
+  owning lib files via a `SYM_TO_LIB` table (grep it before assuming a function lives where its
+  filename suggests) - `Scroll` maps to `graphics.s`, so `scroll.s` is never actually selected/
+  linked for any real example (confirmed: both files define global `Scroll`, which would be a
+  vlink duplicate-symbol error if both were ever linked together). Don't waste time editing
+  `lib/scroll.s` for graphics.s-related Scroll bugs/features - it's unreachable.
+- **Windows Git-Bash gotcha reconfirmed**: `bash scripts/build_example.sh` silently reports
+  "Libs: (none auto-detected)" for EVERY example (not just some) unless `/usr/bin` (GNU
+  coreutils, incl. `sort -u`) is prepended to PATH ahead of System32 - e.g.
+  `export PATH="/usr/bin:$PATH:/c/.../vbcc/bin"` before invoking the script. Previously noted
+  in this file re: `sort`; reconfirmed as a full auto-detect breakage, not just a cosmetic issue.
+  Also: multi-line `bash -c '...for f in ...; do ...; done'` invoked FROM this tool's
+  `run_in_terminal` (PowerShell host spawning bash) is unreliable ("syntax error: unexpected end
+  of file") - write each invocation as its own single-line `bash -c '...'` call instead of a
+  multi-line for-loop string.
+- **Register-clobber bug I introduced then fixed (found by review-agent pass, not by
+  compile/assemble/vasm/pytest)**: `_DrawChar`'s row loop caches `gfx_text_cursor_x` in `d4`
+  ONCE before the loop, re-reading it (`move.w d4,d0`) at the top of every one of the 8 row
+  iterations - `d4` MUST stay live across the whole function, not just within one row. My first
+  attempt at a per-plane "color bit index" for dual-playfield (needed because physical plane
+  slot steps by 2 while the color bit tested is 0..2) used `d4` as that counter, silently
+  destroying the cursor-x cache after row 0 - rows 1-7 of EVERY glyph in EVERY mode (0/1/2/3)
+  would draw at a fixed wrong column. Real fix: don't add a new persistent register at all -
+  compute the bit index from a COPY of the physical-slot register (`d3`) into `d6` right before
+  the `btst`, only for mode 3 (`move.w d3,d6` / `lsr.w #1,d6` for mode 3 else use d3 directly) -
+  `d6` is provably free at exactly that point (the preceding clear-step already flushed its
+  value to `(a4)` before this line runs). Lesson: before repurposing ANY register inside a loop
+  body "because it looked free", trace whether the SAME register is read again at the TOP of
+  the *outer* loop on the next iteration, not just later in the current iteration.
+- **Two more bugs found by the same review pass, both from widening a SHARED gate without
+  auditing every caller of that gate**: (1) `gfx_scroll_screen` (auto-scroll on 32-line text
+  overflow, called from `_DrawChar`'s newline handler and `Print`'s wrap path) only special-
+  cased mode 0 (`tst.w d0 / beq .sc_lores`), so mode 3 silently fell through to the hires
+  geometry (4 planes/80 bytes) - reachable via ordinary `Print()` usage, would corrupt chip RAM
+  past the 61440-byte dualpf buffer. Fixed by adding an explicit `cmp.w #3,d0 / beq .sc_dualpf`
+  branch (6 planes/40 bytes). (2) Widening `_gfx_can_plot` to accept mode 3 also silently
+  re-opened `BLITLINE` (which gates solely via `_gfx_can_plot`) to mode-3 calls, but BLITLINE's
+  OWN separate geometry table (`tst.w d0 / bne.s .bl_hires`, same "any nonzero=hires" pattern)
+  was never adapted - a real blitter-hardware out-of-bounds write, not just a CPU loop. Fixed by
+  adding an explicit `cmp.w #3,gfx_current_mode / beq .bl_error` in BLITLINE right after its
+  `_gfx_can_plot` call, keeping BLITLINE mode-0/1-only as already documented. **General lesson**:
+  when widening a shared validation gate (`_gfx_can_plot`, or any similar chokepoint) to accept a
+  new mode, grep for every OTHER caller of that gate and check whether each one has its own,
+  separate, not-yet-updated mode-dependent geometry table that the gate's contract no longer
+  matches - a passing gate does not mean the caller's own downstream logic is safe.
+- Also fixed while touching `SwapScreen` (already needed restructuring for mode 3 buffers):
+  it previously toggled `gfx_screen1`/`gfx_screen2` (lores) for literally every mode including
+  hires/HAM6 (`cmp.l #gfx_screen1,a0` never matches a hires/HAM6 pointer, so it always fell
+  through to "set to gfx_screen1") - a real pre-existing bug for mode 1 callers, fixed as a
+  natural side effect of making the dispatch properly mode-aware (0/1/2/3 all now correct;
+  mode 2/HAM6 is an explicit intentional no-op since it's single-buffered).
+- Regression sweep after all fixes: 130 examples x 2 CPU targets, zero new failures (same 5
+  negative fixtures + `cpu68020_32bit_arithmetic.has`-on-68000-only baseline);
+  `python -m pytest tests -q` 690 passed/1 skipped (had to update one test in
+  `tests/test_graphics_primitives_api.py` that hard-coded the OLD `_SetPixel` dispatch shape
+  before mode 3 existed, and added a new test asserting `BLITLINE` rejects mode 3).
+- Musashi execution-level verification (does mode 3 ACTUALLY plot to the right byte at runtime,
+  not just "does it assemble") is Linux-only and was postponed - see
+  `docs/MUSASHI_DUAL_PLAYFIELD_TEST_PLAN.md` for the concrete test list already designed
+  (pixel-plane-routing test is the highest-value one, mirrors exactly the class of bug this
+  session's review pass caught by reading, not by running).
+- **BPLCON2 priority bug found by the USER visually testing the demo (not by any agent/review/
+  test)**: `.mode_320x256_dualpf` set `BPLCON2 = %100100` (bit6 PF2PRI=0, i.e. PF1 has priority)
+  - copy-pasted verbatim from modes 0/1/2 where PF2PRI is meaningless (single-playfield). For a
+  "PF1=background, PF2=foreground" demo this is backwards: PF1's picture-frame outline pixels
+  punched through and hid the PF2 foreground box/HUD wherever their pixels coincided (worse near
+  the box's outer travel bounds, since the nested frame borders sit close to those bounds -
+  looked like "the box only renders as a clean rectangle near screen edges"). Fixed by changing
+  to `%1100100` (adds bit6=1, PF2 priority) - the low 6 bits (sprite-vs-playfield priority) are
+  unchanged. **Lesson**: when reusing a shared register-value constant across sibling modes,
+  re-derive what EVERY bit means for the NEW mode specifically - don't assume "same value that
+  worked for single-playfield modes" is safe when the new mode gives that bit a totally
+  different, mode-specific meaning (BPLCON2 bit6 is a no-op outside dual-playfield mode, so this
+  exact bug was structurally invisible to compile/assemble/pytest/regression-sweep AND to two
+  agent review passes that focused on register-clobber/geometry bugs, not on
+  "is this specific priority bit semantically correct for the demo's intended visual layering" -
+  only visual inspection caught it).
+- `lib/scroll.s` was deleted from the repo (2026-09-07, confirmed safe/no-op): it was dead/
+  unlinked template code (see the dedicated bullet above) and its one reference in
+  `scripts/build_example.sh`'s `ORDERED_LIBS` array was removed too. `git status` was clean
+  immediately after - the deletion had already been committed together with the dual-playfield
+  feature commit (`fdf1560`), no separate action was needed to "unbreak" anything.
+- **Tearing bug found by the USER from a screenshot (2026-09-07)**: `examples/dual_playfield_demo.has`'s
+  main loop called `WaitVBlank()` at the very TOP of the loop, then did `Show()`, `GetKey()`, and
+  several arithmetic/clamp statements, and only THEN called `redraw_box()` (the actual screen
+  writes - 2x RECTANGLE = 8 LINE calls total, erase-old + draw-new). By the time execution
+  reached the real drawing, the short vblank window had likely already ended, so the erase+draw
+  landed while the beam was actively scanning the visible frame - some of the rectangle's 4 edges
+  became visible immediately (rows not yet scanned this frame), others only next frame (rows
+  already passed), producing a persistently torn/partial-looking box in screenshots, described by
+  the user as "losing its edges when flying". **Fix**: reorder the loop so all non-drawing work
+  (`GetKey()`, position math/clamping) happens BEFORE `WaitVBlank()`, and the actual screen writes
+  (`redraw_box()`) happen immediately after it returns, with nothing else in between. **General
+  lesson for any single-buffered (no `SwapScreen`) CPU-plotting demo in this codebase**: `WaitVBlank()`
+  only guarantees blanking has STARTED at the moment it returns - any code between that return and
+  the actual pixel writes eats into the (short, ~1.6ms/20ms PAL) blanking budget before tearing
+  becomes visible again. Put `WaitVBlank()` as the LAST statement before the real draw calls, not
+  the first statement of the loop body.
+- Also fixed in the same pass: `Text(6, 1, &hud_title, ...)` with a 37-character string overflowed
+  the 40-column limit by 3 chars (6+37-1=42 > 39), wrapping the tail (`"fg)"`) onto a different
+  screen position - visible in the user's screenshot as a stray `FG)` near the top-left corner.
+  `Text()`'s column-wrap check is the same shared `Print`/`_DrawChar` logic already fixed for mode
+  3 (40 cols), so this wasn't a graphics-library bug - just an example that didn't leave enough
+  column budget for its own string length at that start column. Fixed by starting at column 1
+  instead of 6 (37 chars now fits: 1+37-1=37 <= 39). **Lesson**: when placing `Text()` at a
+  specific column, always check `start_col + strlen - 1 <= 39` (mode 0/2/3) or `<= 79` (mode 1) -
+  nothing in the compiler enforces this at compile time, it silently wraps at runtime instead.
+- **Follow-up (2026-09-07, same demo): the WaitVBlank-reorder fix alone did not fully eliminate
+  the box tearing** - user reported it "still visible" after rebuilding, described as looking
+  like a consistent mask/partial pattern rather than random tearing. Extensive static analysis
+  (generated-assembly inspection, `_SetPixel`'s dualpf physical-slot/bit-index math,
+  `gfx_prepare_copperlist_dualpf`'s BPLxPTH/PTL-to-buffer-offset mapping, RECTANGLE/LINE argument
+  marshalling) found no logic bug - everything checked out mathematically. Root cause is more
+  fundamental: single-buffered CPU pixel-plotting for ANIMATED foreground content is inherently
+  timing-fragile (any interrupt - e.g. the keyboard ISR from `InitKeyboard()` - firing between
+  `WaitVBlank()` and the draw can eat into the blanking budget), no matter how tightly the draw
+  call is placed after `WaitVBlank()`. **Real fix: proper double buffering**, following the
+  exact pattern already proven in `examples/scroll_demo.has` - draw static content
+  (background+HUD+initial box) into BOTH `gfx_screen1_dualpf`/`gfx_screen2_dualpf` up front (via
+  `SwapScreen()` between two identical draw passes), then every frame: `WaitVBlank(); Show();
+  SwapScreen(); <draw into now-off-screen buffer>; SwapScreen(); <draw into the other buffer too,
+  keeping both in sync>; SwapScreen(); UpdateCopperList();`. This never draws into the buffer
+  currently being displayed, so it's tear-free regardless of CPU/interrupt timing - the only
+  timing-sensitive operation left is the copper-list bitplane-pointer repatch itself (`Show`/
+  `UpdateCopperList`), which is fast/atomic-ish compared to a multi-LINE-call RECTANGLE redraw.
+  **Lesson for this codebase generally**: any demo with ANIMATED (not just scrolling-background)
+  foreground content should default to double-buffering from the start rather than attempting
+  single-buffered "draw right after WaitVBlank" - the latter is a real optimization but not a
+  tear-*proof* guarantee once interrupts are enabled (`InitKeyboard()` etc.), and diagnosing "is
+  it tearing or a logic bug" from a single screenshot is unreliable - prefer the robust fix over
+  chasing exact root cause when the codebase already has a proven double-buffer pattern to copy.
+- **Second follow-up (2026-09-07, same demo): my FIRST double-buffering attempt had a real bug**
+  - it drew into BOTH buffers every single frame (`redraw_box` into the off-screen one, then
+  `SwapScreen()` back and `redraw_box` AGAIN into the buffer that was STILL the one actively
+  feeding the display, since `Show()`/`UpdateCopperList()` hadn't been called yet to flip which
+  buffer the copper reads). That second draw tore the visible buffer directly - user caught a
+  frame showing 2 disconnected short segments instead of a rectangle outline (a genuinely worse-
+  looking artifact than the original single-buffered tear) and reasonably asked "is this the
+  emulator's fault?" - it wasn't; it was this bug. **Real fix: draw into the off-screen buffer
+  EXACTLY ONCE per frame, never touch the currently-displayed one at all.** Since each physical
+  buffer is then only updated every OTHER frame, you can't just re-use one "old position" pair -
+  track a 2-deep position history (`trail1_x/y` = position drawn 1 frame ago, `trail2_x/y` =
+  position drawn 2 frames ago = what's STILL physically in the buffer you're about to draw into
+  now): each iteration, `redraw_box(trail2_x, trail2_y, new_x, new_y)` erases the correct stale
+  content for THAT specific buffer, then shift `trail2 = trail1; trail1 = new`. Loop body
+  simplifies to exactly one `WaitVBlank(); SwapScreen(); redraw_box(...); UpdateCopperList();` -
+  no redundant `Show()` call needed (this library's copper list only re-reads its bitplane
+  pointers once per vblank regardless of when during the frame the CPU writes new ones, so a
+  late `UpdateCopperList()` call is naturally deferred/safe - the ONLY thing that must never
+  happen is writing PIXEL DATA into a buffer while its pointers are still the ones the copper is
+  currently using). **General lesson**: "draw into both buffers to keep them in sync" (correct
+  for STATIC/shared background content per the earlier scroll_demo lesson) and "never draw into
+  the visible buffer" (required for tear-free animation) are DIFFERENT, sometimes-conflicting
+  requirements for a genuinely MOVING per-buffer object - use a 2-deep (or N-deep for N buffers)
+  position/state history per animated object instead of trying to satisfy both requirements with
+  a single shared "old position" variable and a same-frame double-draw.
+
+## Dual playfield BOB/Scroll/ClearPlayfield implemented (2026-09-07, follow-up session)
+- Closed the 3 remaining dual-playfield (mode 3) gaps flagged in the mode-3 intro entry
+  above: `Scroll()`, `CreateBob`/`PasteBob`/`MirrorBobHorizontally`/`MirrorBobVertically`
+  now all work in mode 3 (targeting whichever playfield `SetActivePlayfield` last
+  selected). New `ClearPlayfield(playfield: int) -> int` (lib/graphics.s) selectively
+  clears only one playfield's 3 owned planes (`ClearScreen()` unchanged, still clears
+  both).
+- **Proven addressing scheme for "touch only 3 of 6 interleaved planes"** (reused for
+  BOB blits, Scroll's vertical/horizontal paths, and ClearPlayfield - this is the
+  general-purpose pattern for ANY future dual-playfield feature needing this):
+  3 owned planes, `Y-multiplier=240` (one full 6-plane scanline, for computing a row's
+  starting address), uniform `80-byte stride` between consecutive OWNED-plane sub-rows
+  (correctly handles BOTH "next owned plane in the same scanline" AND "wrap to next
+  scanline's first owned plane", because 3*80=240), playfield byte offset `+0`(PF1)/
+  `+40`(PF2) added once to the base address. Backward/predecrement copy loops (e.g.
+  Scroll's `.scroll_v_copy_down_dualpf`) need a `units*80-40` starting-address
+  adjustment (not a plain `units*80`) to land on the last unit's true 40-byte payload
+  instead of one full 80-byte slot past it - verify this exact adjustment by hand with
+  concrete small numbers before trusting it, it's the single most error-prone detail.
+- **User-directed correction of a real pre-existing bug, merged into the same change**:
+  `CreateBob`/`PrepBOB`/`DrawBob`/`DrawBobWithMask` used to dispatch mode via
+  `tst.w gfx_current_mode/bne <hires-sibling>` - ANY nonzero mode (including HAM6/mode 2)
+  silently took the hires (4-plane/80-byte) path with the wrong plane count/stride.
+  Required fix pattern (mirrors `_SetPixel`/`_gfx_can_plot`'s existing style exactly):
+  explicit `tst.w/beq lores; cmp#1/beq hires; cmp#3/beq dualpf; else->reject`, checked in
+  that literal order. **Explicit project rule: BOBs are NOT possible in HAM6 at all** -
+  `MirrorBobHorizontally`/`MirrorBobVertically` had an existing (working) HAM6 6-planes
+  branch deliberately REMOVED (not fixed/kept) at every dispatch site, replaced with the
+  dualpf 3-planes case. `PrepBOB`/`DrawBob`/`DrawBobWithMask` have no error-return
+  convention (void-ish helpers) so HAM6/invalid now safely `rts`s (no-op) instead of
+  rejecting with -1.
+- Register-safety pattern for the offset-injection point in new Dualpf BOB routines:
+  reuse whichever register held the Y-address-multiply intermediate (it's already been
+  consumed into the address register by that point) - verified safe by tracing forward
+  to each routine's own `rts`, not by assumption. Review agent independently re-traced
+  all 3 new routines and found no clobber.
+- Full workflow used (per explicit user request): gamedev agent implemented in 3 rounds
+  (ClearPlayfield+bob.s dispatch fix; Scroll; demo+asset), tests agent ran the full
+  validation (701 passed/1 skipped pytest, full examples/** sweep both `--cpu 68000`/
+  `68020` matches baseline, all BOB/Scroll-calling examples assemble clean both
+  targets), review agent found zero blocking issues (one low-severity cosmetic
+  comment-symmetry note only), docs agent synced `GRAPHICS_LIBRARY_INTERFACE.md`/
+  `CHANGELOG.md`/`MUSASHI_DUAL_PLAYFIELD_TEST_PLAN.md` and found+fixed unrelated stale
+  "Scroll unsupported in mode 3" drift in 4 more docs (`SCROLL_FUNCTION*.md`) that
+  predated this session.
+- **New asset for a plain (non-game-subfolder) example that needs a generated BOB**:
+  `scripts/build_example.sh` has NO mechanism for per-example generated asset objects
+  (its `SYM_TO_LIB` auto-detection only covers hand-written `lib/*.s` files) - a
+  companion `tools/bob_importer.py`-generated `.s` file (e.g.
+  `examples/dpf_bob_dual_playfield_bob.s`) must be assembled and added to the `vlink`
+  command manually; documented the exact manual command sequence in the example's own
+  header comment since the generic script can't do it. `--label-prefix X` on a PNG named
+  `Y.png` produces label `X_Y` (double-prefixed, a bit verbose but harmless) - the
+  importer already supports any `planes` count generically (no code changes needed for
+  3-plane dual-playfield BOBs; `tools/bob_strip_importer.py` even documents a 3-plane
+  example in its own `--help`).
+- **Subagent tooling quirk observed twice this session**: `runSubagent` occasionally
+  returns literally "Agent completed with no output" with zero summary text, even
+  though (checked directly) the agent's actual file edits DID go through correctly in
+  one case (gamedev/Phase 4) and needed a retry with a shorter/tighter prompt to get a
+  real response in another (review agent). Lesson: after any "no output" result,
+  independently verify the actual file state / re-invoke with a more concise prompt
+  rather than assuming the call silently failed - don't just retry the identical call.
+- Reconfirmed (again) the Windows Git-Bash `scripts/build_example.sh` PATH/sort gotcha:
+  needs `bash -c 'export PATH="/usr/bin:$PATH"; cd <repo>; bash scripts/build_example.sh <ex>'`
+  (single-line) or auto-lib-detection silently finds zero libs and every extern symbol
+  comes back undefined at link time - easy to misdiagnose as a real regression if you
+  don't already know this pre-existing environment quirk.
+- Wrote `tests/test_bob_scroll_dualpf_api.py` (11 tests, source-contract style matching
+  `tests/test_graphics_primitives_api.py`). Gotcha hit writing it: a bare
+  `text.index("SomeLabel:")` can match the label's name mentioned inside a PRECEDING
+  comment line (e.g. `; DrawBob: paste bob without mask...` before the real
+  `DrawBob:` label further down) instead of the real asm label - fixed with a
+  `re.search(rf"^{label}[ \t]*$", text, re.MULTILINE)` helper (must also tolerate
+  trailing tabs after the colon, e.g. `PrepBOB:\t\n` - some labels in this file have a
+  stray trailing tab). Always anchor label lookups to start-of-line when slicing
+  hand-written asm source in tests, never trust a bare substring search.
+
 ## The REAL `Scroll()` bug: vertical scroll was a complete no-op, same big-endian .w/.l
 ## class as the SetTextMode bug above (2026-09-07)
 - Direct continuation of "Scroll isn't working was a perception bug" above. After the

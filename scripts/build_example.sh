@@ -251,7 +251,6 @@ ORDERED_LIBS=(
     "$LIB_DIR/input.s"
     "$LIB_DIR/keyboard.s"
     "$LIB_DIR/sprite.s"
-    "$LIB_DIR/scroll.s"
     "$LIB_DIR/gui.s"
     "$LIB_DIR/gui_keyboard.s"
     "$LIB_DIR/str.s"

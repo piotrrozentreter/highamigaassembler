@@ -257,8 +257,10 @@ full_screen_scroll_up:
 The Scroll function is only available and functional in:
 - **Mode 0** (1-bitplane, 16 colors, 320×256 or 320×512)
 - **Mode 1** (2-bitplane, 4 colors, 320×256 or 320×512)
+- **Mode 3** (dual playfield) — scrolls only whichever playfield `SetActivePlayfield` last
+  selected, leaving the sibling playfield untouched
 
-**Do NOT use in HAM6 or other graphics modes** — the function will return `-1` (error).
+**Do NOT use in HAM6** — the function will return `-1` (error).
 
 ### Region Validation
 
@@ -378,7 +380,7 @@ Scroll:
 | **Parameters** | 7 × 32-bit integers, all in data registers d0–d6 |
 | **Return Value** | 32-bit integer in d0: 0 (success) or -1 (error) |
 | **Calling Convention** | Register-based (no stack arguments) |
-| **Supported Modes** | Mode 0, Mode 1 only (no HAM6) |
+| **Supported Modes** | Mode 0, Mode 1, Mode 3 (dual playfield, active playfield only); no HAM6 |
 | **Region Constraints** | `x0 < x1`, `y0 < y1`, coordinates within screen bounds |
 | **Performance** | Uses Blitter; may block if Blitter is busy |
 

@@ -6,7 +6,9 @@ The `Scroll` function is a graphics library routine that scrolls a rectangular r
 
 Scrolling is a common operation in graphics applications: menus, game scrolls, text windows, and animation loops all rely on moving pixel data within a screen region and filling newly exposed areas with a background color. The `Scroll` function automates this operation with CPU-based copying for correctness and efficiency.
 
-- **Supported modes:** Lores (320×256×32 colors) and Hires (640×256×16 colors)
+- **Supported modes:** Lores (320×256×32 colors), Hires (640×256×16 colors), and dual
+  playfield (320×256, mode 3; scrolls only whichever playfield `SetActivePlayfield` last
+  selected)
 - **Vertical scrolling:** Fully implemented, using byte-aligned CPU copy
 - **Horizontal scrolling:** Stubbed (returns success but performs no operation)
 - **HAM6 mode:** Not supported; returns error
@@ -26,7 +28,7 @@ All parameters are passed in data registers using the efficient register calling
 
 | Parameter | Register | Type | Range | Purpose |
 |-----------|----------|------|-------|---------|
-| `x0` | `d0` | int | 0–319 (lores), 0–639 (hires) | Left edge of scroll region (inclusive) |
+| `x0` | `d0` | int | 0–319 (lores/dual playfield), 0–639 (hires) | Left edge of scroll region (inclusive) |
 | `y0` | `d1` | int | 0–255 | Top edge of scroll region (inclusive) |
 | `x1` | `d2` | int | >x0 | Right edge of scroll region (inclusive) |
 | `y1` | `d3` | int | >y0 | Bottom edge of scroll region (inclusive) |
@@ -77,6 +79,22 @@ var result: int = Scroll(0, 0, 639, 255, 0, 1, 8);   // Full screen, scroll down
 ### HAM6 Mode (Mode 2) – Not Supported
 
 HAM6 (Hold-And-Modify) mode is not supported by `Scroll`. Any attempt to scroll while in HAM6 mode returns `-1`.
+
+### Dual Playfield Mode (Mode 3) – Active Playfield Only
+
+- **Resolution:** 320 pixels wide × 256 pixels high (same geometry as lores)
+- **Bitplanes:** 3 owned planes per playfield (6 total, split evenly between Playfield 1 and Playfield 2)
+- **Bytes per scanline:** 40 bytes per owned plane, same convention as lores
+- **Valid coordinates:** x ∈ [0, 319], y ∈ [0, 255]
+
+`Scroll` scrolls only whichever playfield `SetActivePlayfield` last selected, leaving the
+sibling playfield's bitplanes completely untouched.
+
+```has
+var rc: int = SetGraphicsMode(3);          // Dual playfield
+call SetActivePlayfield(1);
+var result: int = Scroll(0, 0, 319, 255, 0, -1, 16);  // Scrolls Playfield 1 only
+```
 
 ## Scrolling Direction Semantics
 

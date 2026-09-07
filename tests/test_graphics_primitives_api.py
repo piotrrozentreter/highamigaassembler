@@ -33,9 +33,17 @@ def test_setpixel_rejects_unsupported_mode_negative_colors_and_null_screen():
     graphics_s = _read_norm(GRAPHICS_S)
     setpixel = graphics_s[graphics_s.index("_SetPixel:"):graphics_s.index("    SECTION graphics_data,DATA")]
 
-    assert re.search(r"cmp\.w #1,d7\s*\n\s*beq\.w \.sp_hires\s*\n\s*bra\.w \.sp_out_of_bounds", setpixel)
-    assert setpixel.count("tst.l d2\n    blt .sp_out_of_bounds") == 2
-    assert setpixel.count("cmpa.l #0,a0\n    beq .sp_out_of_bounds") == 2
+    # Mode 3 (dual playfield) is a supported plotting mode too now; anything
+    # else (e.g. HAM6/mode 2, or an out-of-range mode) still falls through to
+    # the shared out-of-bounds error path.
+    assert re.search(
+        r"cmp\.w #1,d7\s*\n\s*beq\.w \.sp_hires\s*\n\s*cmp\.w #3,d7\s*\n\s*beq\.w \.sp_dualpf\s*\n\s*bra\.w \.sp_out_of_bounds",
+        setpixel,
+    )
+    # Negative-color and null-screen guards are duplicated per mode block
+    # (lores, hires, dualpf).
+    assert setpixel.count("tst.l d2\n    blt .sp_out_of_bounds") == 3
+    assert setpixel.count("cmpa.l #0,a0\n    beq .sp_out_of_bounds") == 3
 
 
 def test_composite_primitives_plot_through_checked_pixel_api():
@@ -79,6 +87,18 @@ def test_blitline_octant_table_is_intact():
     graphics_s = _read_norm(GRAPHICS_S)
     table = graphics_s[graphics_s.index("gfx_line_octants:"):]
     assert "dc.b $10,$18,$00,$04,$14,$1C,$08,$0C" in table
+
+
+def test_blitline_rejects_dual_playfield_mode():
+    # BLITLINE's own geometry table only knows lores/hires; _gfx_can_plot's
+    # mode gate is broader (it also accepts mode 3), so BLITLINE must guard
+    # itself explicitly instead of blitting with the wrong modulo/plane count.
+    graphics_s = _read_norm(GRAPHICS_S)
+    block = graphics_s[graphics_s.index("BLITLINE:"):graphics_s.index("gfx_line_octants:")]
+    can_plot_call = block.index("bsr _gfx_can_plot")
+    guard = block.index("cmp.w #3,gfx_current_mode")
+    assert guard > can_plot_call
+    assert re.search(r"cmp\.w #3,gfx_current_mode\s*\n\s*beq \.bl_error", block)
 
 
 def test_blitter_line_mode_data_registers_are_defined():

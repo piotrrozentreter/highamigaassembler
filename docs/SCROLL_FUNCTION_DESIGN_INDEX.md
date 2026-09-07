@@ -14,7 +14,8 @@ The Scroll function is an external library function that scrolls a rectangular r
 - **Zero stack overhead**: No parameter push/pop, no stack cleanup
 - **Register-based ABI**: Caller specifies which registers receive which parameters
 - **Return value**: 0 (success) or -1 (error) in d0
-- **Mode restriction**: Works only in Mode 0 (1-bitplane) and Mode 1 (2-bitplane)
+- **Mode restriction**: Works in Mode 0 (1-bitplane), Mode 1 (2-bitplane), and Mode 3 (dual
+  playfield, active playfield only); not HAM6
 - **Hardware accelerated**: Uses Amiga Blitter for high-performance scrolling
 
 ---
@@ -148,6 +149,7 @@ The Scroll function is an external library function that scrolls a rectangular r
 
 ✅ **Mode 0** (1-bitplane, 16 colors)
 ✅ **Mode 1** (2-bitplane, 4 colors)
+✅ **Mode 3** (dual playfield) — scrolls only the active playfield (`SetActivePlayfield`)
 ❌ **HAM6** (24-bit hold-and-modify) — **NOT SUPPORTED** → returns -1
 ❌ **Other modes** → **NOT SUPPORTED** → returns -1
 
@@ -244,7 +246,7 @@ Scroll(100, 50, 200, 150, -1, 0, 8);
 
 1. **Region Validation**: x0 < x1 and y0 < y1 (returns -1 if invalid)
 2. **Boundary Checking**: All coordinates must be within screen bounds
-3. **Mode Restriction**: Only works in Mode 0/1 (returns -1 for HAM6)
+3. **Mode Restriction**: Works in Mode 0/1/3 (returns -1 for HAM6; Mode 3/dual playfield scrolls only the active playfield)
 4. **Blitter Dependency**: Requires Amiga Blitter (may busy-wait if in use)
 5. **No Wildcards**: Cannot scroll beyond region boundaries
 6. **Signed Parameters**: Direction flags (hor, vert) are signed (-1, 0, 1)
@@ -275,7 +277,7 @@ When implementing or using the Scroll function:
 - [ ] Extern declaration matches calling convention (d0–d6 for parameters, d0 for return)
 - [ ] All 7 parameters loaded into correct registers before `jsr`
 - [ ] Region coordinates satisfy x0 < x1, y0 < y1
-- [ ] Graphics mode is Mode 0 or Mode 1 (not HAM6)
+- [ ] Graphics mode is Mode 0, Mode 1, or Mode 3/dual playfield (not HAM6)
 - [ ] Return value checked (0 = success, -1 = error)
 - [ ] Non-volatile registers preserved if used after call
 - [ ] No stack cleanup required (register-based convention)
