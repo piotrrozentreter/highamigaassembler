@@ -5,6 +5,11 @@ A lightweight, mode-aware widget toolkit for Amiga Motorola 68000 programs writt
 Supports **mode 0** (320×256, 5 bitplanes, 32 colours) and **mode 1** (640×256, 4 bitplanes, 16 colours).  
 Reads `gfx_current_mode` at call time — no recompilation needed when switching resolutions.
 
+**Not verified in mode 3 (dual playfield):** this library's stride/plane-count logic was written
+for and only tested against mode 0/1. It has not been adapted or verified for mode 3, so widget
+behaviour there is unsupported/undefined - do not rely on `FillRect`, `DrawBox`, `DrawMsgBox`, or
+any other `gui.s` function while in dual-playfield mode.
+
 ---
 
 ## Contents

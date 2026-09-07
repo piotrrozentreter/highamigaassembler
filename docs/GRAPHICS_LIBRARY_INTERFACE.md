@@ -93,16 +93,54 @@ vlink -bamigahunk -o my_program my_program.o graphics.o
 - **mode 0**: 320x256 resolution, 32 colors (5 bitplanes)
 - **mode 1**: 640x256 resolution, 16 colors (4 bitplanes, hires)
 - **mode 2**: 320x256 resolution, HAM6 (6 bitplanes, single-buffered)
+- **mode 3**: 320x256 resolution, dual playfield (6 bitplanes, line-interleaved like mode 0).
+  Hardware splits the planes into two independently drawable layers - Playfield 1 (bitplanes
+  1, 3, 5) and Playfield 2 (bitplanes 2, 4, 6) - each showing 7 visible colors (color code 1-7)
+  plus transparent (color code 0). This is not a 32-color mode. See `SetActivePlayfield` below.
 - Returns 0 on success, -1 on error (including when the mode's screen buffer or copper list was disabled at assembly time - see [Opt-in Memory Savings](#opt-in-memory-savings-disabling-unused-screen-buffers-and-copper-lists) below)
 
 ```has
 var result: int = SetGraphicsMode(0);  // 320x256x32
 ```
 
+#### SetActivePlayfield(playfield: int) -> int
+Selects which dual-playfield bitplane group subsequent drawing calls (`SetPixel`/`POINT`/`PLOT`,
+`LINE`, `RECTANGLE`, `CIRCLE`, `Text`/`Print`) target.
+- **Valid only in mode 3** (dual playfield) - returns `-1` immediately in any other graphics mode.
+- **playfield**: `1` selects Playfield 1 (bitplanes 1, 3, 5); `2` selects Playfield 2
+  (bitplanes 2, 4, 6). Any other value returns `-1` without changing the active playfield.
+- **Default**: `SetGraphicsMode(3)` resets the active playfield to `1`.
+- Returns 0 on success, -1 on error (wrong mode or invalid `playfield` argument).
+
+```has
+call SetGraphicsMode(3);           // Enter dual playfield mode (active playfield defaults to 1)
+call RECTANGLE(4, 4, 312, 248, 1); // Drawn into Playfield 1
+call SetActivePlayfield(2);
+call SetPixel(160, 128, 5);        // Drawn into Playfield 2 instead
+```
+
+#### Dual Playfield Palette Mapping
+Mode 3 uses the same 16-entry palette region as the hires/HAM6 copper lists, split between the
+two playfields:
+
+| Palette register | Meaning |
+|-------------------|---------|
+| `COLOR0` | Shared backdrop, shown where both playfields are transparent (color code 0) |
+| `COLOR1`-`COLOR7` | Playfield 1 colors; color code *N* (1-7) maps directly to `COLOR`*N* |
+| `COLOR8` | Not a meaningful Playfield 2 color - Playfield 2's color code 0 always means transparent, regardless of what is written to `COLOR8` |
+| `COLOR9`-`COLOR15` | Playfield 2 colors; color code *N* (1-7) maps to `COLOR(8+N)` |
+
+Color code 0 is always transparent on both playfields, so each playfield effectively has 7
+usable colors. `SetColor`/`LoadPalette` use these same indices and write directly to
+`gfx_copperlist_dualpf`.
+
 ### Screen Management
 
 #### ClearScreen() -> int
 Clears the current screen buffer to black.
+- **Mode 3 (dual playfield)**: clears both playfields at once (all 6 bitplanes). It does not
+  respect the active-playfield selector set by `SetActivePlayfield` - there is no way to clear
+  only one playfield.
 
 ```has
 call ClearScreen();
@@ -110,6 +148,8 @@ call ClearScreen();
 
 #### SwapScreen() -> int
 Swaps between double buffers (toggles between screen1 and screen2).
+- **Mode 3 (dual playfield)**: toggles between the dual-playfield double buffers
+  (`gfx_screen1_dualpf`/`gfx_screen2_dualpf`), same as modes 0/1.
 
 ```has
 call SwapScreen();
@@ -128,6 +168,8 @@ call UpdateCopperList();
 Draws a pixel at (x, y) with the specified color.
 - **Lores mode**: x=0-319, y=0-255, color=0-31
 - **Hires mode**: x=0-639, y=0-255, color=0-15
+- **Dual playfield mode (mode 3)**: x=0-319, y=0-255, color=0-7; writes into whichever playfield
+  `SetActivePlayfield` last selected (default playfield 1)
 - Returns 0 on success, -1 if coordinates/color out of bounds
 
 ```has
@@ -152,7 +194,9 @@ is clipped with the Cohen-Sutherland algorithm before any blit is started. A lin
 entirely offscreen draws nothing and returns `0`.
 
 Differences from `LINE` worth knowing:
-- It requires blitter DMA and system takeover (`TakeSystem`), so it works in mode 0 and mode 1 only.
+- It requires blitter DMA and system takeover (`TakeSystem`), so it works in mode 0 and mode 1
+  only. Its line-drawing geometry table has no entry for mode 3 (dual playfield); calling it in
+  mode 3 returns `-1` and draws nothing rather than blitting with the wrong modulo/plane count.
 - It is **not blitter-reentrant**: do not call it from an interrupt that can preempt another blit.
 - Coordinates outside `-4096..4096` return `-1`, whereas `LINE` still clips and draws them.
 - Because clipping happens up front rather than per pixel, a clipped line can differ from `LINE`
@@ -170,10 +214,12 @@ Pixels outside the screen are skipped.
 Draws an outline circle using the midpoint circle algorithm. A negative radius returns `-1`.
 Pixels outside the screen are skipped.
 
-`SetPixel`, `POINT`, `PLOT`, `LINE`, `RECTANGLE`, and `CIRCLE` support only graphics mode 0
-(320x256x32) and mode 1 (640x256x16). They return `-1` without drawing in HAM6 mode, before a
-screen buffer has been initialized, or when `SetPixel`/`POINT`/`PLOT` receives invalid coordinates
-or color. Valid colors are 0-31 in mode 0 and 0-15 in mode 1.
+`SetPixel`, `POINT`, `PLOT`, `LINE`, `RECTANGLE`, and `CIRCLE` support graphics mode 0
+(320x256x32), mode 1 (640x256x16), and mode 3 (320x256 dual playfield, drawing into whichever
+playfield `SetActivePlayfield` last selected). They return `-1` without drawing in HAM6 mode,
+before a screen buffer has been initialized, or when `SetPixel`/`POINT`/`PLOT` receives invalid
+coordinates or color. Valid colors are 0-31 in mode 0, 0-15 in mode 1, and 0-7 in mode 3 (per
+playfield; color code 0 is transparent on both playfields).
 
 ### Text Functions
 
@@ -203,10 +249,12 @@ call Print(msg_ptr, 31);
 
 #### Text(x: int, y: int, msg: int, color: int) -> int
 Prints text at specific character coordinates (not pixel coordinates).
-- **x**: Character column (0-39 lores, 0-79 hires)
+- **x**: Character column (0-39 lores/dual playfield, 0-79 hires)
 - **y**: Character row (0-31)
 - **msg**: Pointer to null-terminated string
 - **color**: Text color
+- **Mode 3 (dual playfield)**: draws into whichever playfield `SetActivePlayfield` last selected,
+  using the same 40-column layout as lores mode
 
 ```has
 call Text(10, 5, msg_ptr, 31);  // Print at column 10, row 5
@@ -312,8 +360,8 @@ greeting:
 
 ## Opt-in Memory Savings: Disabling Unused Screen Buffers and Copper Lists
 
-By default, `lib/graphics.s` reserves chip-RAM screen buffers for all three
-supported graphics modes in its `screen` `bss_c` section (~327,680 bytes
+By default, `lib/graphics.s` reserves chip-RAM screen buffers for all four
+supported graphics modes in its `screen` `bss_c` section (~450,560 bytes
 total) and emits the mode-specific copper lists in the `copper` section.
 
 | Mode | Buffers | Size each | Total |
@@ -321,6 +369,7 @@ total) and emits the mode-specific copper lists in the `copper` section.
 | 0 - lores 320x256x32 | `gfx_screen1`, `gfx_screen2` | 51,200 bytes | 102,400 bytes |
 | 1 - hires 640x256x16 | `gfx_screen1_hires`, `gfx_screen2_hires` | 81,920 bytes | 163,840 bytes |
 | 2 - HAM6 320x256 | `gfx_screen1_ham6` (single-buffered) | 61,440 bytes | 61,440 bytes |
+| 3 - dual playfield 320x256 | `gfx_screen1_dualpf`, `gfx_screen2_dualpf` | 61,440 bytes | 122,880 bytes |
 
 If your application only calls `SetGraphicsMode()` with a subset of these
 modes, you can opt out of reserving the unused buffers by defining one or
@@ -329,6 +378,7 @@ more of these constants when assembling `lib/graphics.s` with vasm:
 - `DISABLE_320x256` - drops the lores mode 0 buffers (`gfx_screen1`, `gfx_screen2`)
 - `DISABLE_640x256` - drops the hires mode 1 buffers (`gfx_screen1_hires`, `gfx_screen2_hires`)
 - `DISABLE_HAM` - drops the HAM6 mode 2 buffer (`gfx_screen1_ham6`)
+- `DISABLE_DUALPF` - drops the dual-playfield mode 3 buffers (`gfx_screen1_dualpf`, `gfx_screen2_dualpf`)
 
 Each flag also omits that mode's copper list and its palette, bitplane-pointer,
 and sprite-pointer entries. The copper-list labels remain defined as inert
@@ -339,15 +389,16 @@ placeholders, so code still assembles and links when a mode is disabled.
 vasmm68k_mot -Fhunk -D DISABLE_640x256=1 -D DISABLE_HAM=1 -o graphics.o lib/graphics.s
 ```
 
-Any combination of the three can be defined. Defining all three shrinks the
+Any combination of the four can be defined. Defining all four shrinks the
 entire `screen` section down to a small placeholder.
 
 **Safety guarantees:**
 
 - The buffer labels (`gfx_screen1`, `gfx_screen2`, `gfx_screen1_hires`,
-  `gfx_screen2_hires`, `gfx_screen1_ham6`) always stay defined regardless of
-  which `DISABLE_*` constants are set, so other code in `graphics.s` that
-  references them still assembles and links normally.
+  `gfx_screen2_hires`, `gfx_screen1_ham6`, `gfx_screen1_dualpf`,
+  `gfx_screen2_dualpf`) always stay defined regardless of which `DISABLE_*`
+  constants are set, so other code in `graphics.s` that references them
+  still assembles and links normally.
 - `SetGraphicsMode()` refuses to activate a mode whose buffer was disabled at
   assembly time: it returns `d0 = -1` (its existing error code) instead of
   proceeding to use the shrunk placeholder buffer. Callers must still check

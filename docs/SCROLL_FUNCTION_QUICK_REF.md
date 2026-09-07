@@ -56,7 +56,7 @@ if (Scroll(...) == 0) {
 ## Constraints
 
 ✅ **Works in**: Mode 0, Mode 1 (16/4 color indexed)  
-❌ **Does NOT work in**: HAM6, other modes  
+❌ **Does NOT work in**: Mode 2 (HAM6), Mode 3 (Dual Playfield)  
 ✅ **Uses**: Amiga Blitter (may block if busy)  
 ✅ **Registers**: All parameters in d0–d6, no stack  
 ✅ **ABI**: Standard 68000 (rts pops return address)
@@ -73,7 +73,7 @@ if (Scroll(...) == 0) {
 |-------|-------|
 | Returns -1 | Invalid region (x0 ≥ x1 or y0 ≥ y1) |
 | Returns -1 | Coordinates out of screen bounds |
-| Returns -1 | Graphics mode is HAM6 or other unsupported mode |
+| Returns -1 | Graphics mode is HAM6 (mode 2) or dual playfield (mode 3) |
 | Crash/hang | Blitter in undefined state (use TakeSystem first) |
 
 ## Usage Pattern

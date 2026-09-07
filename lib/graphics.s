@@ -62,6 +62,9 @@ WAITBLIT:MACRO
     XDEF gfx_text_cursor_x
     XDEF gfx_text_cursor_y
     XDEF Scroll
+    XDEF SetActivePlayfield
+    XDEF gfx_sprcop_dualpf
+    XDEF gfx_active_playfield
 
 ; ---------- Graphics support wrappers ----------
 ; These minimal wrappers map the public names used by generated code
@@ -381,6 +384,12 @@ BLITLINE:
     bsr _gfx_can_plot
     tst.l d0
     bmi .bl_error
+    ; _gfx_can_plot accepts mode 3 (dual playfield) too, but this routine's
+    ; own geometry table below only knows lores/hires - line mode blitter
+    ; hardware is not (yet) dual-playfield aware, so reject it explicitly
+    ; instead of silently blitting with the wrong modulo/plane count.
+    cmp.w #3,gfx_current_mode
+    beq .bl_error
     move.l 24(a6),-40(a6)
 
     ; Clip math below is 16-bit, so refuse wildly out-of-range coordinates.
@@ -694,8 +703,17 @@ _gfx_can_plot:
     tst.w d0
     beq.s .gcp_lores
     cmp.w #1,d0
-    bne.s .gcp_error
+    beq.s .gcp_hires
+    cmp.w #3,d0
+    beq.s .gcp_dualpf
+    bra.s .gcp_error
+.gcp_hires:
     cmp.l #16,d7
+    bge.s .gcp_error
+    bra.s .gcp_color_ready
+.gcp_dualpf:
+    ; Dual playfield: 7 visible colors + transparent per playfield (0..7)
+    cmp.l #8,d7
     bge.s .gcp_error
     bra.s .gcp_color_ready
 .gcp_lores:
@@ -711,6 +729,33 @@ _gfx_can_plot:
     rts
 .gcp_error:
     moveq #-1,d0
+    rts
+
+; -----------------------------------------------------------------------------
+; Function: SetActivePlayfield
+; Input: 8(a6)=playfield (1 or 2)
+; Output: d0=0 on success, -1 on error (wrong mode or invalid playfield)
+; Description: Selects which dual-playfield bitplane group subsequent drawing
+;              calls (PLOT/SetPixel/LINE/RECTANGLE/CIRCLE/Text) target.
+; Notes: Only meaningful in mode 3 (dual playfield); errors in any other mode.
+; -----------------------------------------------------------------------------
+SetActivePlayfield:
+    link a6,#0
+    cmp.w #3,gfx_current_mode
+    bne .sapf_error
+    move.l 8(a6),d0
+    cmp.l #1,d0
+    beq.s .sapf_ok
+    cmp.l #2,d0
+    bne .sapf_error
+.sapf_ok:
+    move.w d0,gfx_active_playfield
+    moveq #0,d0
+    bra .sapf_done
+.sapf_error:
+    moveq #-1,d0
+.sapf_done:
+    unlk a6
     rts
 
 ; -----------------------------------------------------------------------------
@@ -835,10 +880,11 @@ Print:
     addq.w #1,d0
     move.w d0,gfx_text_cursor_x
     
-    ; Check for wrap based on current mode
+    ; Check for wrap based on current mode (only real hires uses 80 columns;
+    ; dual playfield and any other mode wraps at 40 like lores)
     move.w gfx_current_mode,d0
-    tst.w d0
-    bne .print_check_hires
+    cmp.w #1,d0
+    beq .print_check_hires
     
 .print_check_lores:
     cmp.w #40,gfx_text_cursor_x
@@ -928,6 +974,14 @@ SwapScreen:
     link a6,#0
     movem.l a0,-(sp)
     move.l gfx_current_screen_ptr,a0
+    move.w gfx_current_mode,d0
+    cmp.w #1,d0
+    beq .swap_hires
+    cmp.w #2,d0
+    beq .swap_noop
+    cmp.w #3,d0
+    beq .swap_dualpf
+    ; Mode 0 (lores)
     cmp.l #gfx_screen1,a0
     beq .to_screen2
     lea gfx_screen1,a0
@@ -935,6 +989,32 @@ SwapScreen:
     bra .after_swap
 .to_screen2:
     lea gfx_screen2,a0
+    move.l a0,gfx_current_screen_ptr
+    bra .after_swap
+.swap_noop:
+    ; HAM6 is single-buffered (only gfx_screen1_ham6 exists) - swapping is
+    ; not meaningful, so leave gfx_current_screen_ptr untouched rather than
+    ; falling through to the mode-0 comparison, which would silently point
+    ; it at the unrelated lores buffer.
+    bra .after_swap
+.swap_hires:
+    cmp.l #gfx_screen1_hires,a0
+    beq .to_screen2_hires
+    lea gfx_screen1_hires,a0
+    move.l a0,gfx_current_screen_ptr
+    bra .after_swap
+.to_screen2_hires:
+    lea gfx_screen2_hires,a0
+    move.l a0,gfx_current_screen_ptr
+    bra .after_swap
+.swap_dualpf:
+    cmp.l #gfx_screen1_dualpf,a0
+    beq .to_screen2_dualpf
+    lea gfx_screen1_dualpf,a0
+    move.l a0,gfx_current_screen_ptr
+    bra .after_swap
+.to_screen2_dualpf:
+    lea gfx_screen2_dualpf,a0
     move.l a0,gfx_current_screen_ptr
 .after_swap:
     ; Do NOT update the copper list here — updating copper while the
@@ -961,10 +1041,15 @@ UpdateCopperList:
     move.w gfx_current_mode,d7
     cmp.w #1,d7
     beq .u_hires
+    cmp.w #3,d7
+    beq .u_dualpf
     jsr gfx_prepare_copperlist_interleaved
     bra .u_done
 .u_hires:
     jsr gfx_prepare_copperlist_hires_interleaved
+    bra .u_done
+.u_dualpf:
+    jsr gfx_prepare_copperlist_dualpf
 .u_done:
     moveq #0,d0
     movem.l (sp)+,d7
@@ -1014,15 +1099,17 @@ _SetGraphicsMode:
     link a6,#0                 ; Set up stack frame
     movem.l d1-d7/a0-a4,-(sp)  ; Save registers
     move.l 8(a6),d1            ; Get mode parameter
-    cmp.l #2,d1                ; Compare mode with max value
-    bgt .error                 ; Invalid mode if > 2
+    cmp.l #3,d1                ; Compare mode with max value
+    bgt .error                 ; Invalid mode if > 3
     tst.l d1                   ; Check for negative
     blt .error                 ; Invalid if negative
     tst.l d1                   ; Test for mode 0
     beq .mode_320x256          ; Mode 0 = 320x256x32
     cmp.l #1,d1                ; Test for mode 1
     beq .mode_640x256          ; Mode 1 = 640x256x16
-    bra .mode_320x256_ham6     ; Mode 2 = 320x256 HAM6
+    cmp.l #2,d1                ; Test for mode 2
+    beq .mode_320x256_ham6     ; Mode 2 = 320x256 HAM6
+    bra .mode_320x256_dualpf   ; Mode 3 = 320x256 dual playfield
 
 .mode_320x256:
     ifd DISABLE_320x256
@@ -1111,6 +1198,35 @@ _SetGraphicsMode:
     clr.w COPJMP1(a5)                       ; Strobe to start Copper at new list
     ; HAM6 mode: disable blitter DMA to avoid conflicts with color register
     move.w #%1000000110100000,DMACON(a5)    ; Enable DMA (SET|MASTER|bitplane|copper|sprite) - no blitter
+    bra .success
+
+.mode_320x256_dualpf:
+    ifd DISABLE_DUALPF
+    bra .error          ; buffer was shrunk at assembly time; refuse this mode at runtime
+    endif
+    move.w #%0000000111100000,DMACON(a5)    ; Disable selected DMA
+    move.w #0,FMODE(a5)                      ; AGA fetch mode off (ECS-compatible 16-bit fetch)
+    move.w #$0C00,BPLCON3(a5)                ; Default ECS/AGA compatibility state
+    move.w #$0011,BPLCON4(a5)                ; Default sprite/bitplane bank mapping
+    move.w #3,gfx_current_mode               ; Set dual-playfield mode
+    lea gfx_screen1_dualpf,a0                ; Load gfx_screen1_dualpf address
+    move.l a0,gfx_current_screen_ptr        ; Set initial screen
+    move.w #%0110011000000000,BPLCON0(a5)   ; 6 bitplanes + DBLPF (dual playfield) + color
+    move.w #0,BPLCON1(a5)                   ; No scroll
+    move.w #%100100,BPLCON2(a5)             ; Default priority (PF1 in front)
+    move.w #200,BPL1MOD(a5)                 ; Modulo for 6-plane interleaved rows: (6-1)*40
+    move.w #200,BPL2MOD(a5)                 ; Modulo for 6-plane interleaved rows
+    move.w #$2C81,DIWSTRT(a5)               ; Display window start
+    move.w #$2CC1,DIWSTOP(a5)               ; Display window stop
+    move.w #$38,DDFSTRT(a5)                 ; Data fetch start
+    move.w #$D0,DDFSTOP(a5)                 ; Data fetch stop
+    move.w #1,gfx_active_playfield          ; Default drawing target: playfield 1
+    jsr gfx_init_sprites                    ; Initialize sprites to null
+    jsr gfx_prepare_copperlist_dualpf       ; Setup copper
+    lea.l gfx_copperlist_dualpf,a1           ; Load copper list
+    move.l a1,COP1LCH(a5)                   ; Set copper pointer
+    clr.w COPJMP1(a5)                       ; Strobe to start Copper at new list
+    move.w #%1000000111100000,DMACON(a5)    ; Enable DMA (SET|MASTER|bitplane|copper|sprite|blitter)
     bra .success
 
 .error:
@@ -1202,11 +1318,17 @@ gfx_scroll_screen:
     move.w gfx_current_mode,d0
     tst.w d0
     beq .sc_lores
+    cmp.w #3,d0
+    beq .sc_dualpf
     moveq #4,d1
     moveq #80,d2
     bra.s .sc_ready
 .sc_lores:
     moveq #5,d1
+    moveq #40,d2
+    bra.s .sc_ready
+.sc_dualpf:
+    moveq #6,d1
     moveq #40,d2
 .sc_ready:
     move.l d1,d3
@@ -1264,6 +1386,8 @@ gfx_clear_screen:
     beq .clear_ham6
     cmp.w #1,d2
     beq .clear_hires_blit
+    cmp.w #3,d2
+    beq .clear_dualpf
 
     ; Mode 0: lores (320x256x5 = 51200 bytes = 25600 words = 400 lines * 64 words)
     WAITBLIT
@@ -1283,6 +1407,19 @@ gfx_clear_screen:
     move.w #0,BLTCON1(a5)
     move.w #$0100,BLTCON0(a5)      ; USED only, minterm $00 -> D always 0
     move.w #640<<6,BLTSIZE(a5)     ; height=640, width=64 words (field 0), starts blit
+    WAITBLIT
+    bra.s .after_clear
+
+.clear_dualpf:
+    ; Mode 3: dual playfield (320x256x6 = 61440 bytes = 30720 words). Clears
+    ; BOTH playfields at once (all 6 planes) - the active-playfield selector
+    ; only affects subsequent drawing calls, not ClearScreen.
+    WAITBLIT
+    move.l a0,BLTDPT(a5)
+    move.w #0,BLTDMOD(a5)
+    move.w #0,BLTCON1(a5)
+    move.w #$0100,BLTCON0(a5)      ; USED only, minterm $00 -> D always 0
+    move.w #480<<6,BLTSIZE(a5)     ; height=480, width=64 words (field 0), starts blit
     WAITBLIT
     bra.s .after_clear
 
@@ -1372,6 +1509,22 @@ gfx_init_sprites:
     move.w d1,(a1)      ; Low word
     addq.l #4,a1
     dbf d2,.init_ham6_loop
+    endif
+
+    ifnd DISABLE_DUALPF
+    ; Initialize dual-playfield copper list sprite pointers
+    lea.l gfx_sprcop_dualpf,a1
+    addq.l #2,a1        ; Skip to value word
+    moveq #7,d2         ; 8 sprites (0-7)
+.init_dualpf_loop:
+    move.l d0,d1
+    swap d1
+    move.w d1,(a1)      ; High word
+    addq.l #4,a1
+    swap d1
+    move.w d1,(a1)      ; Low word
+    addq.l #4,a1
+    dbf d2,.init_dualpf_loop
     endif
     
     ; Write null sprite pointers to hardware registers as well
@@ -1477,6 +1630,37 @@ gfx_prepare_copperlist_ham6:
     movem.l (sp)+,d0-d2/a0-a2
     rts
 
+; Prepare dual-playfield copper list (320x256, 6 planes, line-interleaved -
+; same 40 bytes/plane/row layout as lores, just twice the plane count)
+gfx_prepare_copperlist_dualpf:
+    movem.l d0-d2/a0-a2,-(sp)
+
+    ; Update bitplane pointers
+    move.l gfx_current_screen_ptr,a1
+    lea.l gfx_bplcop_dualpf,a2
+    addq.l #2,a2
+    moveq #0,d0
+    moveq #0,d1
+.gfx_bplloop_dualpf:
+    move.l a1,d2
+    add.l d1,d2
+    swap d2
+    move.w d2,(a2)
+    addq.l #4,a2
+    swap d2
+    move.w d2,(a2)
+    addq.l #4,a2
+    add.l #40,d1
+    addq.l #1,d0
+    cmp.l #6,d0
+    blt.s .gfx_bplloop_dualpf
+
+    ; Update sprite pointers in copper list
+    jsr UpdateSpritePointers
+
+    movem.l (sp)+,d0-d2/a0-a2
+    rts
+
 
 ; New routine: SetColor(idx, value)
 ; Parameters: 8(a6) = idx (0..31), 12(a6) = color value (long)
@@ -1522,6 +1706,16 @@ SetColor:
     addq.l #2,a0
     move.w d1,(a0)
 
+    ; Update dual-playfield copperlist palette entry if idx in 0..15
+    ; (idx 1-7 are PF1 colors, 9-15 are PF2 colors - see docs for the map)
+    move.l d0,d2
+    lsl.l #2,d2
+    lea gfx_copperlist_dualpf,a0
+    addq.l #4,a0
+    add.l d2,a0
+    addq.l #2,a0
+    move.w d1,(a0)
+
 .sc_done:
     moveq #0,d0
     movem.l (sp)+,d1-d2/a0
@@ -1560,6 +1754,8 @@ LoadPalette:
     beq.s .lp_hires
     cmp.w #2,d0
     beq.s .lp_ham6
+    cmp.w #3,d0
+    beq.s .lp_dualpf
     bra.s .lp_done
     
 .lp_lores:
@@ -1590,7 +1786,17 @@ LoadPalette:
 .lp_ham6_ok:
     lea gfx_copperlist_ham6,a1
     addq.l #4,a1
-    
+    bra.s .lp_copy
+
+.lp_dualpf:
+    ; Update dual-playfield copper list (16 colors max: PF1=1-7, PF2=9-15)
+    cmp.l #16,d2
+    ble.s .lp_dualpf_ok
+    move.l #16,d2
+.lp_dualpf_ok:
+    lea gfx_copperlist_dualpf,a1
+    addq.l #4,a1
+
 .lp_copy:
     ; Copy palette colors
     subq.l #1,d2            ; Loop counter
@@ -1688,13 +1894,19 @@ _DrawChar:
     lsl.l #3,d5
     move.w gfx_current_mode,d7
     tst.w d7
-    bne .dc_hires
+    beq.s .dc_lores
+    cmp.w #3,d7
+    beq.s .dc_dualpf_mode
+    moveq #4,d7
+    moveq #80,d1
+    bra.s .dc_mode_set
+.dc_lores:
     moveq #5,d7
     moveq #40,d1
     bra.s .dc_mode_set
-.dc_hires:
-    moveq #4,d7
-    moveq #80,d1
+.dc_dualpf_mode:
+    moveq #6,d7
+    moveq #40,d1
 .dc_mode_set:
     move.l d2,d3
     lsl.l #3,d3
@@ -1715,7 +1927,15 @@ _DrawChar:
     add.l d0,d2             ; d2 = base_offset + text_x
     move.l gfx_current_screen_ptr,a2
     add.l d2,a2             ; a2 = screen_base + base_offset + text_x
-    moveq #0,d3
+    moveq #0,d3             ; d3 = physical plane slot (address offset unit)
+    cmp.w #3,gfx_current_mode
+    bne.s .dc_plane_start_ok
+    ; Dual playfield: only touch the active playfield's 3 physical planes
+    ; (PF1 = even slots 0/2/4, PF2 = odd slots 1/3/5)
+    cmp.w #2,gfx_active_playfield
+    bne.s .dc_plane_start_ok
+    moveq #1,d3              ; PF2 = odd physical slots
+.dc_plane_start_ok:
     ; Save row counter (d6) and restore later, but we need to access color correctly
     ; Stack layout: 0(sp) = saved_color, then we save row counter making it:
     ; Stack layout: 0(sp) = row_counter, 4(sp) = saved_color
@@ -1728,7 +1948,7 @@ _DrawChar:
     move.b (a3,d0.w),d0	; font byte for (glyph, plane 0, row)
     ; Calculate address for this plane: base + (plane * width_bytes)
     move.l a2,a4        ; a4 = base address for this row
-    move.l d3,d2        ; d2 = plane number
+    move.l d3,d2        ; d2 = physical plane slot
     mulu d1,d2          ; d2 = plane * width_bytes (40)
     add.l d2,a4         ; a4 = address for this plane/row/column
 
@@ -1748,9 +1968,18 @@ _DrawChar:
     move.b d6,(a4)
 .dc_clear_done:
 
-    ; Test whether this plane should be set for the requested color
+    ; Test whether this plane should be set for the requested color. The bit
+    ; position is the physical slot (d3) for modes 0/1/2, but for dual
+    ; playfield the physical slot steps by 2 (0/2/4 or 1/3/5) while the
+    ; color's bit position is always 0..2 - halve a COPY of d3 (d6 is free
+    ; here: the clear-step above already flushed its value to (a4)).
     move.l 4(sp),d2     ; Color was saved at 4(sp) offset
-    btst d3,d2
+    move.w d3,d6
+    cmp.w #3,gfx_current_mode
+    bne.s .dc_bit_ready
+    lsr.w #1,d6
+.dc_bit_ready:
+    btst d6,d2
     beq.s .dc_after_plane
 
     ; Set bits where font has 1s (OR font byte into screen byte)
@@ -1759,14 +1988,22 @@ _DrawChar:
     move.b d6,(a4)
 
 .dc_after_plane:
+    cmp.w #3,gfx_current_mode
+    bne.s .dc_plane_step_default
+    addq.w #2,d3
+    cmp.w #6,d3
+    blt.s .dc_plane_loop
+    bra.s .dc_plane_done
+.dc_plane_step_default:
     addq.w #1,d3
     cmp.w d7,d3
     blt.s .dc_plane_loop
+.dc_plane_done:
     ; Restore row counter (was saved before entering plane loop)
     move.l (sp)+,d6
     addq.l #1,d6
     cmp.l #8,d6
-    blt.s .dc_row_loop
+    blt .dc_row_loop
 .dc_done:
     addq.l #4,sp
     movem.l (sp)+,d1-d7/a0-a4
@@ -1785,6 +2022,8 @@ _SetPixel:
      beq.w .sp_lores
      cmp.w #1,d7
      beq.w .sp_hires
+     cmp.w #3,d7
+     beq.w .sp_dualpf
      bra.w .sp_out_of_bounds
  .sp_lores:
     ; LORES mode (320x256x32)
@@ -1895,6 +2134,64 @@ _SetPixel:
     blt.s .sp_hires_loop_planes
     moveq #0,d0
     bra .sp_done
+.sp_dualpf:
+    ; DUAL PLAYFIELD mode (320x256, 6 planes total; 7 visible colors +
+    ; transparent per playfield). Routes bits into the odd (PF1) or even
+    ; (PF2) physical plane slots selected by gfx_active_playfield.
+    cmp.l #320,d0
+    bge .sp_out_of_bounds
+    cmp.l #256,d1
+    bge .sp_out_of_bounds
+    tst.l d0
+    blt .sp_out_of_bounds
+    tst.l d1
+    blt .sp_out_of_bounds
+    tst.l d2
+    blt .sp_out_of_bounds
+    cmp.l #8,d2
+    bge .sp_out_of_bounds
+    move.l gfx_current_screen_ptr,a0
+    cmpa.l #0,a0
+    beq .sp_out_of_bounds
+    moveq #0,d5              ; d5 = color bit index (0..2)
+    moveq #0,d4              ; d4 = physical plane slot (PF1 default = 0)
+    cmp.w #2,gfx_active_playfield
+    bne.s .sp_dualpf_loop
+    moveq #1,d4              ; PF2 = odd physical slots
+.sp_dualpf_loop:
+    move.l d1,d6            ; d6 = y
+    mulu #6,d6               ; d6 = y * num_planes(6)
+    mulu #40,d6              ; d6 = y * 6 * 40
+    move.l d4,d7             ; d7 = physical plane slot
+    mulu #40,d7
+    add.l d7,d6
+    move.l d0,d7             ; d7 = x
+    lsr.w #3,d7              ; d7 = x // 8
+    add.l d7,d6
+    move.l a0,a2
+    add.l d6,a2
+    move.l d0,d7
+    and.w #7,d7
+    moveq #7,d6
+    sub.w d7,d6
+    moveq #1,d7
+    lsl.w d6,d7
+    move.b (a2),d6
+    btst d5,d2
+    beq.s .sp_dualpf_clearbit
+    or.b d7,d6
+    bra.s .sp_dualpf_store
+.sp_dualpf_clearbit:
+    not.b d7
+    and.b d7,d6
+.sp_dualpf_store:
+    move.b d6,(a2)
+    addq.w #1,d5
+    addq.w #2,d4
+    cmp.w #3,d5
+    blt.s .sp_dualpf_loop
+    moveq #0,d0
+    bra .sp_done
 .sp_out_of_bounds:
     moveq #-1,d0
 .sp_done:
@@ -1943,6 +2240,8 @@ Scroll:
     move.w gfx_current_mode,d7
     cmp.w #2,d7
     beq .scroll_error            ; HAM6 mode not supported
+    cmp.w #3,d7
+    beq .scroll_error            ; Dual playfield not supported yet
 
     ; --- Set up screen parameters based on mode ---
     ; Local variables:
@@ -2414,9 +2713,14 @@ gfx_text_cursor_x:
 gfx_text_cursor_y:
     dc.w 0  ; Text cursor row
 
-;Current graphics mode (0=320x256x32, 1=640x256x16)
+;Current graphics mode (0=320x256x32, 1=640x256x16, 2=HAM6, 3=dual playfield)
 gfx_current_mode:
     dc.w 0  ; Current graphics mode
+
+; Active playfield for drawing calls in dual-playfield mode (1 or 2). Only
+; meaningful when gfx_current_mode=3; see SetActivePlayfield.
+gfx_active_playfield:
+    dc.w 1
 
 gfx_text_mode:
     dc.w 0  ; Text rendering mode (0=transparent, 1=opaque)
@@ -2636,6 +2940,72 @@ gfx_sprcop_ham6:
     ds.b 2
     endif
 
+; Dual-playfield copper list (320x256, 6 bitplanes split PF1=planes 1,3,5 /
+; PF2=planes 2,4,6). Palette: COLOR0=backdrop, COLOR1-7=PF1 (000=transparent),
+; COLOR8=unused by PF2 (000 selects transparent, not COLOR8), COLOR9-15=PF2.
+gfx_copperlist_dualpf:
+    ifnd DISABLE_DUALPF
+    dc.w $1807,$fffe  ; Wait for vertical position $22
+
+    dc.w COLOR0,$000
+    dc.w COLOR1,$F00
+    dc.w COLOR2,$0F0
+    dc.w COLOR3,$00F
+    dc.w COLOR4,$FF0
+    dc.w COLOR5,$F0F
+    dc.w COLOR6,$0FF
+    dc.w COLOR7,$FFF
+    dc.w COLOR8,$000
+    dc.w COLOR9,$800
+    dc.w COLOR10,$080
+    dc.w COLOR11,$008
+    dc.w COLOR12,$880
+    dc.w COLOR13,$808
+    dc.w COLOR14,$088
+    dc.w COLOR15,$CCC
+
+gfx_bplcop_dualpf:
+    dc.w BPL1PTH,0
+    dc.w BPL1PTL,0
+    dc.w BPL2PTH,0
+    dc.w BPL2PTL,0
+    dc.w BPL3PTH,0
+    dc.w BPL3PTL,0
+    dc.w BPL4PTH,0
+    dc.w BPL4PTL,0
+    dc.w BPL5PTH,0
+    dc.w BPL5PTL,0
+    dc.w BPL6PTH,0
+    dc.w BPL6PTL,0
+
+    ; Sprite pointers (8 sprites, 2 words each)
+gfx_sprcop_dualpf:
+    dc.w SPR0PTH,0 
+    dc.w SPR0PTL,0
+    dc.w SPR1PTH,0
+    dc.w SPR1PTL,0
+    dc.w SPR2PTH,0
+    dc.w SPR2PTL,0
+    dc.w SPR3PTH,0
+    dc.w SPR3PTL,0
+    dc.w SPR4PTH,0
+    dc.w SPR4PTL,0
+    dc.w SPR5PTH,0
+    dc.w SPR5PTL,0
+    dc.w SPR6PTH,0
+    dc.w SPR6PTL,0
+    dc.w SPR7PTH,0
+    dc.w SPR7PTL,0
+
+    dc.w $FFFF,$FFFE
+    else
+    ds.b 2
+gfx_bplcop_dualpf:
+    ds.b 2
+gfx_sprcop_dualpf:
+    ds.b 2
+    endif
+
 ; Null sprite (invisible sprite for unused slots)
 ; Must be in chip RAM
 gfx_null_sprite:
@@ -2689,6 +3059,22 @@ gfx_screen2_hires:
 
 gfx_screen1_ham6:
     ifnd DISABLE_HAM
+    ds.b 320*256/8*6
+    else
+    ds.b 2
+    endif
+    even
+
+gfx_screen1_dualpf:
+    ifnd DISABLE_DUALPF
+    ds.b 320*256/8*6
+    else
+    ds.b 2
+    endif
+    even
+
+gfx_screen2_dualpf:
+    ifnd DISABLE_DUALPF
     ds.b 320*256/8*6
     else
     ds.b 2

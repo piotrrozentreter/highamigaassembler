@@ -55,6 +55,11 @@ WAITBLIT:MACRO
 CreateBob:
     link a6,#0
     movem.l d1-d7/a0-a4,-(sp)
+    ; BOB storage is tied to modes 0/1/2 plane layouts; dual playfield (mode 3)
+    ; is not yet supported here - reject explicitly rather than silently using
+    ; the wrong plane count.
+    cmpi.w #3,gfx_current_mode
+    beq .cb_fail
     move.l 8(a6),a1        ; a1 = descriptor_ptr
     move.l 12(a6),d3       ; d3 = b parameter (0 or 1)
     ; read width/height/color_count from descriptor and save to non-clobbered registers
@@ -172,6 +177,10 @@ MirrorBobHorizontally:
     moveq #0,d0
     move.l d0,a4                   ; a4 = dst_data_ptr (for cleanup)
     move.l d0,a2                   ; a2 = dst_mask_ptr (for cleanup)
+
+    ; Dual playfield (mode 3) is not yet supported by BOB storage - reject.
+    cmpi.w #3,gfx_current_mode
+    beq .mbh_fail
 
     move.l 8(a6),a0                ; a0 = source handle
     cmpa.l #0,a0
@@ -444,6 +453,10 @@ MirrorBobVertically:
     moveq #0,d0
     move.l d0,a4                   ; a4 = dst_data_ptr (for cleanup)
     move.l d0,a2                   ; a2 = dst_mask_ptr (for cleanup)
+
+    ; Dual playfield (mode 3) is not yet supported by BOB storage - reject.
+    cmpi.w #3,gfx_current_mode
+    beq .mbv_fail
 
     move.l 8(a6),a0                ; a0 = source handle
     cmpa.l #0,a0

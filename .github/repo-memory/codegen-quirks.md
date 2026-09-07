@@ -872,6 +872,87 @@
   `SetFont` which correctly used `move.l 8(a6),d0`) - don't trust a subagent's asm output at
   face value even when it "assembles clean" (vasm won't catch this, it's a semantic bug).
 
+## Dual playfield graphics mode 3 (2026-09-07)
+- Added `SetGraphicsMode(3)`: classic OCS/ECS 320x256 dual playfield, 6 line-interleaved
+  bitplanes (40 bytes/plane/row like mode 0), hardware-split into PF1 (bitplanes 1,3,5) and PF2
+  (bitplanes 2,4,6), 7 visible colors + transparent per playfield (NOT 32 colors). BPLCON0=
+  `%0110011000000000` (6 planes, DBLPF, HAM off, COLOR_ON on). BPL1MOD/BPL2MOD=200
+  (formula confirmed: `(planes-1)*bytes_per_row`, matches mode0's 160=(5-1)*40 and
+  mode1's 240=(4-1)*80). New `SetActivePlayfield(1|2)` + `gfx_active_playfield` word select
+  which physical plane group (PF1=even slots 0/2/4, PF2=odd slots 1/3/5, zero-indexed within
+  the 6-plane interleaved buffer) subsequent SetPixel/LINE/RECTANGLE/CIRCLE/Text calls target.
+  Palette: COLOR0=backdrop, COLOR1-7=PF1 (code N->COLORN), COLOR8 unused (PF2 code 0 is always
+  transparent regardless of COLOR8), COLOR9-15=PF2 (code N->COLOR(8+N)). New `DISABLE_DUALPF`
+  flag mirrors DISABLE_320x256/640x256/HAM. Deliberately NOT supported in mode 3 (return -1):
+  `BLITLINE`, `Scroll()`, `CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically`; `lib/gui.s`
+  untouched/unverified. New example `examples/dual_playfield_demo.has`.
+- **`lib/scroll.s` is DEAD CODE, not linked** - it's a "Reference VASM Implementation Template"
+  (its own header says so) whose `Scroll:`/`ScrollInit:` bodies are pseudo-code stubs that
+  validate input then return success without ever blitting. The REAL, actively-used `Scroll()`
+  (with the `.scroll_do_vertical`/`.scroll_h_pixel` labels referenced elsewhere in this file's
+  history) lives in **`lib/graphics.s`** (`XDEF Scroll` in its header, real label ~line 1919).
+  `scripts/build_example.sh` auto-detects libs by mapping `extern func`-declared symbol names to
+  owning lib files via a `SYM_TO_LIB` table (grep it before assuming a function lives where its
+  filename suggests) - `Scroll` maps to `graphics.s`, so `scroll.s` is never actually selected/
+  linked for any real example (confirmed: both files define global `Scroll`, which would be a
+  vlink duplicate-symbol error if both were ever linked together). Don't waste time editing
+  `lib/scroll.s` for graphics.s-related Scroll bugs/features - it's unreachable.
+- **Windows Git-Bash gotcha reconfirmed**: `bash scripts/build_example.sh` silently reports
+  "Libs: (none auto-detected)" for EVERY example (not just some) unless `/usr/bin` (GNU
+  coreutils, incl. `sort -u`) is prepended to PATH ahead of System32 - e.g.
+  `export PATH="/usr/bin:$PATH:/c/.../vbcc/bin"` before invoking the script. Previously noted
+  in this file re: `sort`; reconfirmed as a full auto-detect breakage, not just a cosmetic issue.
+  Also: multi-line `bash -c '...for f in ...; do ...; done'` invoked FROM this tool's
+  `run_in_terminal` (PowerShell host spawning bash) is unreliable ("syntax error: unexpected end
+  of file") - write each invocation as its own single-line `bash -c '...'` call instead of a
+  multi-line for-loop string.
+- **Register-clobber bug I introduced then fixed (found by review-agent pass, not by
+  compile/assemble/vasm/pytest)**: `_DrawChar`'s row loop caches `gfx_text_cursor_x` in `d4`
+  ONCE before the loop, re-reading it (`move.w d4,d0`) at the top of every one of the 8 row
+  iterations - `d4` MUST stay live across the whole function, not just within one row. My first
+  attempt at a per-plane "color bit index" for dual-playfield (needed because physical plane
+  slot steps by 2 while the color bit tested is 0..2) used `d4` as that counter, silently
+  destroying the cursor-x cache after row 0 - rows 1-7 of EVERY glyph in EVERY mode (0/1/2/3)
+  would draw at a fixed wrong column. Real fix: don't add a new persistent register at all -
+  compute the bit index from a COPY of the physical-slot register (`d3`) into `d6` right before
+  the `btst`, only for mode 3 (`move.w d3,d6` / `lsr.w #1,d6` for mode 3 else use d3 directly) -
+  `d6` is provably free at exactly that point (the preceding clear-step already flushed its
+  value to `(a4)` before this line runs). Lesson: before repurposing ANY register inside a loop
+  body "because it looked free", trace whether the SAME register is read again at the TOP of
+  the *outer* loop on the next iteration, not just later in the current iteration.
+- **Two more bugs found by the same review pass, both from widening a SHARED gate without
+  auditing every caller of that gate**: (1) `gfx_scroll_screen` (auto-scroll on 32-line text
+  overflow, called from `_DrawChar`'s newline handler and `Print`'s wrap path) only special-
+  cased mode 0 (`tst.w d0 / beq .sc_lores`), so mode 3 silently fell through to the hires
+  geometry (4 planes/80 bytes) - reachable via ordinary `Print()` usage, would corrupt chip RAM
+  past the 61440-byte dualpf buffer. Fixed by adding an explicit `cmp.w #3,d0 / beq .sc_dualpf`
+  branch (6 planes/40 bytes). (2) Widening `_gfx_can_plot` to accept mode 3 also silently
+  re-opened `BLITLINE` (which gates solely via `_gfx_can_plot`) to mode-3 calls, but BLITLINE's
+  OWN separate geometry table (`tst.w d0 / bne.s .bl_hires`, same "any nonzero=hires" pattern)
+  was never adapted - a real blitter-hardware out-of-bounds write, not just a CPU loop. Fixed by
+  adding an explicit `cmp.w #3,gfx_current_mode / beq .bl_error` in BLITLINE right after its
+  `_gfx_can_plot` call, keeping BLITLINE mode-0/1-only as already documented. **General lesson**:
+  when widening a shared validation gate (`_gfx_can_plot`, or any similar chokepoint) to accept a
+  new mode, grep for every OTHER caller of that gate and check whether each one has its own,
+  separate, not-yet-updated mode-dependent geometry table that the gate's contract no longer
+  matches - a passing gate does not mean the caller's own downstream logic is safe.
+- Also fixed while touching `SwapScreen` (already needed restructuring for mode 3 buffers):
+  it previously toggled `gfx_screen1`/`gfx_screen2` (lores) for literally every mode including
+  hires/HAM6 (`cmp.l #gfx_screen1,a0` never matches a hires/HAM6 pointer, so it always fell
+  through to "set to gfx_screen1") - a real pre-existing bug for mode 1 callers, fixed as a
+  natural side effect of making the dispatch properly mode-aware (0/1/2/3 all now correct;
+  mode 2/HAM6 is an explicit intentional no-op since it's single-buffered).
+- Regression sweep after all fixes: 130 examples x 2 CPU targets, zero new failures (same 5
+  negative fixtures + `cpu68020_32bit_arithmetic.has`-on-68000-only baseline);
+  `python -m pytest tests -q` 690 passed/1 skipped (had to update one test in
+  `tests/test_graphics_primitives_api.py` that hard-coded the OLD `_SetPixel` dispatch shape
+  before mode 3 existed, and added a new test asserting `BLITLINE` rejects mode 3).
+- Musashi execution-level verification (does mode 3 ACTUALLY plot to the right byte at runtime,
+  not just "does it assemble") is Linux-only and was postponed - see
+  `docs/MUSASHI_DUAL_PLAYFIELD_TEST_PLAN.md` for the concrete test list already designed
+  (pixel-plane-routing test is the highest-value one, mirrors exactly the class of bug this
+  session's review pass caught by reading, not by running).
+
 ## The REAL `Scroll()` bug: vertical scroll was a complete no-op, same big-endian .w/.l
 ## class as the SetTextMode bug above (2026-09-07)
 - Direct continuation of "Scroll isn't working was a perception bug" above. After the

@@ -6,6 +6,40 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Graphics mode 3 (dual playfield) in `lib/graphics.s`:** `SetGraphicsMode(3)` selects a
+  classic OCS/ECS 320x256 dual-playfield mode - 6 line-interleaved bitplanes (40 bytes/plane/row,
+  same convention as mode 0) split by hardware into Playfield 1 (bitplanes 1, 3, 5) and
+  Playfield 2 (bitplanes 2, 4, 6). Each playfield shows 7 visible colors (color code 1-7) plus
+  transparent (color code 0); this is not a 320x256x32 mode.
+  - **New function `SetActivePlayfield(playfield: int) -> int`:** selects which playfield (`1`
+    or `2`) subsequent drawing calls target. Defaults to playfield 1 after `SetGraphicsMode(3)`;
+    returns `-1` in any other graphics mode or for an invalid playfield argument.
+  - **Palette mapping:** `COLOR0` is the shared backdrop. `COLOR1`-`COLOR7` are Playfield 1
+    colors (color code *N* maps to `COLOR`*N*). `COLOR8` is not a meaningful Playfield 2 color -
+    Playfield 2's color code 0 always means transparent regardless of what is written there.
+    `COLOR9`-`COLOR15` are Playfield 2 colors (color code *N* maps to `COLOR(8+N)`).
+  - `SetPixel`/`POINT`/`PLOT`, `LINE`, `RECTANGLE`, `CIRCLE`, and `Text`/`Print` route drawing
+    through the active-playfield selector. `ClearScreen` also works in mode 3 but always clears
+    both playfields (all 6 bitplanes) at once rather than respecting the selector. `SwapScreen`
+    and `Show`/`UpdateCopperList` correctly handle the dual-playfield double buffers and copper
+    list.
+  - Not supported in mode 3 (returns `-1` without corrupting state): `BLITLINE` (the blitter
+    line-mode geometry table has no dual-playfield entry), `Scroll` (same restriction as
+    HAM6/mode 2), and `CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically` in `lib/bob.s`
+    (BOB storage's plane-count logic does not support dual playfield yet). `lib/gui.s` widgets
+    were not adapted or verified for mode 3 and should be treated as unsupported there.
+  - **New opt-in memory flag `DISABLE_DUALPF`:** following the same pattern as
+    `DISABLE_320x256`/`DISABLE_640x256`/`DISABLE_HAM`, shrinks the dual-playfield chip-RAM screen
+    buffers (`gfx_screen1_dualpf`, `gfx_screen2_dualpf`) to 2-byte placeholders and omits the
+    dual-playfield copper list when defined at assembly time. `SetGraphicsMode(3)` returns `-1`
+    if the buffer was disabled this way.
+  - New example: [examples/dual_playfield_demo.has](../examples/dual_playfield_demo.has) - a
+    static Playfield 1 background (nested picture-frame rectangles and circles) composited under
+    an animated Playfield 2 HUD and bouncing box, demonstrating real hardware transparency
+    compositing. Sprites (own copper list `gfx_sprcop_dualpf`) also work in mode 3.
+
+### Added
+
 - **`BLITLINE(x0, y0, x1, y1, color)` in `lib/graphics.s`:** a hardware line drawn with the
   blitter's line mode, as an alternative to the CPU Bresenham `LINE`. Blitter line mode has no
   hardware clipping, so the segment is clipped with Cohen-Sutherland before any blit; a fully
@@ -767,9 +801,9 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Roots are discovered from `public` declarations that point to internal `proc` definitions.
   - Unreachable internal procedures are removed from the AST before assembly is emitted.
   - Three conservative keep-all safeguards prevent incorrect stripping:
-    - **Feature off by default** â€” requires an explicit opt-in flag.
-    - **Top-level asm block** â€” raw `jsr`/`jmp` may reference any label; all procs kept.
-    - **No roots found** â€” keeps everything rather than silently discarding all code.
+    - **Feature off by default** — requires an explicit opt-in flag.
+    - **Top-level asm block** — raw `jsr`/`jmp` may reference any label; all procs kept.
+    - **No roots found** — keeps everything rather than silently discarding all code.
   - `--strip-unused-report` prints roots, kept, and removed procedure lists to stderr.
   - Three new example files demonstrate all scenarios: `strip_unused_procs_demo.has`, `strip_unused_procs_asm_safe.has`, `strip_unused_procs_no_roots.has`.
 
@@ -903,7 +937,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   - Initialised with `CreateSprite(0, &cursor)` + `ApplySpritePalette(0)` + `ShowSprite(0)`.
   - Updated every VBlank: `SetSpritePosition(0, GetGuiMouseX(), GetGuiMouseY())`.
 - **`scripts/build_msgbox_demo.sh`**: End-to-end build script compiling, assembling, and linking all eight objects for the GUI demo.
-- **New documentation**: [`docs/GUI_LIBRARY.md`](GUI_LIBRARY.md) â€” full API reference for the GUI widget library.
+- **New documentation**: [`docs/GUI_LIBRARY.md`](GUI_LIBRARY.md) — full API reference for the GUI widget library.
 
 ### Changed
 - **`DrawButton` rendering** changed from a uniform `DrawBox` border to a **3D raised gadget** style (bright top/left highlight, black bottom/right shadow). Visual appearance now clearly distinguishes buttons from message-box windows.

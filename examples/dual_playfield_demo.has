@@ -1,0 +1,185 @@
+// Dual Playfield Demo - graphics mode 3 (320x256, classic OCS/ECS dual playfield)
+//
+// Demonstrates the new dual-playfield graphics mode: two independently
+// drawable layers are composited by the hardware in a single frame.
+//   - Playfield 1 (background): a static picture-frame pattern of nested
+//     rectangles plus a circle, drawn once with SetActivePlayfield(1).
+//   - Playfield 2 (foreground): a HUD caption/footer plus a small box that
+//     bounces around the screen, drawn with SetActivePlayfield(2).
+//
+// Each playfield only has 7 visible colors + transparent (color code 0).
+// Erasing the bouncing box on PF2 with color 0 reveals the PF1 background
+// through it - proof the two playfields are genuinely separate hardware
+// layers, not one shared 32-color screen.
+//
+// Not supported in mode 3 (see docs/GRAPHICS_LIBRARY_INTERFACE.md): Scroll(),
+// BOB creation/mirroring, and lib/gui.s widgets - this demo intentionally
+// only uses SetPixel/PLOT/LINE/RECTANGLE/CIRCLE/Text/ClearScreen, which are
+// dual-playfield aware.
+//
+// Compile: python3 -m hasc.cli examples/dual_playfield_demo.has -o build/dual_playfield_demo.s
+// Assemble: vasmm68k_mot -Fhunkexe -o build/dual_playfield_demo.o build/dual_playfield_demo.s
+
+const KEY_ESC = 69;
+
+const BOX_SIZE = 8;
+const BOX_MIN_X = 24;
+const BOX_MAX_X = 295;
+const BOX_MIN_Y = 24;
+const BOX_MAX_Y = 231;
+
+code main:
+    extern var fonts: byte;
+
+    extern func DebugSetEnabled(flag: int) -> int;
+    extern func DebugClear() -> int;
+    extern func DebugLogStr(msg: int) -> int;
+    extern func DebugFlushToDos() -> void;
+    extern func TakeSystem() -> void;
+    extern func ReleaseSystem() -> void;
+
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func SetActivePlayfield(playfield: int) -> int;
+    extern func SetColor(id: int, col: int) -> int;
+    extern func SetFont(ptr: int) -> int;
+    extern func ClearScreen() -> int;
+    extern func SetPixel(x: int, y: int, color: int) -> int;
+    extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int;
+    extern func CIRCLE(cx: int, cy: int, radius: int, color: int) -> int;
+    extern func Text(x: int, y: int, msg: int, color: int) -> int;
+    extern func UpdateCopperList() -> int;
+    extern func Show() -> void;
+    extern func WaitVBlank() -> int;
+    extern func InitKeyboard() -> void;
+    extern func GetKey() -> byte;
+
+    public main;
+
+    asm {
+        jsr TakeSystem
+        jsr main
+        jsr ReleaseSystem
+        jsr DebugFlushToDos
+        rts
+    }
+
+    // Static PF1 backdrop: nested picture-frame rectangles plus a circle.
+    // Drawn once - PF1 never changes for the rest of the demo.
+    proc draw_background() -> void {
+        call SetActivePlayfield(1);
+        call RECTANGLE(4, 4, 312, 248, 1);
+        call RECTANGLE(20, 20, 280, 216, 2);
+        call RECTANGLE(36, 36, 248, 184, 3);
+        call RECTANGLE(52, 52, 216, 152, 4);
+        call CIRCLE(160, 128, 60, 6);
+        call CIRCLE(160, 128, 40, 7);
+    }
+
+    // Static PF2 HUD text: drawn once - only the bouncing box changes per frame.
+    proc draw_hud() -> void {
+        call SetActivePlayfield(2);
+        call Text(6, 1, &hud_title, 1);
+        call Text(9, 30, &hud_footer, 1);
+    }
+
+    // Erases the box's old position (color 0 = transparent on PF2, revealing
+    // the PF1 background underneath) then draws it at the new position.
+    proc redraw_box(old_x: int, old_y: int, new_x: int, new_y: int) -> void {
+        call SetActivePlayfield(2);
+        call RECTANGLE(old_x, old_y, BOX_SIZE, BOX_SIZE, 0);
+        call RECTANGLE(new_x, new_y, BOX_SIZE, BOX_SIZE, 2);
+    }
+
+    proc main() -> int {
+        var result: int;
+        var key: byte = 0;
+        var box_x: int = 160;
+        var box_y: int = 128;
+        var dx: int = 3;
+        var dy: int = 2;
+        var new_x: int;
+        var new_y: int;
+
+        call DebugClear();
+        call DebugSetEnabled(1);
+        call DebugLogStr(&debug_start);
+
+        // Mode 3: 320x256 classic OCS/ECS dual playfield (6 bitplanes total,
+        // split 3+3 between PF1 and PF2). Not 320x256x32 - see docs.
+        result = SetGraphicsMode(3);
+        if (result != 0) {
+            call DebugLogStr(&debug_mode_failed);
+            return -1;
+        }
+        call DebugLogStr(&debug_mode_ready);
+
+        call ClearScreen();
+        call SetFont(&fonts);
+
+        // Backdrop color (shared, not playfield-specific).
+        call SetColor(0, $000);
+
+        // PF1 palette: dim background colors (codes 1-7 -> COLOR1-COLOR7).
+        call SetColor(1, $400);
+        call SetColor(2, $040);
+        call SetColor(3, $004);
+        call SetColor(4, $440);
+        call SetColor(6, $044);
+        call SetColor(7, $333);
+
+        // PF2 palette: bright foreground colors (codes 1-7 -> COLOR9-COLOR15).
+        call SetColor(9, $FFF);
+        call SetColor(10, $FF0);
+
+        call draw_background();
+        call draw_hud();
+        call redraw_box(box_x, box_y, box_x, box_y);
+
+        call InitKeyboard();
+        call UpdateCopperList();
+        call DebugLogStr(&debug_loop_start);
+
+        while (key != KEY_ESC) {
+            call WaitVBlank();
+            call Show();
+            key = GetKey();
+
+            new_x = box_x + dx;
+            new_y = box_y + dy;
+            if (new_x < BOX_MIN_X) {
+                new_x = BOX_MIN_X;
+                dx = -dx;
+            }
+            if (new_x > BOX_MAX_X) {
+                new_x = BOX_MAX_X;
+                dx = -dx;
+            }
+            if (new_y < BOX_MIN_Y) {
+                new_y = BOX_MIN_Y;
+                dy = -dy;
+            }
+            if (new_y > BOX_MAX_Y) {
+                new_y = BOX_MAX_Y;
+                dy = -dy;
+            }
+
+            call redraw_box(box_x, box_y, new_x, new_y);
+            box_x = new_x;
+            box_y = new_y;
+        }
+
+        call DebugLogStr(&debug_done);
+        return 0;
+    }
+
+data dual_playfield_debug_data:
+    debug_start.b = "dual playfield demo start",0
+    debug_mode_ready.b = "mode 3 ready",0
+    debug_mode_failed.b = "SetGraphicsMode(3) failed",0
+    debug_loop_start.b = "entering interactive loop - press ESC to quit",0
+    debug_done.b = "dual playfield demo done",0
+
+data dual_playfield_text:
+    hud_title.b = "DUAL PLAYFIELD MODE 3 (PF1=bg PF2=fg)",0
+    hud_footer.b = "PRESS ESC TO QUIT",0

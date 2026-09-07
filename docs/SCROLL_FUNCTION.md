@@ -10,6 +10,7 @@ Scrolling is a common operation in graphics applications: menus, game scrolls, t
 - **Vertical scrolling:** Fully implemented, using byte-aligned CPU copy
 - **Horizontal scrolling:** Stubbed (returns success but performs no operation)
 - **HAM6 mode:** Not supported; returns error
+- **Dual playfield mode (mode 3):** Not supported; returns error
 - **Fill color:** Newly exposed areas are always filled with black (color 0)
 
 ## Function Signature
@@ -46,6 +47,7 @@ Errors occur when:
 - `pixels <= 0`
 - `hor` or `vert` outside the range [-1, 0, 1]
 - Current graphics mode is HAM6 (mode 2)
+- Current graphics mode is dual playfield (mode 3)
 - Graphics mode not initialized (no screen buffer set up)
 
 ## Graphics Mode Support
@@ -77,6 +79,10 @@ var result: int = Scroll(0, 0, 639, 255, 0, 1, 8);   // Full screen, scroll down
 ### HAM6 Mode (Mode 2) – Not Supported
 
 HAM6 (Hold-And-Modify) mode is not supported by `Scroll`. Any attempt to scroll while in HAM6 mode returns `-1`.
+
+### Dual Playfield Mode (Mode 3) – Not Supported
+
+Dual playfield mode is not supported by `Scroll`. Any attempt to scroll while in mode 3 returns `-1`, the same as HAM6.
 
 ## Scrolling Direction Semantics
 
@@ -168,7 +174,7 @@ The `Scroll` function assumes the region fits within a single contiguous screen 
 // Scroll entire screen up by 16 pixels
 var result: int = Scroll(0, 0, 319, 255, 0, -1, 16);
 if (result != 0) {
-    // Error: graphics mode not initialized or HAM6
+    // Error: graphics mode not initialized, HAM6, or dual playfield
     return -1;
 }
 ```

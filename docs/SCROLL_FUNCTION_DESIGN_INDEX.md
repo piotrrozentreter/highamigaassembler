@@ -149,6 +149,7 @@ The Scroll function is an external library function that scrolls a rectangular r
 ✅ **Mode 0** (1-bitplane, 16 colors)
 ✅ **Mode 1** (2-bitplane, 4 colors)
 ❌ **HAM6** (24-bit hold-and-modify) — **NOT SUPPORTED** → returns -1
+❌ **Mode 3** (dual playfield) — **NOT SUPPORTED** → returns -1
 ❌ **Other modes** → **NOT SUPPORTED** → returns -1
 
 ---
@@ -244,7 +245,7 @@ Scroll(100, 50, 200, 150, -1, 0, 8);
 
 1. **Region Validation**: x0 < x1 and y0 < y1 (returns -1 if invalid)
 2. **Boundary Checking**: All coordinates must be within screen bounds
-3. **Mode Restriction**: Only works in Mode 0/1 (returns -1 for HAM6)
+3. **Mode Restriction**: Only works in Mode 0/1 (returns -1 for HAM6 or Mode 3/dual playfield)
 4. **Blitter Dependency**: Requires Amiga Blitter (may busy-wait if in use)
 5. **No Wildcards**: Cannot scroll beyond region boundaries
 6. **Signed Parameters**: Direction flags (hor, vert) are signed (-1, 0, 1)
@@ -275,7 +276,7 @@ When implementing or using the Scroll function:
 - [ ] Extern declaration matches calling convention (d0–d6 for parameters, d0 for return)
 - [ ] All 7 parameters loaded into correct registers before `jsr`
 - [ ] Region coordinates satisfy x0 < x1, y0 < y1
-- [ ] Graphics mode is Mode 0 or Mode 1 (not HAM6)
+- [ ] Graphics mode is Mode 0 or Mode 1 (not HAM6 or Mode 3/dual playfield)
 - [ ] Return value checked (0 = success, -1 = error)
 - [ ] Non-volatile registers preserved if used after call
 - [ ] No stack cleanup required (register-based convention)
