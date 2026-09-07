@@ -952,6 +952,101 @@
   `docs/MUSASHI_DUAL_PLAYFIELD_TEST_PLAN.md` for the concrete test list already designed
   (pixel-plane-routing test is the highest-value one, mirrors exactly the class of bug this
   session's review pass caught by reading, not by running).
+- **BPLCON2 priority bug found by the USER visually testing the demo (not by any agent/review/
+  test)**: `.mode_320x256_dualpf` set `BPLCON2 = %100100` (bit6 PF2PRI=0, i.e. PF1 has priority)
+  - copy-pasted verbatim from modes 0/1/2 where PF2PRI is meaningless (single-playfield). For a
+  "PF1=background, PF2=foreground" demo this is backwards: PF1's picture-frame outline pixels
+  punched through and hid the PF2 foreground box/HUD wherever their pixels coincided (worse near
+  the box's outer travel bounds, since the nested frame borders sit close to those bounds -
+  looked like "the box only renders as a clean rectangle near screen edges"). Fixed by changing
+  to `%1100100` (adds bit6=1, PF2 priority) - the low 6 bits (sprite-vs-playfield priority) are
+  unchanged. **Lesson**: when reusing a shared register-value constant across sibling modes,
+  re-derive what EVERY bit means for the NEW mode specifically - don't assume "same value that
+  worked for single-playfield modes" is safe when the new mode gives that bit a totally
+  different, mode-specific meaning (BPLCON2 bit6 is a no-op outside dual-playfield mode, so this
+  exact bug was structurally invisible to compile/assemble/pytest/regression-sweep AND to two
+  agent review passes that focused on register-clobber/geometry bugs, not on
+  "is this specific priority bit semantically correct for the demo's intended visual layering" -
+  only visual inspection caught it).
+- `lib/scroll.s` was deleted from the repo (2026-09-07, confirmed safe/no-op): it was dead/
+  unlinked template code (see the dedicated bullet above) and its one reference in
+  `scripts/build_example.sh`'s `ORDERED_LIBS` array was removed too. `git status` was clean
+  immediately after - the deletion had already been committed together with the dual-playfield
+  feature commit (`fdf1560`), no separate action was needed to "unbreak" anything.
+- **Tearing bug found by the USER from a screenshot (2026-09-07)**: `examples/dual_playfield_demo.has`'s
+  main loop called `WaitVBlank()` at the very TOP of the loop, then did `Show()`, `GetKey()`, and
+  several arithmetic/clamp statements, and only THEN called `redraw_box()` (the actual screen
+  writes - 2x RECTANGLE = 8 LINE calls total, erase-old + draw-new). By the time execution
+  reached the real drawing, the short vblank window had likely already ended, so the erase+draw
+  landed while the beam was actively scanning the visible frame - some of the rectangle's 4 edges
+  became visible immediately (rows not yet scanned this frame), others only next frame (rows
+  already passed), producing a persistently torn/partial-looking box in screenshots, described by
+  the user as "losing its edges when flying". **Fix**: reorder the loop so all non-drawing work
+  (`GetKey()`, position math/clamping) happens BEFORE `WaitVBlank()`, and the actual screen writes
+  (`redraw_box()`) happen immediately after it returns, with nothing else in between. **General
+  lesson for any single-buffered (no `SwapScreen`) CPU-plotting demo in this codebase**: `WaitVBlank()`
+  only guarantees blanking has STARTED at the moment it returns - any code between that return and
+  the actual pixel writes eats into the (short, ~1.6ms/20ms PAL) blanking budget before tearing
+  becomes visible again. Put `WaitVBlank()` as the LAST statement before the real draw calls, not
+  the first statement of the loop body.
+- Also fixed in the same pass: `Text(6, 1, &hud_title, ...)` with a 37-character string overflowed
+  the 40-column limit by 3 chars (6+37-1=42 > 39), wrapping the tail (`"fg)"`) onto a different
+  screen position - visible in the user's screenshot as a stray `FG)` near the top-left corner.
+  `Text()`'s column-wrap check is the same shared `Print`/`_DrawChar` logic already fixed for mode
+  3 (40 cols), so this wasn't a graphics-library bug - just an example that didn't leave enough
+  column budget for its own string length at that start column. Fixed by starting at column 1
+  instead of 6 (37 chars now fits: 1+37-1=37 <= 39). **Lesson**: when placing `Text()` at a
+  specific column, always check `start_col + strlen - 1 <= 39` (mode 0/2/3) or `<= 79` (mode 1) -
+  nothing in the compiler enforces this at compile time, it silently wraps at runtime instead.
+- **Follow-up (2026-09-07, same demo): the WaitVBlank-reorder fix alone did not fully eliminate
+  the box tearing** - user reported it "still visible" after rebuilding, described as looking
+  like a consistent mask/partial pattern rather than random tearing. Extensive static analysis
+  (generated-assembly inspection, `_SetPixel`'s dualpf physical-slot/bit-index math,
+  `gfx_prepare_copperlist_dualpf`'s BPLxPTH/PTL-to-buffer-offset mapping, RECTANGLE/LINE argument
+  marshalling) found no logic bug - everything checked out mathematically. Root cause is more
+  fundamental: single-buffered CPU pixel-plotting for ANIMATED foreground content is inherently
+  timing-fragile (any interrupt - e.g. the keyboard ISR from `InitKeyboard()` - firing between
+  `WaitVBlank()` and the draw can eat into the blanking budget), no matter how tightly the draw
+  call is placed after `WaitVBlank()`. **Real fix: proper double buffering**, following the
+  exact pattern already proven in `examples/scroll_demo.has` - draw static content
+  (background+HUD+initial box) into BOTH `gfx_screen1_dualpf`/`gfx_screen2_dualpf` up front (via
+  `SwapScreen()` between two identical draw passes), then every frame: `WaitVBlank(); Show();
+  SwapScreen(); <draw into now-off-screen buffer>; SwapScreen(); <draw into the other buffer too,
+  keeping both in sync>; SwapScreen(); UpdateCopperList();`. This never draws into the buffer
+  currently being displayed, so it's tear-free regardless of CPU/interrupt timing - the only
+  timing-sensitive operation left is the copper-list bitplane-pointer repatch itself (`Show`/
+  `UpdateCopperList`), which is fast/atomic-ish compared to a multi-LINE-call RECTANGLE redraw.
+  **Lesson for this codebase generally**: any demo with ANIMATED (not just scrolling-background)
+  foreground content should default to double-buffering from the start rather than attempting
+  single-buffered "draw right after WaitVBlank" - the latter is a real optimization but not a
+  tear-*proof* guarantee once interrupts are enabled (`InitKeyboard()` etc.), and diagnosing "is
+  it tearing or a logic bug" from a single screenshot is unreliable - prefer the robust fix over
+  chasing exact root cause when the codebase already has a proven double-buffer pattern to copy.
+- **Second follow-up (2026-09-07, same demo): my FIRST double-buffering attempt had a real bug**
+  - it drew into BOTH buffers every single frame (`redraw_box` into the off-screen one, then
+  `SwapScreen()` back and `redraw_box` AGAIN into the buffer that was STILL the one actively
+  feeding the display, since `Show()`/`UpdateCopperList()` hadn't been called yet to flip which
+  buffer the copper reads). That second draw tore the visible buffer directly - user caught a
+  frame showing 2 disconnected short segments instead of a rectangle outline (a genuinely worse-
+  looking artifact than the original single-buffered tear) and reasonably asked "is this the
+  emulator's fault?" - it wasn't; it was this bug. **Real fix: draw into the off-screen buffer
+  EXACTLY ONCE per frame, never touch the currently-displayed one at all.** Since each physical
+  buffer is then only updated every OTHER frame, you can't just re-use one "old position" pair -
+  track a 2-deep position history (`trail1_x/y` = position drawn 1 frame ago, `trail2_x/y` =
+  position drawn 2 frames ago = what's STILL physically in the buffer you're about to draw into
+  now): each iteration, `redraw_box(trail2_x, trail2_y, new_x, new_y)` erases the correct stale
+  content for THAT specific buffer, then shift `trail2 = trail1; trail1 = new`. Loop body
+  simplifies to exactly one `WaitVBlank(); SwapScreen(); redraw_box(...); UpdateCopperList();` -
+  no redundant `Show()` call needed (this library's copper list only re-reads its bitplane
+  pointers once per vblank regardless of when during the frame the CPU writes new ones, so a
+  late `UpdateCopperList()` call is naturally deferred/safe - the ONLY thing that must never
+  happen is writing PIXEL DATA into a buffer while its pointers are still the ones the copper is
+  currently using). **General lesson**: "draw into both buffers to keep them in sync" (correct
+  for STATIC/shared background content per the earlier scroll_demo lesson) and "never draw into
+  the visible buffer" (required for tear-free animation) are DIFFERENT, sometimes-conflicting
+  requirements for a genuinely MOVING per-buffer object - use a 2-deep (or N-deep for N buffers)
+  position/state history per animated object instead of trying to satisfy both requirements with
+  a single shared "old position" variable and a same-frame double-draw.
 
 ## The REAL `Scroll()` bug: vertical scroll was a complete no-op, same big-endian .w/.l
 ## class as the SetTextMode bug above (2026-09-07)

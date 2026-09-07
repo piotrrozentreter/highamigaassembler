@@ -12,6 +12,12 @@
 // through it - proof the two playfields are genuinely separate hardware
 // layers, not one shared 32-color screen.
 //
+// Double-buffered: the static content is drawn into both gfx_screen1_dualpf
+// and gfx_screen2_dualpf up front. Each frame, the box is redrawn into
+// whichever buffer is currently off-screen (erasing that buffer's own
+// 2-frames-stale position, since it's only touched every other frame) and
+// then flipped in - the buffer currently on screen is never written to.
+//
 // Not supported in mode 3 (see docs/GRAPHICS_LIBRARY_INTERFACE.md): Scroll(),
 // BOB creation/mirroring, and lib/gui.s widgets - this demo intentionally
 // only uses SetPixel/PLOT/LINE/RECTANGLE/CIRCLE/Text/ClearScreen, which are
@@ -50,6 +56,7 @@ code main:
     extern func Text(x: int, y: int, msg: int, color: int) -> int;
     extern func UpdateCopperList() -> int;
     extern func Show() -> void;
+    extern func SwapScreen() -> int;
     extern func WaitVBlank() -> int;
     extern func InitKeyboard() -> void;
     extern func GetKey() -> byte;
@@ -79,7 +86,7 @@ code main:
     // Static PF2 HUD text: drawn once - only the bouncing box changes per frame.
     proc draw_hud() -> void {
         call SetActivePlayfield(2);
-        call Text(6, 1, &hud_title, 1);
+        call Text(1, 1, &hud_title, 1);
         call Text(9, 30, &hud_footer, 1);
     }
 
@@ -100,6 +107,13 @@ code main:
         var dy: int = 2;
         var new_x: int;
         var new_y: int;
+        // 2-deep position history: each buffer is only ever drawn into once
+        // every OTHER frame (never the one currently on screen), so the
+        // stale position to erase from it is 2 frames old, not 1.
+        var trail1_x: int = 160;
+        var trail1_y: int = 128;
+        var trail2_x: int = 160;
+        var trail2_y: int = 128;
 
         call DebugClear();
         call DebugSetEnabled(1);
@@ -132,17 +146,24 @@ code main:
         call SetColor(9, $FFF);
         call SetColor(10, $FF0);
 
+        // Build identical static content (background + HUD + box) in both
+        // dual-playfield buffers, then double-buffer the animation below -
+        // drawing directly to the visible buffer every frame is what let
+        // the box tear (partial edges visible mid-scan).
         call draw_background();
         call draw_hud();
         call redraw_box(box_x, box_y, box_x, box_y);
+        call SwapScreen();
+        call draw_background();
+        call draw_hud();
+        call redraw_box(box_x, box_y, box_x, box_y);
+        call SwapScreen();
 
         call InitKeyboard();
         call UpdateCopperList();
         call DebugLogStr(&debug_loop_start);
 
         while (key != KEY_ESC) {
-            call WaitVBlank();
-            call Show();
             key = GetKey();
 
             new_x = box_x + dx;
@@ -164,7 +185,19 @@ code main:
                 dy = -dy;
             }
 
-            call redraw_box(box_x, box_y, new_x, new_y);
+            // Draw into the off-screen buffer only, then flip - never touch
+            // the buffer currently on screen. (The earlier attempt drew into
+            // BOTH buffers every frame, including the one still on screen
+            // before the flip - that's what caused the fragmented rectangle.)
+            call WaitVBlank();
+            call SwapScreen();
+            call redraw_box(trail2_x, trail2_y, new_x, new_y);
+            call UpdateCopperList();
+
+            trail2_x = trail1_x;
+            trail2_y = trail1_y;
+            trail1_x = new_x;
+            trail1_y = new_y;
             box_x = new_x;
             box_y = new_y;
         }

@@ -1213,7 +1213,7 @@ _SetGraphicsMode:
     move.l a0,gfx_current_screen_ptr        ; Set initial screen
     move.w #%0110011000000000,BPLCON0(a5)   ; 6 bitplanes + DBLPF (dual playfield) + color
     move.w #0,BPLCON1(a5)                   ; No scroll
-    move.w #%100100,BPLCON2(a5)             ; Default priority (PF1 in front)
+    move.w #%1100100,BPLCON2(a5)            ; PF2 (foreground) priority over PF1 (background)
     move.w #200,BPL1MOD(a5)                 ; Modulo for 6-plane interleaved rows: (6-1)*40
     move.w #200,BPL2MOD(a5)                 ; Modulo for 6-plane interleaved rows
     move.w #$2C81,DIWSTRT(a5)               ; Display window start
