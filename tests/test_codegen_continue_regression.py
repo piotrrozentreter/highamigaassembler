@@ -156,7 +156,7 @@ code test:
 def test_continue_array_loop_with_subsequent_writes():
     src = """
 bss vars:
-    grid.l: 8
+    grid.l[8]
 
 code test:
     proc array_loop() -> int {

@@ -16,6 +16,7 @@ class Validator:
         self.warnings = []
         self.constants = {}  # Store const declarations for substitution
         self.globals = set()  # Global symbols from data/bss sections
+        self.non_indexable_buffers = set()  # bss 'name: COUNT' globals - raw storage, not real arrays
         self.extern_vars = set()  # External variables (extern var)
         self.extern_funcs = {}  # External functions: {name: [params]} where params is list of Param objects
         self.proc_funcs = {}  # Local procedures: {name: [params]}
@@ -130,6 +131,16 @@ class Validator:
                                 for d in var.dimensions:
                                     total *= d
                                 var.size = str(total * elem_size)
+
+                            # A bss 'name.suffix: COUNT' declaration (no array_dims,
+                            # i.e. var.is_array is False) reserves COUNT>1 units of raw
+                            # storage, not a real array - name[i] on it would silently
+                            # read whatever bytes live there as a pointer (the same
+                            # codegen path used for genuine 'byte*'-style globals like a
+                            # single 'ptr.l: 1'). Flag direct indexing so this can't
+                            # compile to a garbage-address read/write with no diagnostic.
+                            if not var.is_array and var.size and str(var.size).isdigit() and int(var.size) > 1:
+                                self.non_indexable_buffers.add(var.name)
 
                             self.globals.add(var.name)
                         elif isinstance(var, ast.StructVarDecl):
@@ -688,6 +699,14 @@ class Validator:
                 f"In proc '{proc.name}': Cannot index through 'void*' variable '{name}': "
                 "the element size is undefined. Declare it with a concrete element "
                 "type (e.g. 'byte*', 'int*')."
+            )
+        if name in self.non_indexable_buffers:
+            self.errors.append(
+                f"In proc '{proc.name}': Cannot index '{name}[...]' directly: '{name}' was "
+                f"declared with the bss 'name.suffix: COUNT' form, which reserves raw "
+                f"storage but is not a real array (indexing it would read whatever bytes "
+                f"live there as a pointer). Declare it as '{name}.suffix[COUNT]' (bracket-dims "
+                f"form) for direct element indexing instead."
             )
 
     def _validate_expr(self, expr, symbols, proc):

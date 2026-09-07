@@ -20,14 +20,6 @@
 GFX_FONT_PLANES      EQU 5                ; Font assets are always expanded to 5 planes
     endif
 
-    ifnd GFX_SPACE_CODE
-GFX_SPACE_CODE       EQU 32               ; Input byte used for a space
-    endif
-
-    ifnd GFX_SPACE_GLYPH
-GFX_SPACE_GLYPH      EQU 16               ; Font glyph used for a space
-    endif
-
 ; Poll DMACONR until the blitter is idle. Same technique as lib/bob.s.
 WAITBLIT:MACRO
     tst DMACONR(a5)         ;for compatibility
@@ -1680,15 +1672,13 @@ _DrawChar:
     beq .dc_done
     moveq #0,d1
     move.b d0,d1
-    cmp.l #GFX_SPACE_CODE,d1
-    beq.s .dc_space
+    ; Every font asset here (font8x8.s, c64_font_converter.py output) maps
+    ; glyph = ascii-32 with glyph 0 left blank for space - no special case
+    ; needed, just clamp codes below the first printable character.
     sub.l #32,d1
     tst.l d1
     bge .dc_index_ok
     moveq #0,d1
-    bra.s .dc_index_ok
-.dc_space:
-    moveq #GFX_SPACE_GLYPH,d1
 .dc_index_ok:
     move.l a0,a1
     move.l d1,d2
@@ -2069,7 +2059,8 @@ Scroll:
     
     ; Calculate bytes_per_scanline_all_planes = bytes_per_row * plane_count
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count (d4 = stride)
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count (d4 = stride)
     
     ; Check if scroll amount >= region height
     cmp.l d3,d2
@@ -2103,7 +2094,8 @@ Scroll:
     
     ; Calculate stride = bytes_per_row * plane_count
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count (d4 = stride)
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count (d4 = stride)
     
     ; lines_to_copy = height - pixels
     move.l -48(a6),d0            ; height_pixels
@@ -2151,7 +2143,8 @@ Scroll:
     
     ; Calculate stride = bytes_per_row * plane_count
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count
     
     move.l -48(a6),d0            ; height_pixels
     sub.l -28(a6),d0             ; lines_to_copy = height - pixels
@@ -2191,7 +2184,8 @@ Scroll:
     ; Rows: y0..y0+pixels-1
     
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count (stride)
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count (stride)
     
     ; Start address = screen + y0*stride + x0_byte*8/8
     ; For now, fill entire rows for simplicity
@@ -2220,7 +2214,8 @@ Scroll:
     ; Rows: y1-pixels+1..y1
     
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count (stride)
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count (stride)
     
     ; Start address = screen + (y1-pixels+1)*stride
     move.l -52(a6),a0
@@ -2248,7 +2243,8 @@ Scroll:
 .scroll_v_fill_clear:
     ; Clear entire region (for scroll >= height)
     move.l -32(a6),d4            ; bytes_per_row
-    muls.w -36(a6),d4            ; * plane_count
+    move.l -36(a6),d7            ; plane_count (.l load - a .w read here would grab the zero high word)
+    muls.w d7,d4                  ; * plane_count
     
     move.l -52(a6),a0
     move.l -8(a6),d0             ; y0
@@ -2320,7 +2316,12 @@ Scroll:
     move.w d0,(a1)
     subq.l #2,a1
     dbra d4,.scroll_h_right_word
-    clr.w (a1)                   ; newly exposed left edge
+    ; Word 0 (x=0..15): no word further left to carry a bit in from, so
+    ; just shift right with a 0 carried into bit15 - matches the way the
+    ; left-scroll path shifts its own true edge word instead of clearing it.
+    move.w (a1),d0
+    lsr.w #1,d0
+    move.w d0,(a1)
     add.l #40,a0
     dbra d5,.scroll_h_right_plane
     dbra d7,.scroll_h_right_row
@@ -2397,42 +2398,6 @@ Scroll:
     moveq #-1,d0
     movem.l (sp)+,d1-d7/a0-a5
     unlk a6
-    rts
-
-; -----------------------------------------------------------------------------
-; Function: gfx_patch_bplptrs_stride
-; Input: a0=base_ptr (row 0 address), d0=stride (bytes between plane starts)
-; Output: none
-; Description: Patches the 5 BPLxPT entries in the running lores copper list
-;              (gfx_bplcop_lores) to point at a caller-owned buffer with a
-;              non-standard per-plane byte stride. Lets a level manage its own
-;              wider, line-interleaved screen buffer (e.g. for hardware
-;              scrolling with BPLCON1) outside the shared gfx_screen1/2 pair.
-;              Does not touch gfx_current_screen_ptr, ClearScreen, PasteBob,
-;              or any other routine that assumes the standard 40-byte stride.
-; -----------------------------------------------------------------------------
-    XDEF gfx_patch_bplptrs_stride
-gfx_patch_bplptrs_stride:
-    movem.l d1-d3/a1-a2,-(sp)
-    move.l  a0,a1
-    lea.l   gfx_bplcop_lores,a2
-    addq.l  #2,a2
-    moveq   #0,d1
-    moveq   #0,d2
-.gpbs_loop:
-    move.l  a1,d3
-    add.l   d2,d3
-    swap    d3
-    move.w  d3,(a2)
-    addq.l  #4,a2
-    swap    d3
-    move.w  d3,(a2)
-    addq.l  #4,a2
-    add.l   d0,d2
-    addq.l  #1,d1
-    cmp.l   #5,d1
-    blt.s   .gpbs_loop
-    movem.l (sp)+,d1-d3/a1-a2
     rts
 
     SECTION graphics_data,DATA

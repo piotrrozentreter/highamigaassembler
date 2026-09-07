@@ -1,27 +1,57 @@
-// Scroll Function Demo - Comprehensive working example
-// This program demonstrates all major scroll usage patterns
+// Scroll Function Demo - interactive visual demo
+//
+// Demonstrates the Scroll() function on real hardware in both directions,
+// using text (not solid color fills) so 1-pixel motion is always visible:
+//   1) A "VERTICAL SCROLL" banner that bounces up and down by
+//      VBOUNCE_RANGE pixels forever (vertical Scroll()).
+//   2) A full-width text banner below it that scrolls horizontally forever
+//      (left, then right, alternating), fed one font pixel-column at a
+//      time as each Scroll() call exposes a fresh column at the strip's
+//      leading edge (horizontal Scroll()).
+//
+// Expected behavior: both regions animate continuously and simultaneously
+// until ESC is pressed, then the program returns to DOS (the debug log
+// flushes to the DOS window after ReleaseSystem, as before).
 // Compile: python3 -m hasc.cli examples/scroll_demo.has -o /tmp/scroll_demo.s
 // Assemble: vasmm68k_mot -Fhunkexe -o /tmp/scroll_demo.o /tmp/scroll_demo.s
 
+const KEY_ESC = 69;
+
+const TICK_Y0 = 200;
+const TICK_Y1 = 207;
+
+const TICKER_LEN = 51;
+const PHASE_FRAMES = 380;
+const DIR_TICK_COL = 28;
+
+// 16-row window: the label occupies its top 8 rows or bottom 8 rows as it
+// bounces, so VBOUNCE_RANGE (8px) of travel never clips the text.
+const VTEXT_Y0 = 96;
+const VTEXT_Y1 = 111;
+const VBOUNCE_RANGE = 8;
+
 code main:
-    extern var fonts: int;
+    extern var fonts: byte;
     // Debug output is buffered and flushed to DOS after ReleaseSystem.
     extern func DebugSetEnabled(flag: int) -> int;
     extern func DebugClear() -> int;
     extern func DebugLogStr(msg: int) -> int;
-    extern func DebugLogInt(value: int) -> int;
     extern func DebugFlushToDos() -> void;
     extern func TakeSystem() -> void;
     extern func ReleaseSystem() -> void;
     extern func SetGraphicsMode(mode: int) -> int;
     extern func SetFont(ptr: int) -> int;
+    extern func SetTextMode(mode: int) -> int;
     extern func SetColor(id: int, col: int) -> int;
     extern func Text(x: int, y: int, msg: int, color: int) -> int;
-    extern func LINE(x0: int, y0: int, x1: int, y1: int, color: int) -> int;
+    extern func SetPixel(x: int, y: int, color: int) -> int;
     extern func ClearScreen() -> int;
     extern func UpdateCopperList() -> int;
+    extern func Show() -> void;
     extern func SwapScreen() -> int;
     extern func WaitVBlank() -> int;
+    extern func InitKeyboard() -> void;
+    extern func GetKey() -> byte;
     extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int, 
                        __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int, 
                        __reg(d6) pixels: int) -> int;
@@ -36,486 +66,225 @@ code main:
         jsr DebugFlushToDos
         rts
     }
-    
-    
-    // ========================================================================
-    // DEMO 1: Basic full-screen scroll up
-    // ========================================================================
-    
-    proc demo_scroll_up(pixels: int) -> int {
-        // Scroll entire screen upward
-        // The bottom row is filled with black, and top row scrolls off
-        var result: int = Scroll(0, 0, 319, 255, 0, -1, pixels);
-        return result;
-    }
-    
-    
-    // ========================================================================
-    // DEMO 2: Full-screen scroll down
-    // ========================================================================
-    
-    proc demo_scroll_down(pixels: int) -> int {
-        // Scroll entire screen downward
-        // The top row is filled with black, and bottom row scrolls off
-        var result: int = Scroll(0, 0, 319, 255, 0, 1, pixels);
-        return result;
-    }
-    
-    
-    // ========================================================================
-    // DEMO 3: Scroll a sub-region (window)
-    // ========================================================================
-    
-    proc demo_scroll_window(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
-        // Scroll only a rectangular window within the screen
-        // The rest of the screen remains unchanged
-        // Useful for scrolling UI elements like text boxes, menus, or game areas
-        var result: int = Scroll(x0, y0, x1, y1, 0, -1, pixels);
-        return result;
-    }
-    
-    
-    // ========================================================================
-    // DEMO 4: Animation loop with continuous scrolling
-    // ========================================================================
-    
-    proc demo_animate_scroll_loop(num_frames: int, pixels_per_frame: int) -> int {
-        // Scroll repeatedly to create smooth animation
-        // In a real application, you would:
-        // - Draw new content after each scroll
-        // - Synchronize with VBlank
-        // - Swap display buffers
-        
-        var frame: int = 0;
-        var result: int;
-        
-        while (frame < num_frames) {
-            // Scroll up by pixels_per_frame
-            result = Scroll(0, 0, 319, 255, 0, -1, pixels_per_frame);
-            
-            if (result != 0) {
-                // Scroll failed (graphics mode may not be initialized)
-                return -1;
-            }
-            
-            frame = frame + 1;
+
+    // Advances the shared vertical-bounce state and returns the direction
+    // (-1 up, 1 down) this step should scroll with, flipping once the label
+    // has travelled VBOUNCE_RANGE pixels. Called once per iteration so both
+    // physical screen buffers scroll the identical step.
+    proc next_vbounce_dir() -> int {
+        var d: int = vbounce_dir;
+        vbounce_count = vbounce_count + 1;
+        if (vbounce_count >= VBOUNCE_RANGE) {
+            vbounce_count = 0;
+            vbounce_dir = -vbounce_dir;
         }
-        
-        return 0;  // All frames completed successfully
-    }
-    
-    
-    // ========================================================================
-    // DEMO 5: Safe scroll with input validation
-    // ========================================================================
-    
-    proc demo_safe_scroll(pixels: int) -> int {
-        // Validate parameters before calling Scroll
-        
-        if (pixels <= 0) {
-            return -1;  // Pixel count must be positive
-        }
-        
-        if (pixels > 256) {
-            return -1;  // Prevent excessive scrolling
-        }
-        
-        // Attempt scroll
-        var result: int = Scroll(0, 0, 319, 255, 0, -1, pixels);
-        
-        if (result != 0) {
-            // Scroll failed (possible causes):
-            // - Graphics mode not initialized
-            // - HAM6 mode active (unsupported)
-            return -1;
-        }
-        
-        return 0;  // Success
-    }
-    
-    
-    // ========================================================================
-    // DEMO 6: Parallax scrolling (different scroll speeds for layers)
-    // ========================================================================
-    
-    proc demo_parallax_scroll(bg_pixels: int, fg_pixels: int) -> int {
-        // Scroll background and foreground at different rates
-        // for a classic parallax effect
-        
-        // Scroll background (top half) slower
-        var result: int = Scroll(0, 0, 319, 127, 0, -1, bg_pixels);
-        if (result != 0) {
-            return -1;
-        }
-        
-        // Scroll foreground (bottom half) faster
-        result = Scroll(0, 128, 319, 255, 0, -1, fg_pixels);
-        if (result != 0) {
-            return -1;
-        }
-        
-        return 0;  // Both scrolls successful
-    }
-    
-    
-    // ========================================================================
-    // DEMO 7: Error handling pattern
-    // ========================================================================
-    
-    proc demo_robust_scroll(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
-        // Comprehensive error checking before and after scroll
-        
-        // Pre-flight validation
-        if (pixels <= 0) {
-            return -1;  // Invalid pixel count
-        }
-        
-        if (x0 >= x1 || y0 >= y1) {
-            return -1;  // Invalid region (must be x0 < x1 and y0 < y1)
-        }
-        
-        // For lores mode, check bounds
-        if (x1 > 319 || y1 > 255) {
-            return -1;  // Coordinates out of bounds for lores
-        }
-        
-        // Attempt scroll
-        var result: int = Scroll(x0, y0, x1, y1, 0, -1, pixels);
-        
-        // Handle result
-        if (result != 0) {
-            return -1;  // Scroll failed
-        }
-        
-        return 0;  // Success
-    }
-    
-    
-    // ========================================================================
-    // DEMO 8: Scroll with pixel rendering
-    // ========================================================================
-    
-    proc demo_scroll_and_render(num_frames: int) -> int {
-        // Combine scrolling with pixel rendering
-        // This simulates a typical game loop where you:
-        // 1. Scroll the game area
-        // 2. Render new content (sprites, etc.)
-        // 3. Display the result
-        
-        var frame: int = 0;
-        var result: int;
-        var y_pos: int;
-        
-        while (frame < num_frames) {
-            // Scroll the game area up by 1 pixel per frame
-            result = Scroll(0, 0, 319, 255, 0, -1, 1);
-            if (result != 0) {
-                return -1;
-            }
-            
-            // In a real application, render new content here
-            // For example, draw pixels at the newly exposed rows
-            y_pos = 255;  // Bottom of screen
-            
-            // This would be a full sprite/tile renderer in a real game
-            // SetPixel(160, y_pos, 31);  // Example: white dot at bottom
-            
-            // Update display
-            UpdateCopperList();
-            SwapScreen();
-            
-            frame = frame + 1;
-        }
-        
-        return 0;
-    }
-    
-    
-    // ========================================================================
-    // DEMO 9: Edge cases and boundary testing
-    // ========================================================================
-    
-    proc demo_edge_case_full_height_scroll() -> int {
-        // Test scrolling by exactly the region height
-        // This should clear the entire region
-        var result: int = Scroll(0, 0, 319, 255, 0, -1, 256);
-        return result;
-    }
-    
-    proc demo_edge_case_single_pixel() -> int {
-        // Test scrolling by only 1 pixel
-        var result: int = Scroll(0, 0, 319, 255, 0, -1, 1);
-        return result;
-    }
-    
-    proc demo_edge_case_small_window() -> int {
-        // Test scrolling a very small window
-        var result: int = Scroll(100, 100, 120, 120, 0, -1, 5);
-        return result;
-    }
-    
-    
-    // ========================================================================
-    // DEMO 10: Scroll direction patterns
-    // ========================================================================
-    
-    proc demo_scroll_down_variant(pixels: int) -> int {
-        // Scroll downward instead of upward
-        // Top rows are filled with black
-        var result: int = Scroll(0, 0, 319, 255, 0, 1, pixels);
-        return result;
+        return d;
     }
 
-
-    proc debug_scroll_result(label: int, result: int) -> void {
-        call DebugLogStr(label);
-        call DebugLogInt(result);
+    proc draw_static_screen() -> void {
+        call ClearScreen();
+        call Text(12, VTEXT_Y0 / 8, &vtext_label, 7);
+        call Text(1, 23, &caption_ticker, 7);
+        call SetTextMode(1);
+        call Text(DIR_TICK_COL, 23, &dir_left, 7);
+        call SetTextMode(0);
+        call Text(1, 27, &caption_exit, 7);
     }
 
+    // Pure draw, no state changes - safe to call once per physical buffer.
+    // Opaque mode so [LEFT] fully overwrites [RIGHT] (and vice versa) instead
+    // of only OR-ing in the new glyph's pixels over the old ones.
+    proc draw_ticker_indicator() -> void {
+        call SetTextMode(1);
+        if (ticker_hor < 0) {
+            call Text(DIR_TICK_COL, 23, &dir_left, 7);
+        } else {
+            call Text(DIR_TICK_COL, 23, &dir_right, 7);
+        }
+        call SetTextMode(0);
+    }
 
-    proc draw_scroll_pattern() -> int {
-        var y: int = 0;
-        var color: int = 1;
-        var band_line: int = 0;
+    // Reads one column (8 rows) out of the 8x8 font bitmap for whichever
+    // character is currently entering the ticker, and advances the shared
+    // message cursor - left scroll reads forward, right scroll rewinds.
+    // Glyph index is simply ascii-32 (space is ascii 32, giving glyph 0,
+    // the font's real blank glyph). The 8 rows are packed into one int
+    // (bit N = row N) since HAS locals can't return arrays; called once
+    // per iteration so both physical buffers stamp the identical column.
+    proc compute_ticker_bits(hor: int) -> int {
+        var fp: byte* = &fonts;
+        var mp: byte* = &ticker_msg;
+        var charidx: int;
+        var colidx: int;
+        var code: int;
+        var glyph: int;
+        var row: int;
+        var fontbyte: int;
+        var bitval: int;
+        var packed: int = 0;
 
-        while (y < 256) {
-            call LINE(0, y, 319, y, color);
-            y = y + 1;
-            band_line = band_line + 1;
-            if (band_line == 8) {
-                band_line = 0;
-                color = color + 1;
-                if (color == 8) {
-                    color = 1;
-                }
+        charidx = ticker_col / 8;
+        colidx = ticker_col % 8;
+        code = mp[charidx];
+        glyph = code - 32;
+        if (glyph < 0) {
+            glyph = 0;
+        }
+
+        for row = 0 to 7 {
+            // fonts stores each glyph in a 40-byte slot (8 real bytes then 32
+            // zero-padding bytes for the other 4 unused planes - the asset is
+            // pre-expanded to GFX_FONT_PLANES=5 in lib/graphics.s), not a
+            // packed 8-byte slot - stride must be 40, matching _DrawChar's
+            // own glyph*8*GFX_FONT_PLANES addressing, or every glyph past
+            // index 0 reads the wrong (mostly padding-zero) bytes.
+            fontbyte = fp[glyph * 40 + row];
+            bitval = (fontbyte >> (7 - colidx)) & 1;
+            if (bitval != 0) {
+                packed = packed | (1 << row);
             }
         }
 
-        // A unique marker gives the scroll motion a fixed visual landmark.
-        call LINE(0, 255, 319, 255, 7);
+        ticker_col = ticker_col - hor;
+        if (ticker_col >= TICKER_LEN * 8) {
+            ticker_col = 0;
+        }
+        if (ticker_col < 0) {
+            ticker_col = TICKER_LEN * 8 - 1;
+        }
 
-        return 0;
+        return packed;
     }
 
-
-    proc draw_text_scroll_content() -> int {
-        call Text(2, 2, &text_scroll_1, 1);
-        call Text(2, 6, &text_scroll_2, 2);
-        call Text(2, 10, &text_scroll_3, 3);
-        call Text(2, 14, &text_scroll_4, 4);
-        call Text(2, 18, &text_scroll_5, 5);
-        call Text(2, 22, &text_scroll_6, 6);
-        call Text(2, 26, &text_scroll_7, 7);
-        call Text(2, 30, &text_scroll_8, 1);
-        return 0;
-    }
-
-
-    proc demo_visual_scroll() -> int {
-        var frame: int = 0;
-        var text_tick: int = 0;
-        var result: int;
-
-        call DebugLogStr(&debug_visual_start);
-        result = draw_scroll_pattern();
-        if (result != 0) {
-            return result;
-        }
-
-        call SetFont(&fonts);
-        result = draw_text_scroll_content();
-        if (result != 0) {
-            return result;
-        }
-
-        call UpdateCopperList();
-        while (frame < 50) {
-            call WaitVBlank();
-            frame = frame + 1;
-        }
-
-        frame = 0;
-        while (frame < 180) {
-            call WaitVBlank();
-            result = Scroll(0, 0, 319, 255, 0, -1, 1);
-            if (result != 0) {
-                return result;
+    // Pure draw, no state changes - safe to call once per physical buffer.
+    proc stamp_ticker_column(edge_x: int, bits: int) -> void {
+        var row: int;
+        var bitval: int;
+        for row = 0 to 7 {
+            bitval = (bits >> row) & 1;
+            if (bitval != 0) {
+                call SetPixel(edge_x, TICK_Y0 + row, 7);
+            } else {
+                call SetPixel(edge_x, TICK_Y0 + row, 0);
             }
-
-            call UpdateCopperList();
-            text_tick = text_tick + 1;
-            if (text_tick == 8) {
-                call Text(2, 31, &text_scroll_stream, 1);
-                text_tick = 0;
-            }
-            frame = frame + 1;
         }
-
-        call DebugLogStr(&debug_visual_done);
-        return 0;
     }
     
     
     // ========================================================================
-    // Main program
+    // Main program - interactive: press ESC to return to DOS.
     // ========================================================================
-    
+
     proc main() -> int {
+        var key: byte = 0;
         var result: int;
-        var test_count: int = 0;
-        var pass_count: int = 0;
+        var vbounce_step: int;
+        var ticker_edge_x: int;
+        var ticker_bits: int;
 
         call DebugClear();
         call DebugSetEnabled(1);
         call DebugLogStr(&debug_start);
-        
+
         // Initialize graphics
         result = SetGraphicsMode(0);  // Lores mode: 320x256x32 colors
         if (result != 0) {
             call DebugLogStr(&debug_graphics_failed);
-            call DebugLogInt(result);
             return -1;  // Graphics mode not available
         }
         call DebugLogStr(&debug_graphics_ready);
 
         call SetColor(0, $000);
-        call SetColor(1, $FFF);
-        call SetColor(2, $F00);
-        call SetColor(3, $0F0);
-        call SetColor(4, $00F);
-        call SetColor(5, $FF0);
-        call SetColor(6, $F0F);
-        call SetColor(7, $0FF);
-        call ClearScreen();
+        call SetColor(7, $FFF);
+        call SetFont(&fonts);
 
-        result = demo_visual_scroll();
-        call DebugLogStr(&debug_visual_result);
-        call DebugLogInt(result);
-        if (result != 0) {
-            return result;
+        ticker_col = 0;
+        ticker_hor = -1;
+        phase_timer = 0;
+        // The label starts at the window's top 8 rows, so it must move down
+        // (deeper into the window) first - starting up would immediately
+        // scroll it past the region's top edge, where Scroll() discards it
+        // for good instead of holding it for the reverse leg.
+        vbounce_dir = 1;
+        vbounce_count = 0;
+
+        // Build identical initial frames in both buffers.
+        call draw_static_screen();
+        call SwapScreen();
+        call draw_static_screen();
+        call SwapScreen();
+
+        call InitKeyboard();
+        call UpdateCopperList();
+        call DebugLogStr(&debug_loop_start);
+
+        while (key != KEY_ESC) {
+            call WaitVBlank();
+            call Show();
+            call SwapScreen();
+            key = GetKey();
+
+            // Flip the ticker direction every PHASE_FRAMES, and redraw the
+            // indicator into BOTH physical buffers so neither one is left
+            // showing a stale label until its own next flip.
+            phase_timer = phase_timer + 1;
+            if (phase_timer >= PHASE_FRAMES) {
+                phase_timer = 0;
+                ticker_hor = -ticker_hor;
+
+                call draw_ticker_indicator();
+                call SwapScreen();
+                call draw_ticker_indicator();
+                call SwapScreen();
+            }
+
+            // Decide this iteration's new content ONCE (shared, monotonic
+            // state), then apply it to BOTH physical buffers identically -
+            // otherwise each buffer would only see whichever updates happened
+            // to land on its own turn, and the two would drift apart.
+            vbounce_step = next_vbounce_dir();
+            if (ticker_hor < 0) {
+                ticker_edge_x = 319;
+            } else {
+                ticker_edge_x = 0;
+            }
+            ticker_bits = compute_ticker_bits(ticker_hor);
+
+            call Scroll(0, VTEXT_Y0, 319, VTEXT_Y1, 0, vbounce_step, 1);
+            call Scroll(0, TICK_Y0, 319, TICK_Y1, ticker_hor, 0, 1);
+            call stamp_ticker_column(ticker_edge_x, ticker_bits);
+
+            call SwapScreen();
+            call Scroll(0, VTEXT_Y0, 319, VTEXT_Y1, 0, vbounce_step, 1);
+            call Scroll(0, TICK_Y0, 319, TICK_Y1, ticker_hor, 0, 1);
+            call stamp_ticker_column(ticker_edge_x, ticker_bits);
+            call SwapScreen();
+
+            call UpdateCopperList();
         }
-        
-        // ========================================================================
-        // Test Suite
-        // ========================================================================
-        
-        // Test 1: Basic full-screen scroll up
-        test_count = test_count + 1;
-        result = demo_scroll_up(16);
-        call debug_scroll_result(&debug_test_1, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 2: Full-screen scroll down
-        test_count = test_count + 1;
-        result = demo_scroll_down(16);
-        call debug_scroll_result(&debug_test_2, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 3: Scroll a sub-region
-        test_count = test_count + 1;
-        result = demo_scroll_window(50, 50, 270, 200, 10);
-        call debug_scroll_result(&debug_test_3, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 4: Safe scroll with validation
-        test_count = test_count + 1;
-        result = demo_safe_scroll(32);
-        call debug_scroll_result(&debug_test_4, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 5: Robust scroll with detailed error checking
-        test_count = test_count + 1;
-        result = demo_robust_scroll(0, 0, 319, 255, 8);
-        call debug_scroll_result(&debug_test_5, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 6: Edge case - scroll by region height (full clear)
-        test_count = test_count + 1;
-        result = demo_edge_case_full_height_scroll();
-        call debug_scroll_result(&debug_test_6, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 7: Edge case - single pixel scroll
-        test_count = test_count + 1;
-        result = demo_edge_case_single_pixel();
-        call debug_scroll_result(&debug_test_7, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 8: Edge case - small window scroll
-        test_count = test_count + 1;
-        result = demo_edge_case_small_window();
-        call debug_scroll_result(&debug_test_8, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 9: Parallax scrolling
-        test_count = test_count + 1;
-        result = demo_parallax_scroll(2, 4);
-        call debug_scroll_result(&debug_test_9, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Test 10: Scroll down variant
-        test_count = test_count + 1;
-        result = demo_scroll_down_variant(8);
-        call debug_scroll_result(&debug_test_10, result);
-        if (result == 0) {
-            pass_count = pass_count + 1;
-        }
-        
-        // Summary
-        if (pass_count == test_count) {
-            call DebugLogStr(&debug_done);
-            call DebugLogInt(pass_count);
-            return 0;  // All tests passed
-        } else {
-            call DebugLogStr(&debug_failed);
-            call DebugLogInt(pass_count);
-            return -1;  // Some tests failed
-        }
+
+        call DebugLogStr(&debug_done);
+        return 0;
     }
 
 data scroll_demo_debug_data:
     debug_start.b = "scroll demo start",0
     debug_graphics_ready.b = "graphics ready",0
     debug_graphics_failed.b = "graphics setup failed",0
-    debug_visual_start.b = "visual scroll start",0
-    debug_visual_done.b = "visual scroll done",0
-    debug_visual_result.b = "visual scroll result",0
-    debug_test_1.b = "TEST 1: scrolling up",0
-    debug_test_2.b = "TEST 2: scrolling down",0
-    debug_test_3.b = "TEST 3: sub-region",0
-    debug_test_4.b = "TEST 4: safe scroll",0
-    debug_test_5.b = "TEST 5: robust scroll",0
-    debug_test_6.b = "TEST 6: full clear",0
-    debug_test_7.b = "TEST 7: one pixel",0
-    debug_test_8.b = "TEST 8: small window",0
-    debug_test_9.b = "TEST 9: parallax",0
-    debug_test_10.b = "TEST 10: scroll down",0
-    debug_done.b = "ALL TESTS RETURNED SUCCESS",0
-    debug_failed.b = "ONE OR MORE TESTS FAILED",0
-    text_scroll_1.b = "VERTICAL TEXT SCROLL DEMO",0
-    text_scroll_2.b = "The screen moves one pixel per frame.",0
-    text_scroll_3.b = "Each line stays in the bitplane screen.",0
-    text_scroll_4.b = "Scroll copies the planar rows upward.",0
-    text_scroll_5.b = "The exposed bottom rows are cleared.",0
-    text_scroll_6.b = "This is a real graphics scroll test.",0
-    text_scroll_7.b = "Watch the letters move off the top.",0
-    text_scroll_8.b = "Vertical scrolling complete.",0
-    text_scroll_stream.b = "NEW TEXT ENTERS FROM BELOW",0
+    debug_loop_start.b = "entering interactive loop - press ESC to quit",0
+    debug_done.b = "scroll demo done",0
+
+data scroll_demo_text:
+    vtext_label.b = "VERTICAL SCROLL",0
+    caption_ticker.b = "HORIZONTAL Scroll() ticker ",0
+    caption_exit.b = "Press ESC to quit.",0
+    ticker_msg.b = "*** HIGH AMIGA ASSEMBLER - LIVE SCROLL DEMO ***    ",0
+    dir_left.b = "[LEFT] ",0
+    dir_right.b = "[RIGHT]",0
+
+bss scroll_demo_state:
+    ticker_col.l: 1
+    ticker_hor.l: 1
+    phase_timer.l: 1
+    vbounce_dir.l: 1
+    vbounce_count.l: 1
