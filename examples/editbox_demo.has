@@ -188,6 +188,6 @@ data demo_data:
 // -------------------------------------------------------------------------
 
 bss demo_bss:
-    edit_buf.b:    32    // 32-byte text buffer (31 usable chars + NUL)
-    edit_cursor.w: 1     // current cursor position (0..strlen)
+    edit_buf.b[32]        // 32-byte text buffer (31 usable chars + NUL)
+    edit_cursor.w: 1      // current cursor position (0..strlen)
 

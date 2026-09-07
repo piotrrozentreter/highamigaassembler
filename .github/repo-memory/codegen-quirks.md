@@ -660,6 +660,203 @@
   clip-before-BLTSIZE ordering, line-mode register values, octant table bytes).
   Example/caller: `examples/tests/compiler/graphics_primitives_test.has`.
 
+## bss_var `NAME.suffix: COUNT` vs `NAME.suffix[N]` - only one is a real indexable array (2026-09-07)
+- **This was a genuine compiler bug (missing validation), confirmed and fixed - not just a usage
+  gotcha.** Declaring `bob_handles.l: 2` (the "count" form: `NAME[.suffix] : COUNT`) and then
+  indexing it with `bob_handles[0] = CreateBob(...)` / `bob_handles[db_index]` used to **compile with
+  no error or warning** but generate completely wrong code: `move.l bob_handles,a0` (loads whatever
+  long *value* is stored at that BSS location - zero at startup - as if `bob_handles` were a pointer
+  *variable*) followed by a **byte** store/load through it (`move.b d0,(a0,d1.l)`), i.e. exactly the
+  codegen shape used for a `byte*` pointer local (`var p: byte* = &x; p[i]`), not for a real array.
+  Net effect: writes through address 0/near-0 (instant crash on real hardware/most emulators) and any
+  stored "handle" is truncated to 8 bits even if it didn't crash.
+- Root cause: `self.array_dims` (consulted by the indexed-address codegen path) is only populated for
+  the **dims** form, `NAME[.suffix][N]` (e.g. `buf_heli_x.l[2]` in
+  `examples/games/caveride/caveride.has`, the proven-working precedent for exactly this
+  double-buffer-state-array pattern). The colon/count form only reserves raw storage
+  (`ds.suffix COUNT`) - it is *not* registered as an array at all, so `name[i]` on it silently fell
+  through to codegen's *intentional* "non-array globals are treated as byte pointers" fallback
+  (`hasc/codegen.py` around `emit_untyped_global_pointer_read`/`emit_typed_pointer_store`) - a real,
+  load-bearing feature for old-style global-pointer-variable BSS vars (`map_data.l: 1` in
+  `examples/games/robots/level.has`, `score_str.l: 1` in `examples/snake.has` - always COUNT=1,
+  assigned `&something` at runtime and later indexed through) - just wrongly reachable for COUNT>1
+  raw-buffer declarations too, where it silently corrupts memory instead of erroring.
+- Symptom in practice: "crash after lines drawn" / "no scroll, no ball, crash" with zero compiler
+  diagnostics anywhere - the bug only became visible by diffing generated assembly (`move.l
+  bob_handles,a0` + `move.b (a0,d1.l)` vs the correct `lea bob_handles,a0` + `lsl.l #2,d1` +
+  `move.l (a0,d1.l),d0` that appears once declared as `.l[2]`).
+- **Found a second, already-shipped instance of the identical bug** while checking blast radius:
+  `examples/editbox_demo.has` declared `edit_buf.b: 32` (COUNT=32) and did `edit_buf[0] = 0;` on
+  Escape to clear the buffer - same wrong-address write. Grepped the entire `examples/` tree for every
+  bss colon-form COUNT>1 global and every place it's indexed with `[i]`: `edit_buf` was the *only*
+  other hit, and no legitimate COUNT>1-with-direct-indexing pattern exists anywhere in the repo (every
+  other colon-form global is COUNT=1). That gave high confidence a compiler-level fix would have zero
+  false positives.
+- **Fix applied in `hasc/validator.py`** (not just docs): during global collection, any bss
+  `GlobalVarDecl` with `not var.is_array and int(var.size) > 1` is recorded in a new
+  `self.non_indexable_buffers` set; `_check_indexable()` (previously only rejected `void*` indexing)
+  now also raises a clear validation error for these, naming the bracket-dims form as the fix. COUNT=1
+  colon-form globals (the legitimate pointer-holder pattern) are deliberately left alone - untouched,
+  still compile and behave exactly as before.
+- Fixed the two known real occurrences to use bracket-dims: `examples/scroll_demo.has`
+  (`bob_handles.l[2]`/`bob_x.l[2]`/`bob_y.l[2]`) and `examples/editbox_demo.has` (`edit_buf.b[32]`).
+  One existing unit test fixture had the same bug incidentally
+  (`tests/test_codegen_continue_regression.py::test_continue_array_loop_with_subsequent_writes` used
+  `grid.l: 8` + `grid[i]`, unrelated to what it was actually testing - control-flow label placement
+  for `continue;` - fixed to `grid.l[8]`, assertions unchanged since they only check branch/label
+  ordering around a `move #123,d0` marker, not addressing mode).
+- Verified via full regression sweep: `python -m pytest tests -q` (689 passed, 1 skipped, was 1 failed
+  before the test-fixture fix) and a full `examples/**/*.has` compile sweep on both `--cpu 68000` and
+  `--cpu 68020` - only the pre-existing baseline failures remain (5 intentional negative fixtures from
+  `examples/tests/compiler/negative_examples.txt`, x2 CPU targets, plus
+  `cpu68020_32bit_arithmetic.has` failing on 68000-only by design) - zero new regressions.
+- Rule of thumb going forward: **any bss/data array that will ever be indexed with `name[i]` must use
+  the `NAME.suffix[N]` bracket-dims form**, never `NAME.suffix: N` - and now the compiler itself will
+  reject the latter with a clear error instead of silently miscompiling it.
+
+## lib/graphics.s font/Scroll bugs found+fixed while building examples/scroll_demo.has (2026-09-07)
+- **`GFX_SPACE_GLYPH EQU 16` was wrong, then removed entirely** - font8x8.s's real blank glyph is
+  index **0** (ascii 32, code-32=0, verified by parsing the raw `dc.b` table with the correct
+  **40-byte-per-glyph** stride - `GFX_FONT_PLANES=5` means each glyph slot reserves `8*5=40` bytes
+  even though only the first 8 bytes hold real pattern data, so a naive contiguous-8-bytes parse of
+  font8x8.s gives garbage/misaligned glyphs; always stride by `8*GFX_FONT_PLANES`). Glyph 16
+  (ascii 48) is the real digit '0' glyph. Net effect before the fix: every space character drawn via
+  `Text`/`Print` rendered as a '0' instead of blank. `git log -S GFX_SPACE_GLYPH` showed the special
+  case was added 2026-08-13, ~2 weeks *after* font8x8.s (2026-07-29) was last touched, with no
+  evidence the font was ever laid out differently - just an unverified assumption baked into the
+  constant.
+- First fix attempt just changed the default to `EQU 0` - technically correct but redundant, since
+  `code-32` for ascii 32 (space) already equals 0. **Final fix (after user pushback "pass
+  GFX_SPACE_GLYPH as other projects do"): removed the `GFX_SPACE_CODE`/`GFX_SPACE_GLYPH` constants
+  and the whole `.dc_space` branch in `_DrawChar` entirely** - space now falls through the exact same
+  `sub.l #32,d1` / clamp-negative-to-0 path as every other character, no special-casing at all.
+  Verified this is safe for every font source in the repo, not just font8x8.s: grepped
+  `tools/c64_font_converter.py` (the only other font-asset generator) and its own docstring/
+  `build_font_bytes` confirm it independently uses the identical convention - "maps C64 screen codes
+  to ASCII 32..127" with glyph 0 = ascii 32 = space, "plane 0 = glyph data, planes 1-4 = 0" - so no
+  font asset in this codebase has ever needed a non-zero space glyph. Only remove a magic-constant
+  special case like this after confirming *every* asset-producing path agrees the naive formula is
+  already correct - don't stop at "my fix makes the default right", also check whether the special
+  case is still doing anything useful at all.
+- Considered but rejected: making space `bra .dc_done` immediately (skip the whole glyph draw, like
+  the newline path does) instead of drawing a verified-blank glyph. This is not equivalent in
+  **opaque** text mode (`gfx_text_mode=1`): the draw loop unconditionally clears the full character
+  cell to background before OR-ing in glyph bits, so a real character (including a blank-bitmap
+  space) still erases stale pixels under it; skipping the draw entirely for space would leave old
+  pixels behind in opaque mode. Falling through the normal per-character path (which happens to draw
+  an all-zero glyph for space) is what correctly preserves both text modes.
+- HAS-level code that reimplements the same glyph lookup outside `_DrawChar` (e.g. a custom
+  font-column ticker) should just do `glyph = code - 32` uniformly with no space special-case at all.
+  **Also must use stride 40 (`glyph*40+row`), not 8** - see the dedicated entry below; a first pass at
+  `examples/scroll_demo.has`'s ticker used the wrong 8-byte stride for a full extra round of this
+  same conversation before it was caught from a screenshot, despite the 40-byte stride already having
+  been established earlier in the very same investigation. Don't rediscover a fact and then fail to
+  apply it to sibling code in the same file.
+
+## `fonts` table stride is 40 bytes/glyph, not 8 - re-discovered the hard way in my OWN ticker code (2026-09-07)
+- Direct continuation of the bug above: while investigating `GFX_SPACE_GLYPH`, I established (by
+  parsing font8x8.s with the correct 40-byte stride) that each glyph occupies a 40-byte slot - 8 real
+  bytes + 32 zero-padding bytes for the unused 4 of 5 `GFX_FONT_PLANES` - and verified `_DrawChar`
+  addresses it as `glyph*8*GFX_FONT_PLANES` = `glyph*40`. I then fixed `lib/graphics.s` but **never
+  re-checked my own `ticker_feed_column`/`compute_ticker_bits` code in `examples/scroll_demo.has`**,
+  which had been written with `fp[glyph * 8 + row]` (assuming the WRONG, naive 8-byte-per-glyph
+  layout) since the very first draft of the ticker feature, several turns earlier.
+- Effect: `glyph*8` only lands on real glyph data when `glyph*8` happens to be an exact multiple of 40
+  (i.e. `glyph` is a multiple of 5) - and even then it reads the WRONG glyph (index `glyph/5` instead
+  of `glyph`). Every other glyph index reads into some other glyph's zero-padding region and renders
+  fully blank. Net visual effect: the ticker was overwhelmingly blank with occasional wrong/unrelated
+  glyph fragments popping up every 5th character position - looked like scattered, disconnected
+  symbol fragments (arrows, dashes, colon-like dot pairs) rather than legible scrolling text. Caught
+  from a user-supplied screenshot showing exactly that pattern (sparse odd glyph fragments in the
+  ticker strip, no legible words), not from a build/compile check - this class of bug is silent at
+  every level (compiles clean, links clean, runs without crashing).
+- Fixed by changing `fp[glyph * 8 + row]` to `fp[glyph * 40 + row]`.
+- Lesson: when a "correct stride/offset/constant" fact is established mid-conversation for one code
+  path (a library file), grep for *every other* place in the codebase using the same asset with the
+  same assumption before considering the investigation closed - a fix in one file does not
+  automatically propagate to sibling/example code written earlier against the same wrong assumption.
+- **Horizontal `Scroll()` right-direction (`hor=1`) cleared the whole leftmost 16px word instead of
+  bit-shifting it** - `.scroll_h_right_row` processes words 19..1 with a correct per-word
+  `lsr.w #1` + carry-in from the word to the left, but the true edge word (word0, x=0-15) was just
+  `clr.w`'d instead of being shifted with a 0 carried into bit15. This destroyed 15 real (already-
+  shifted) pixels every call instead of exposing exactly 1 new blank column at x=0, asymmetric with
+  the (correct) left-direction path which properly shifts its own edge word. Fixed by replacing
+  `clr.w (a1)` with `move.w (a1),d0 / lsr.w #1,d0 / move.w d0,(a1)`.
+- Both bugs were latent/undetected because no existing example exercised `Text()` strings with a
+  meaningful visual check for spaces, nor `Scroll(..., hor=1, ...)` (right direction) at all before
+  `examples/scroll_demo.has` added a bidirectional ticker.
+- Separately (not a bug, just a real hardware constraint worth remembering): `PasteBob` positions
+  BOBs with the blitter barrel shifter whenever `x` isn't word-aligned (`x&15 != 0`) - shifted blits
+  read one word past the object's real width for the shift's carry-in. The blit width comes straight
+  from the descriptor's `width` field with **no automatic padding**, so any hand-crafted BOB that will
+  ever be pasted at a non-word-aligned X must reserve one extra all-zero 16px chunk per plane (both
+  data AND mask) and declare `width = real_width + 16` in the descriptor - the same "add_word" pattern
+  `tools/bob_importer.py` already implements for PNG-sourced BOBs. Skipping this silently clips the
+  object's rightmost columns on most frames (only word-aligned positions render fully).
+- `lib/graphics.s`'s vertical `Scroll()` fill step (`.scroll_v_fill_top`/`.scroll_v_fill_bottom`)
+  clears the **entire 320px scanline width**, not just the caller's `x0..x1` sub-region (comment:
+  "For now, fill entire rows for simplicity" - a known, documented shortcut, not something I fixed).
+  Harmless if nothing else occupies that same Y row outside the scroll rectangle; if something does
+  (e.g. a border's vertical edge pixels passing through the newly-exposed row), it gets wiped and
+  needs a manual patch redraw after each vertical `Scroll()` call.
+
+## Double-buffered scrolling backgrounds: update BOTH buffers identically, don't "catch up" one (2026-09-07)
+- After double-buffering fixed the bob's blinking in `examples/scroll_demo.has`, the vertical
+  conveyor-belt rectangle and horizontal ticker started looking visibly wrong ("different scroll
+  state on screens") even though the bob itself was correct.
+- Root cause: `Scroll()` + `draw_pattern_row`/`ticker_feed_column` were called once per iteration on
+  whichever single physical buffer (`db_index`) was about to be rendered, with a "scroll_steps=1 or 2"
+  catch-up scheme to account for a buffer being skipped every other frame. **The total-scroll-amount
+  arithmetic in that scheme was actually correct** (traced it frame-by-frame: displayed total-scroll
+  sequence came out perfectly smooth, 1/2/3/4/5/6...) - the real bug is architectural: each physical
+  buffer only ever receives *some* of the shared, monotonically-advancing state's row/column values
+  (whichever land on its own turn), so the two buffers' actual pixel content permanently diverges from
+  each other even though the aggregate scroll amount stays consistent. Two buffers that never look
+  identical will always show a visible seam/inconsistency when displayed alternately, no matter how
+  carefully the *quantity* of catch-up steps is computed.
+- **Fix: stop trying to catch up a lagging buffer at all. Update BOTH physical buffers identically,
+  every iteration, by exactly one step each** (decide the next row color / next ticker column bits
+  ONCE per iteration via a small stateful `next_pattern_color()` / `compute_ticker_bits()`, splitting
+  it from a separate *pure* `draw_pattern_line(y, color)` / `stamp_ticker_column(edge_x, bits)` that
+  has no side effects and is safe to call once per buffer). The two buffers can then never drift apart
+  for shared "environmental" scrolling content, while only the BOB stays genuinely per-buffer (its
+  handle/position/saved-background triplet indexed by `db_index`, unchanged from before) since it's
+  the one thing that's supposed to legitimately differ between "what's on screen right now" and "what
+  we're building for next frame".
+- Mechanically: bracket the second buffer's identical update with `SwapScreen(); ...; SwapScreen();`
+  (an even number of toggles nets back to the buffer `db_index` expects for the bob/ball rendering that
+  follows) rather than manipulating `db_index` itself.
+- Same bug, smaller blast radius, same fix: the `[UP]`/`[DOWN]`/`[LEFT]`/`[RIGHT]` direction-indicator
+  `Text()` redraw on a phase flip (every ~3s) was also only being drawn into whichever buffer was
+  current at that moment - the other buffer would show a stale label for up to 150 frames until its
+  own next flip. Fixed by extracting the redraw into its own pure proc and calling it once per buffer
+  via the same `SwapScreen()` bracketing.
+- General lesson for any double-buffered Amiga demo/game: HeapAlloc'd/BOB-style *moving* objects are
+  correctly double-buffered per-frame (erase-old/draw-new against whichever buffer is the back
+  buffer); *background/environment* state that's supposed to be identical in both buffers (scrolling
+  terrain, HUD text, palettes) must instead be pushed into both buffers every frame, not alternated -
+  don't reach for a "buffer is N frames behind, replay N updates" scheme for that class of content,
+  since it silently produces two non-identical buffers even when the total update *count* checks out.
+- Verified: full build (compile+assemble+link) clean, no warnings, and `--cpu 68020` compiles.
+
+## "Scroll isn't working" was a perception bug, not a Scroll() bug (2026-09-07)
+- After the double-buffer lockstep fix made the horizontal ticker scroll correctly, the user reported
+  the vertical rectangle still "doesn't scroll" and suspected `Scroll()`'s vertical implementation was
+  wrong. It wasn't - `next_pattern_color()` only advanced `pattern_color` once every 8 calls (an
+  8-row-tall solid color band). Since exactly 1 row is scrolled in per iteration, for 7 out of 8
+  frames the newly-exposed row is the **same color** as the row already there - a uniform-colored band
+  shifted by 1 pixel is visually indistinguishable from not scrolling at all. Only band *boundaries*
+  (every 8th frame) showed any visible change, and even those only by 1px, easy to miss.
+- The horizontal ticker was visibly correct because text has fine per-pixel detail; a solid color
+  band has none. This is a general lesson: don't assume "I can't see it changing" means "it isn't
+  changing" for solid-fill scrolling content - check whether the content itself has enough per-pixel
+  variation to make a 1-unit shift observable before suspecting the scroll primitive.
+- Fix (not a `Scroll()` change): made `next_pattern_color()` advance every row (removed the
+  `pattern_band` counter/bss var entirely) so adjacent rows are always different colors - any 1px
+  vertical shift is now unmistakable every single frame. This was also a useful diagnostic in itself:
+  if the rectangle still didn't visibly move after this change, that would have pointed at a genuine
+  `Scroll()` bug instead.
+
 ## SetTextMode graphics.s feature + subagent bug caught (2026-08-21)
 - Added `SetTextMode(mode: int) -> int` to lib/graphics.s (XDEF + `gfx_text_mode` word var
   + function, modeled on `SetFont`). `_DrawChar`'s `.dc_plane_loop` background-clear step now
@@ -674,3 +871,57 @@
   reads use `.l` for HAS `int` params (compare against a working sibling function like
   `SetFont` which correctly used `move.l 8(a6),d0`) - don't trust a subagent's asm output at
   face value even when it "assembles clean" (vasm won't catch this, it's a semantic bug).
+
+## The REAL `Scroll()` bug: vertical scroll was a complete no-op, same big-endian .w/.l
+## class as the SetTextMode bug above (2026-09-07)
+- Direct continuation of "Scroll isn't working was a perception bug" above. After the
+  perception-bug fix (banding -> every-row color change) still showed **zero** vertical
+  motion even after redesigning the whole demo around bouncing 8x8 text specifically to rule
+  out perception issues, this *was* the anticipated "genuine Scroll() bug" - found via a
+  runtime memory-peek diagnostic (`extern var gfx_current_screen_ptr: byte*;` +
+  `probe = gfx_current_screen_ptr[known_offset];` logged via `DebugLogInt` each frame), not
+  by re-reading the assembly again (multiple full re-reads of `.scroll_do_vertical` and every
+  sub-routine found nothing - the bug is invisible to static tracing of the *control flow*,
+  it's purely an addressing bug hiding behind an always-taken "success" path).
+- **Root cause**: in `.scroll_do_vertical` / `.scroll_v_copy_down` / `.scroll_v_copy_up` /
+  `.scroll_v_fill_top` / `.scroll_v_fill_bottom` / `.scroll_v_fill_clear` (6 separate
+  occurrences, each recomputing stride independently), `plane_count` is *stored* as a
+  longword (`move.l #5,-36(a6)`) but *read back* with `muls.w -36(a6),d4`. On big-endian
+  68000, a `.w` read at the same base address as a stored `.l` gets the **high** 16 bits,
+  which are always zero for small values (4 or 5) - so `stride` always computed to **0**.
+  With stride=0, every `total_bytes = lines * stride` / `pixels * stride` calculation is 0,
+  `lsr.l #2,d0/d1` stays 0, `beq` fires immediately, and the copy/fill loop body **never
+  executes a single iteration** - while the function still falls through to
+  `moveq #0,d0 / rts` (success!). Horizontal scroll was never affected because
+  `.scroll_h_pixel` uses a hardcoded `mulu #200,d7` immediate instead of reading `-36(a6)`.
+- This is the **same bug class** as the `SetTextMode` mode-arg bug documented just above it
+  in this file (word-read of a longword-stored value on big-endian 68k silently reads zero) -
+  two independent instances found in this codebase now. **Any time hand-written lib/*.s reads
+  a local/global that was stored with `move.l #imm,...` back out with a `.w`-sized
+  instruction (`muls.w`, `move.w`, `cmp.w`, etc.), stop and check byte offset/endianness
+  before trusting it** - vasm will never flag this, it assembles and links clean, and the
+  function can still return a "success" code while silently doing nothing.
+- **Fix**: load the longword into a scratch register first, then multiply by the register -
+  `move.l -36(a6),d7` (d7 confirmed free/scratch in all 6 sites; already callee-saved via
+  `Scroll:`'s own `movem.l d1-d7/a0-a5,-(sp)` prologue) followed by `muls.w d7,d4`, in all 6
+  occurrences. Do NOT "fix" this by changing the store to `.w` instead - `-36(a6)` is a
+  dedicated 4-byte local-variable slot per the function's own offset map comment; changing
+  its store size without touching every read (and re-verifying no adjacent slot overlap)
+  is a bigger, riskier change than fixing the read side alone.
+- **Diagnostic method worth reusing**: when a hand-written asm routine returns "success" but
+  visibly does nothing, don't stop at re-reading the control flow for a Nth time - add a
+  direct memory peek (`extern var <screen_ptr>: byte*; probe = ptr[offset];`) at a byte you
+  can predict the *exact* before/after value of (here: a specific font glyph row/column/plane
+  byte, cross-checked against the raw `font8x8.s` `dc.b` table by hand), logged via
+  `DebugLogInt`. A value that never changes across dozens of frames with confirmed-correct,
+  alternating call parameters is conclusive proof the writes aren't landing, and narrows the
+  search to addressing/stride math specifically rather than dispatch/branch logic.
+- Verified: all 4 `examples/*.has` files that call `Scroll()` with a vertical component
+  (`scroll_demo.has`, `scroll_comprehensive_test.has`, `scroll_function_demo.has`,
+  `scroll_test.has`) still compile+assemble+link clean after the fix; `--cpu 68020` HAS
+  compile of `scroll_demo.has` unaffected (fix is confined to hand-written `lib/graphics.s`,
+  not compiler-generated code). These 4 examples were previously "passing" only because the
+  bug silently no-op'd instead of erroring - expect their actual on-screen vertical-scroll
+  behavior to visibly change now that it really runs.</newString>
+</invoke>
+
