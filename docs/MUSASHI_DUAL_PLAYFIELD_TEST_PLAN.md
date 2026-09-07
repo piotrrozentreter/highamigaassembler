@@ -17,10 +17,12 @@ actually composite correctly on real Denise/Agnes hardware. What it *can*
 verify cheaply and repeatably is the **CPU-side correctness** of the runtime
 library: did `SetGraphicsMode(3)` compute and write the values this feature
 was designed to write, did `SetActivePlayfield`/`SetPixel`/`ClearScreen`/
-`SwapScreen` touch the right memory addresses, and do the deliberately
-unsupported functions (`BLITLINE`, `Scroll`, `CreateBob`/`MirrorBobHorizontally`/
-`MirrorBobVertically`) really return `-1` in mode 3 instead of corrupting
-memory.
+`SwapScreen`/`ClearPlayfield` touch the right memory addresses, does
+`Scroll` and `CreateBob`/`PasteBob`/`MirrorBobHorizontally`/
+`MirrorBobVertically` correctly target only whichever playfield
+`SetActivePlayfield` last selected, and does the one function that remains
+deliberately unsupported in mode 3 (`BLITLINE`) really return `-1` instead
+of corrupting memory.
 
 Before writing register-readback assertions, inspect
 `tools/musashi_runner/has_musashi_runner.c` to confirm how (or whether) the
@@ -49,9 +51,14 @@ confirmation is a separate, still-open follow-up beyond this test tier.
 - `_gfx_can_plot`, `_SetPixel`, `_DrawChar` (used by `Text`/`Print`),
   `gfx_clear_screen`, `SwapScreen`, `Show`/`UpdateCopperList`, `SetColor`,
   `LoadPalette` all gained mode-3-aware branches.
-- `BLITLINE`, `Scroll`, and `CreateBob`/`MirrorBobHorizontally`/
-  `MirrorBobVertically` (`lib/bob.s`) explicitly reject mode 3 (return `-1`)
-  rather than attempting unsupported behavior.
+- `BLITLINE` explicitly rejects mode 3 (returns `-1`) - its line-mode geometry
+  table has no dual-playfield entry. `Scroll` and `CreateBob`/`PasteBob`/
+  `MirrorBobHorizontally`/`MirrorBobVertically` (`lib/bob.s`) now work in mode 3
+  instead, targeting whichever playfield `SetActivePlayfield` last selected.
+  New `ClearPlayfield(playfield: int) -> int` clears only one playfield's 3
+  owned bitplanes without resetting the text cursor. A pre-existing bug where
+  BOB functions silently mistreated HAM6 (mode 2) as hires was fixed at the
+  same time - they now explicitly reject HAM6 instead.
 - Working example: `examples/dual_playfield_demo.has` (compiles, assembles,
   and links cleanly for both `--cpu 68000` and `--cpu 68020`; not yet run on
   an emulator/hardware with real video output).
@@ -119,19 +126,50 @@ PASS/FAIL based on the observed byte).
    class fixed in `SwapScreen` during this feature's code review.
 
 6. **`dualpf_rejected_apis_test.has`** - after `SetGraphicsMode(3)`, assert
-   `Scroll(0, 0, 63, 63, 1, 0, 8)` returns `-1`; assert
-   `BLITLINE(0, 0, 63, 63, 1)` returns `-1`; assert `CreateBob(...)` (any
-   valid-looking descriptor pointer) returns `-1`. None of these calls
-   should hang, crash, or corrupt memory - assert a few bytes of
-   `gfx_screen1_dualpf` before/after each rejected call are unchanged as a
-   cheap corruption smoke check.
+   `BLITLINE(0, 0, 63, 63, 1)` returns `-1` (its line-mode geometry table has
+   no dual-playfield entry - this restriction is unchanged). The call should
+   not hang, crash, or corrupt memory - assert a few bytes of
+   `gfx_screen1_dualpf` before/after the call are unchanged as a cheap
+   corruption smoke check. `Scroll` and `CreateBob` are no longer rejected in
+   mode 3 (see the positive tests below) and must NOT be asserted to return
+   `-1` here.
+
+7. **`dualpf_scroll_test.has`** - after `SetGraphicsMode(3)`, use
+   `SetActivePlayfield(1)` + `SetPixel` to draw a known pattern into
+   Playfield 1's owned bytes, then `SetActivePlayfield(2)` and draw a
+   different pattern into Playfield 2. Call `Scroll(...)` while Playfield 1
+   is active and assert: (a) it returns `0`; (b) Playfield 1's owned bytes
+   moved as expected; (c) Playfield 2's owned bytes are completely
+   untouched - the core "independent per-playfield scroll" guarantee, and
+   the single highest-value assertion for this test. Also assert `Scroll`
+   still returns `-1` in HAM6 (mode 2), unchanged.
+
+8. **`dualpf_bob_test.has`** - after `SetGraphicsMode(3)` and
+   `SetActivePlayfield(1)`, call `CreateBob(...)` with a small test
+   descriptor and assert it returns a handle other than `-1`; `PasteBob` it
+   at a known position and peek the affected bytes to confirm the paste
+   landed only in Playfield 1's owned planes. Repeat with
+   `SetActivePlayfield(2)` and assert the opposite. Also exercise
+   `MirrorBobHorizontally`/`MirrorBobVertically` on the mode-3 handle and
+   assert they return a valid new handle rather than `-1`. Finally, switch
+   to `SetGraphicsMode(2)` (HAM6) and assert `CreateBob` returns `-1` there
+   - the one restriction that did not change.
+
+9. **`dualpf_clearplayfield_test.has`** - after `SetGraphicsMode(3)`, draw
+   non-zero test bytes into both playfields via `SetPixel`, call
+   `ClearPlayfield(1)`, and assert Playfield 1's bytes are zeroed while
+   Playfield 2's are unchanged; repeat for `ClearPlayfield(2)` the other way
+   round. Assert `ClearPlayfield(0)`/`ClearPlayfield(3)` (invalid playfield)
+   and calling it outside mode 3 all return `-1` without touching memory.
+   Also peek `gfx_text_cursor_x`/`gfx_text_cursor_y` before/after and assert
+   they are unchanged, unlike `ClearScreen`.
 
 ## Procedure
 
 1. `./scripts/setup_musashi.sh && ./scripts/build_musashi_runner.sh` (Linux
    prerequisites: git, python3, gcc, vasmm68k_mot in PATH - see
    `MUSASHI_USER_GUIDE.md`).
-2. Write the six `.has` files above under `examples/runtime_musashi/`,
+2. Write the nine `.has` files above under `examples/runtime_musashi/`,
    following the MMIO PASS/FAIL protocol and the exact style of existing
    files in that directory.
 3. Add each new file's path to `tests/runtime_musashi_manifest.txt`.

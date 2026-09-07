@@ -63,6 +63,7 @@ WAITBLIT:MACRO
     XDEF gfx_text_cursor_y
     XDEF Scroll
     XDEF SetActivePlayfield
+    XDEF ClearPlayfield
     XDEF gfx_sprcop_dualpf
     XDEF gfx_active_playfield
 
@@ -767,6 +768,46 @@ SetActivePlayfield:
 ; -----------------------------------------------------------------------------
 ClearScreen:
     jmp gfx_clear_screen
+
+; -----------------------------------------------------------------------------
+; Function: ClearPlayfield
+; Input: 8(a6)=playfield (1 or 2)
+; Output: d0=0 on success, -1 on error (wrong mode or invalid playfield)
+; Description: Blitter-clears only the 3 bitplanes owned by one dual-playfield
+;              layer, leaving the sibling playfield's bytes untouched.
+; Notes: Only meaningful in mode 3 (dual playfield); errors in any other mode.
+;    Unlike ClearScreen, this does not reset the text cursor - cursor state
+;    is not playfield-specific.
+; -----------------------------------------------------------------------------
+ClearPlayfield:
+    link a6,#0
+    cmp.w #3,gfx_current_mode
+    bne .clpf_error
+    move.l 8(a6),d0
+    cmp.l #1,d0
+    beq.s .clpf_ok
+    cmp.l #2,d0
+    bne .clpf_error
+.clpf_ok:
+    move.l gfx_current_screen_ptr,a0
+    cmp.l #2,d0
+    bne.s .clpf_blit
+    adda.w #40,a0                   ; PF2's owned planes start 40 bytes into the scanline
+.clpf_blit:
+    WAITBLIT
+    move.l a0,BLTDPT(a5)
+    move.w #40,BLTDMOD(a5)          ; skip the sibling playfield's 40 owned bytes each row
+    move.w #0,BLTCON1(a5)
+    move.w #$0100,BLTCON0(a5)       ; USED only, minterm $00 -> D always 0
+    move.w #(768<<6)|20,BLTSIZE(a5) ; height=768 (256 rows x 3 owned planes), width=20 words (40 bytes)
+    WAITBLIT
+    moveq #0,d0
+    bra .clpf_done
+.clpf_error:
+    moveq #-1,d0
+.clpf_done:
+    unlk a6
+    rts
 
 ; -----------------------------------------------------------------------------
 ; Function: Text
@@ -2210,7 +2251,9 @@ _SetPixel:
 ;   - x1,y1 = bottom-right corner (inclusive)
 ;   - hor: -1=left, 0=no h-scroll, 1=right
 ;   - vert: -1=up, 0=no v-scroll, 1=down
-;   - Only works in modes 0/1 (lores/hires). Returns -1 for HAM6.
+;   - Works in modes 0/1/3 (lores/hires/dual playfield). Returns -1 for HAM6.
+;   - Mode 3 only scrolls gfx_active_playfield's own 3 owned bitplanes.
+;     Horizontal scroll supports modes 0/3 only (not hires).
 ;   - Uses blitter for word-aligned scrolling, CPU for non-aligned.
 ; ============================================================================
 Scroll:
@@ -2240,8 +2283,6 @@ Scroll:
     move.w gfx_current_mode,d7
     cmp.w #2,d7
     beq .scroll_error            ; HAM6 mode not supported
-    cmp.w #3,d7
-    beq .scroll_error            ; Dual playfield not supported yet
 
     ; --- Set up screen parameters based on mode ---
     ; Local variables:
@@ -2261,6 +2302,15 @@ Scroll:
     ; Determine bytes_per_row, plane_count, and screen max coordinates
     tst.w d7
     beq .scroll_lores
+    cmp.w #1,d7
+    beq .scroll_hires
+    ; Dual playfield mode (mode 3, the only value left once HAM6 is rejected)
+    move.l #40,-32(a6)            ; bytes_per_row: unused by dualpf vertical, kept for compatibility
+    move.l #3,-36(a6)             ; plane_count: 3 owned planes
+    move.l #319,d7                ; max_x
+    move.l #255,d6                ; max_y
+    bra .scroll_mode_ready
+.scroll_hires:
     ; Hires mode
     move.l #80,-32(a6)
     move.l #4,-36(a6)
@@ -2352,7 +2402,9 @@ Scroll:
     move.l -24(a6),d1            ; vert
     tst.l d1
     beq .scroll_vret             ; No vertical scrolling
-    
+    cmp.w #3,gfx_current_mode
+    beq .scroll_do_vertical_dualpf
+
     move.l -28(a6),d2            ; pixels to scroll
     move.l -48(a6),d3            ; height_pixels
     
@@ -2382,6 +2434,31 @@ Scroll:
 .scroll_up:
     bsr .scroll_v_copy_up
     bsr .scroll_v_fill_bottom
+    moveq #0,d0
+    rts
+
+.scroll_do_vertical_dualpf:
+    ; Dual playfield sibling of the dispatch above: same full-clear /
+    ; partial-down / partial-up shape, calling the _dualpf sub-routines.
+    move.l -28(a6),d2            ; pixels to scroll
+    move.l -48(a6),d3            ; height_pixels
+    cmp.l d3,d2
+    blt.s .scroll_v_partial_dualpf
+    bsr .scroll_v_fill_clear_dualpf
+    moveq #0,d0
+    rts
+
+.scroll_v_partial_dualpf:
+    tst.l d1
+    bmi .scroll_up_dualpf         ; vert = -1 (up)
+    bsr .scroll_v_copy_down_dualpf
+    bsr .scroll_v_fill_top_dualpf
+    moveq #0,d0
+    rts
+
+.scroll_up_dualpf:
+    bsr .scroll_v_copy_up_dualpf
+    bsr .scroll_v_fill_bottom_dualpf
     moveq #0,d0
     rts
 
@@ -2565,6 +2642,232 @@ Scroll:
 .scroll_v_fill_clear_ret:
     rts
 
+.scroll_v_copy_down_dualpf:
+    ; Backward copy (avoids overwrite) - dual playfield sibling of
+    ; .scroll_v_copy_down, per-unit (40B owned + 40B skipped sibling).
+    move.l -48(a6),d0            ; height_pixels
+    sub.l -28(a6),d0              ; lines_to_copy = height - pixels
+    bls .scroll_v_down_dualpf_ret ; if <= 0, nothing to copy
+
+    ; d7 free here - playfield byte offset (0=PF1, 40=PF2).
+    moveq #0,d7
+    cmp.w #2,gfx_active_playfield
+    bne.s .svcdd_pf_ready
+    moveq #40,d7
+.svcdd_pf_ready:
+
+    mulu #3,d0                    ; units = lines_to_copy * 3 owned planes
+    move.l d0,d1                  ; d1 = units (kept for the loop counter)
+    mulu #80,d0                   ; d0 = units * 80
+    sub.l #40,d0                  ; -40: lands past the LAST unit's true
+                                   ; 40-byte payload, not its 80-byte slot
+
+    ; Source: screen + y0*240 + d_pf + (units*80-40)
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d2             ; y0
+    mulu #240,d2
+    add.l d2,a0
+    adda.w d7,a0
+    add.l d0,a0                  ; a0 = one past end of source's last unit
+
+    ; Destination: screen + (y0+pixels)*240 + d_pf + (units*80-40)
+    move.l -52(a6),a1            ; screen base
+    move.l -8(a6),d2             ; y0
+    add.l -28(a6),d2              ; y0 + pixels
+    mulu #240,d2
+    add.l d2,a1
+    adda.w d7,a1
+    add.l d0,a1                  ; a1 = one past end of dest's last unit
+
+    move.l d1,d0                  ; d0 = units (loop counter)
+    beq .scroll_v_down_dualpf_ret
+
+.scroll_v_down_dualpf_loop:
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    move.l -(a0),-(a1)
+    suba.w #40,a0                 ; skip sibling, previous owned unit
+    suba.w #40,a1
+    subq.l #1,d0
+    bne .scroll_v_down_dualpf_loop
+
+.scroll_v_down_dualpf_ret:
+    rts
+
+.scroll_v_copy_up_dualpf:
+    ; Forward copy - dual playfield sibling of .scroll_v_copy_up, per-unit
+    ; (40B owned + 40B skipped sibling).
+    move.l -48(a6),d0            ; height_pixels
+    sub.l -28(a6),d0              ; lines_to_copy = height - pixels
+    bls .scroll_v_up_dualpf_ret   ; if <= 0, nothing to copy
+
+    ; d7 free here - playfield byte offset (0=PF1, 40=PF2).
+    moveq #0,d7
+    cmp.w #2,gfx_active_playfield
+    bne.s .svcud_pf_ready
+    moveq #40,d7
+.svcud_pf_ready:
+
+    ; Source: screen + (y0+pixels)*240 + d_pf
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d1             ; y0
+    add.l -28(a6),d1              ; y0 + pixels
+    mulu #240,d1
+    add.l d1,a0
+    adda.w d7,a0                  ; a0 = start of source
+
+    ; Destination: screen + y0*240 + d_pf
+    move.l -52(a6),a1            ; screen base
+    move.l -8(a6),d1             ; y0
+    mulu #240,d1
+    add.l d1,a1
+    adda.w d7,a1                  ; a1 = destination
+
+    mulu #3,d0                    ; units = lines_to_copy * 3 owned planes
+    beq .scroll_v_up_dualpf_ret
+
+.scroll_v_up_dualpf_loop:
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    move.l (a0)+,(a1)+
+    adda.w #40,a0                 ; skip sibling, next owned unit
+    adda.w #40,a1
+    subq.l #1,d0
+    bne .scroll_v_up_dualpf_loop
+
+.scroll_v_up_dualpf_ret:
+    rts
+
+.scroll_v_fill_top_dualpf:
+    ; Dual playfield sibling of .scroll_v_fill_top: per-unit (40B) clear.
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d0             ; y0
+    mulu #240,d0
+    add.l d0,a0
+
+    ; d7 free here - playfield byte offset (0=PF1, 40=PF2).
+    moveq #0,d7
+    cmp.w #2,gfx_active_playfield
+    bne.s .svftd_pf_ready
+    moveq #40,d7
+.svftd_pf_ready:
+    adda.w d7,a0
+
+    move.l -28(a6),d0            ; pixels (rows to fill)
+    mulu #3,d0                    ; units = pixels * 3 owned planes
+    beq .scroll_v_fill_top_dualpf_ret
+
+    moveq #0,d1                   ; fill with 0
+.scroll_v_fill_top_dualpf_loop:
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    adda.w #80,a0                 ; skip sibling, next owned unit
+    subq.l #1,d0
+    bne .scroll_v_fill_top_dualpf_loop
+
+.scroll_v_fill_top_dualpf_ret:
+    rts
+
+.scroll_v_fill_bottom_dualpf:
+    ; Dual playfield sibling of .scroll_v_fill_bottom: per-unit (40B) clear.
+    move.l -52(a6),a0            ; screen base
+    move.l -16(a6),d0            ; y1
+    sub.l -28(a6),d0               ; y1 - pixels
+    addq.l #1,d0                   ; y1 - pixels + 1
+    mulu #240,d0
+    add.l d0,a0
+
+    ; d7 free here - playfield byte offset (0=PF1, 40=PF2).
+    moveq #0,d7
+    cmp.w #2,gfx_active_playfield
+    bne.s .svfbd_pf_ready
+    moveq #40,d7
+.svfbd_pf_ready:
+    adda.w d7,a0
+
+    move.l -28(a6),d0            ; pixels (rows to fill)
+    mulu #3,d0                    ; units = pixels * 3 owned planes
+    beq .scroll_v_fill_bottom_dualpf_ret
+
+    moveq #0,d1                   ; fill with 0
+.scroll_v_fill_bottom_dualpf_loop:
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    adda.w #80,a0                 ; skip sibling, next owned unit
+    subq.l #1,d0
+    bne .scroll_v_fill_bottom_dualpf_loop
+
+.scroll_v_fill_bottom_dualpf_ret:
+    rts
+
+.scroll_v_fill_clear_dualpf:
+    ; Dual playfield sibling of .scroll_v_fill_clear: per-unit (40B) clear.
+    move.l -52(a6),a0            ; screen base
+    move.l -8(a6),d0             ; y0
+    mulu #240,d0
+    add.l d0,a0
+
+    ; d7 free here - playfield byte offset (0=PF1, 40=PF2).
+    moveq #0,d7
+    cmp.w #2,gfx_active_playfield
+    bne.s .svfcd_pf_ready
+    moveq #40,d7
+.svfcd_pf_ready:
+    adda.w d7,a0
+
+    move.l -48(a6),d0            ; height_pixels (rows to fill)
+    mulu #3,d0                    ; units = height_pixels * 3 owned planes
+    beq .scroll_v_fill_clear_dualpf_ret
+
+    moveq #0,d1                   ; fill with 0
+.scroll_v_fill_clear_dualpf_loop:
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    move.l d1,(a0)+
+    adda.w #80,a0                 ; skip sibling, next owned unit
+    subq.l #1,d0
+    bne .scroll_v_fill_clear_dualpf_loop
+
+.scroll_v_fill_clear_dualpf_ret:
+    rts
+
 .scroll_vret:
     moveq #0,d0
     rts
@@ -2575,10 +2878,16 @@ Scroll:
     tst.l d1
     beq .scroll_hret             ; No horizontal scrolling
     
-    ; This path operates on lores scanlines ending at x=319. It supports
-    ; x0=0, or x0=1 when scrolling left so callers can retain screen column 0.
-    tst.w gfx_current_mode
+    ; This path operates on scanlines ending at x=319 (lores and dual
+    ; playfield are both 320px wide). It supports x0=0, or x0=1 when
+    ; scrolling left so callers can retain screen column 0. Hires (mode 1)
+    ; and HAM6 (mode 2) horizontal scroll remain unsupported.
+    move.w gfx_current_mode,d7
+    tst.w d7
+    beq.s .scroll_h_mode_ok
+    cmp.w #3,d7
     bne .scroll_error
+.scroll_h_mode_ok:
     tst.l -4(a6)
     beq.s .scroll_h_x0_ok
     cmp.l #1,-4(a6)
@@ -2588,6 +2897,8 @@ Scroll:
 .scroll_h_x0_ok:
     cmp.l #319,-12(a6)
     bne .scroll_error
+    cmp.w #3,d7
+    beq .scroll_h_dualpf_pixel
 
 .scroll_h_pixel:
     move.l -52(a6),a0            ; current screen base
@@ -2680,6 +2991,110 @@ Scroll:
 .scroll_h_next_pixel:
     subq.l #1,-28(a6)
     bne .scroll_h_pixel
+    moveq #0,d0
+    rts
+
+.scroll_h_dualpf_pixel:
+    move.l -52(a6),a0            ; current screen base
+    move.l -8(a6),d7             ; y0
+    mulu #240,d7                 ; six 40-byte planes per scanline (owned+sibling)
+    add.l d7,a0
+
+    ; d6 free here (reloaded with hor direction right below) - playfield
+    ; byte offset (0=PF1, 40=PF2).
+    moveq #0,d6
+    cmp.w #2,gfx_active_playfield
+    bne.s .scroll_h_dualpf_pf_ready
+    moveq #40,d6
+.scroll_h_dualpf_pf_ready:
+    adda.w d6,a0
+
+    move.l -48(a6),d7            ; rows remaining
+    subq.l #1,d7
+    move.l -20(a6),d6            ; horizontal direction
+    bmi.s .scroll_h_dualpf_left_row
+
+.scroll_h_dualpf_right_row:
+    moveq #2,d5                  ; three owned bitplanes
+.scroll_h_dualpf_right_plane:
+    lea 38(a0),a1                ; final word in this plane
+    moveq #18,d4                 ; copy the remaining 19 words backward
+.scroll_h_dualpf_right_word:
+    move.w (a1),d0
+    lsr.w #1,d0
+    move.w -2(a1),d1
+    btst #0,d1
+    beq.s .scroll_h_dualpf_right_store
+    or.w #$8000,d0
+.scroll_h_dualpf_right_store:
+    move.w d0,(a1)
+    subq.l #2,a1
+    dbra d4,.scroll_h_dualpf_right_word
+    ; Word 0 (x=0..15): no word further left to carry a bit in from, so
+    ; just shift right with a 0 carried into bit15 - matches the way the
+    ; left-scroll path shifts its own true edge word instead of clearing it.
+    move.w (a1),d0
+    lsr.w #1,d0
+    move.w d0,(a1)
+    adda.w #80,a0                ; next owned plane (skip sibling's 40 bytes)
+    dbra d5,.scroll_h_dualpf_right_plane
+    dbra d7,.scroll_h_dualpf_right_row
+    bra.s .scroll_h_dualpf_next_pixel
+
+.scroll_h_dualpf_left_row:
+    moveq #2,d5                  ; three owned bitplanes
+.scroll_h_dualpf_left_plane:
+    ; Word 0: new_bit(b) = old_bit(b-1) for b=15..1, new_bit(0) = word1's
+    ; bit15. When x0=1 (preserve screen column 0), bit15 is patched back
+    ; to its original value afterwards instead of taking the shifted-in bit.
+    tst.l -4(a6)
+    beq.s .scroll_h_dualpf_w0_full
+    move.w (a0),d3                ; save original word0 for the bit15 patch
+    bra.s .scroll_h_dualpf_w0_shift
+.scroll_h_dualpf_w0_full:
+    move.w (a0),d3                ; unused when x0=0, kept for symmetry
+.scroll_h_dualpf_w0_shift:
+    move.w (a0),d0
+    lsl.w #1,d0
+    move.w 2(a0),d1
+    btst #15,d1
+    beq.s .scroll_h_dualpf_w0_store
+    or.w #1,d0
+.scroll_h_dualpf_w0_store:
+    tst.l -4(a6)
+    beq.s .scroll_h_dualpf_w0_write
+    andi.w #$7fff,d0               ; drop the shifted-in bit15
+    and.w #$8000,d3                ; isolate the original bit15
+    or.w d3,d0                     ; restore column 0 unchanged
+.scroll_h_dualpf_w0_write:
+    move.w d0,(a0)
+
+    lea 2(a0),a1                  ; word1
+    moveq #17,d4                  ; words 1..18 (18 words), each uses the next word
+.scroll_h_dualpf_left_word:
+    move.w (a1),d0
+    lsl.w #1,d0
+    move.w 2(a1),d1
+    btst #15,d1
+    beq.s .scroll_h_dualpf_left_store
+    or.w #1,d0
+.scroll_h_dualpf_left_store:
+    move.w d0,(a1)+
+    dbra d4,.scroll_h_dualpf_left_word
+
+    ; a1 now points at word19 (x=304..319), the true screen edge: no word
+    ; to its right, so bit0 (x=319) is simply left clear by the shift.
+    move.w (a1),d0
+    lsl.w #1,d0
+    move.w d0,(a1)
+
+    adda.w #80,a0                 ; next owned plane (skip sibling's 40 bytes)
+    dbra d5,.scroll_h_dualpf_left_plane
+    dbra d7,.scroll_h_dualpf_left_row
+
+.scroll_h_dualpf_next_pixel:
+    subq.l #1,-28(a6)
+    bne .scroll_h_dualpf_pixel
     moveq #0,d0
     rts
 

@@ -1048,6 +1048,84 @@
   position/state history per animated object instead of trying to satisfy both requirements with
   a single shared "old position" variable and a same-frame double-draw.
 
+## Dual playfield BOB/Scroll/ClearPlayfield implemented (2026-09-07, follow-up session)
+- Closed the 3 remaining dual-playfield (mode 3) gaps flagged in the mode-3 intro entry
+  above: `Scroll()`, `CreateBob`/`PasteBob`/`MirrorBobHorizontally`/`MirrorBobVertically`
+  now all work in mode 3 (targeting whichever playfield `SetActivePlayfield` last
+  selected). New `ClearPlayfield(playfield: int) -> int` (lib/graphics.s) selectively
+  clears only one playfield's 3 owned planes (`ClearScreen()` unchanged, still clears
+  both).
+- **Proven addressing scheme for "touch only 3 of 6 interleaved planes"** (reused for
+  BOB blits, Scroll's vertical/horizontal paths, and ClearPlayfield - this is the
+  general-purpose pattern for ANY future dual-playfield feature needing this):
+  3 owned planes, `Y-multiplier=240` (one full 6-plane scanline, for computing a row's
+  starting address), uniform `80-byte stride` between consecutive OWNED-plane sub-rows
+  (correctly handles BOTH "next owned plane in the same scanline" AND "wrap to next
+  scanline's first owned plane", because 3*80=240), playfield byte offset `+0`(PF1)/
+  `+40`(PF2) added once to the base address. Backward/predecrement copy loops (e.g.
+  Scroll's `.scroll_v_copy_down_dualpf`) need a `units*80-40` starting-address
+  adjustment (not a plain `units*80`) to land on the last unit's true 40-byte payload
+  instead of one full 80-byte slot past it - verify this exact adjustment by hand with
+  concrete small numbers before trusting it, it's the single most error-prone detail.
+- **User-directed correction of a real pre-existing bug, merged into the same change**:
+  `CreateBob`/`PrepBOB`/`DrawBob`/`DrawBobWithMask` used to dispatch mode via
+  `tst.w gfx_current_mode/bne <hires-sibling>` - ANY nonzero mode (including HAM6/mode 2)
+  silently took the hires (4-plane/80-byte) path with the wrong plane count/stride.
+  Required fix pattern (mirrors `_SetPixel`/`_gfx_can_plot`'s existing style exactly):
+  explicit `tst.w/beq lores; cmp#1/beq hires; cmp#3/beq dualpf; else->reject`, checked in
+  that literal order. **Explicit project rule: BOBs are NOT possible in HAM6 at all** -
+  `MirrorBobHorizontally`/`MirrorBobVertically` had an existing (working) HAM6 6-planes
+  branch deliberately REMOVED (not fixed/kept) at every dispatch site, replaced with the
+  dualpf 3-planes case. `PrepBOB`/`DrawBob`/`DrawBobWithMask` have no error-return
+  convention (void-ish helpers) so HAM6/invalid now safely `rts`s (no-op) instead of
+  rejecting with -1.
+- Register-safety pattern for the offset-injection point in new Dualpf BOB routines:
+  reuse whichever register held the Y-address-multiply intermediate (it's already been
+  consumed into the address register by that point) - verified safe by tracing forward
+  to each routine's own `rts`, not by assumption. Review agent independently re-traced
+  all 3 new routines and found no clobber.
+- Full workflow used (per explicit user request): gamedev agent implemented in 3 rounds
+  (ClearPlayfield+bob.s dispatch fix; Scroll; demo+asset), tests agent ran the full
+  validation (701 passed/1 skipped pytest, full examples/** sweep both `--cpu 68000`/
+  `68020` matches baseline, all BOB/Scroll-calling examples assemble clean both
+  targets), review agent found zero blocking issues (one low-severity cosmetic
+  comment-symmetry note only), docs agent synced `GRAPHICS_LIBRARY_INTERFACE.md`/
+  `CHANGELOG.md`/`MUSASHI_DUAL_PLAYFIELD_TEST_PLAN.md` and found+fixed unrelated stale
+  "Scroll unsupported in mode 3" drift in 4 more docs (`SCROLL_FUNCTION*.md`) that
+  predated this session.
+- **New asset for a plain (non-game-subfolder) example that needs a generated BOB**:
+  `scripts/build_example.sh` has NO mechanism for per-example generated asset objects
+  (its `SYM_TO_LIB` auto-detection only covers hand-written `lib/*.s` files) - a
+  companion `tools/bob_importer.py`-generated `.s` file (e.g.
+  `examples/dpf_bob_dual_playfield_bob.s`) must be assembled and added to the `vlink`
+  command manually; documented the exact manual command sequence in the example's own
+  header comment since the generic script can't do it. `--label-prefix X` on a PNG named
+  `Y.png` produces label `X_Y` (double-prefixed, a bit verbose but harmless) - the
+  importer already supports any `planes` count generically (no code changes needed for
+  3-plane dual-playfield BOBs; `tools/bob_strip_importer.py` even documents a 3-plane
+  example in its own `--help`).
+- **Subagent tooling quirk observed twice this session**: `runSubagent` occasionally
+  returns literally "Agent completed with no output" with zero summary text, even
+  though (checked directly) the agent's actual file edits DID go through correctly in
+  one case (gamedev/Phase 4) and needed a retry with a shorter/tighter prompt to get a
+  real response in another (review agent). Lesson: after any "no output" result,
+  independently verify the actual file state / re-invoke with a more concise prompt
+  rather than assuming the call silently failed - don't just retry the identical call.
+- Reconfirmed (again) the Windows Git-Bash `scripts/build_example.sh` PATH/sort gotcha:
+  needs `bash -c 'export PATH="/usr/bin:$PATH"; cd <repo>; bash scripts/build_example.sh <ex>'`
+  (single-line) or auto-lib-detection silently finds zero libs and every extern symbol
+  comes back undefined at link time - easy to misdiagnose as a real regression if you
+  don't already know this pre-existing environment quirk.
+- Wrote `tests/test_bob_scroll_dualpf_api.py` (11 tests, source-contract style matching
+  `tests/test_graphics_primitives_api.py`). Gotcha hit writing it: a bare
+  `text.index("SomeLabel:")` can match the label's name mentioned inside a PRECEDING
+  comment line (e.g. `; DrawBob: paste bob without mask...` before the real
+  `DrawBob:` label further down) instead of the real asm label - fixed with a
+  `re.search(rf"^{label}[ \t]*$", text, re.MULTILINE)` helper (must also tolerate
+  trailing tabs after the colon, e.g. `PrepBOB:\t\n` - some labels in this file have a
+  stray trailing tab). Always anchor label lookups to start-of-line when slicing
+  hand-written asm source in tests, never trust a bare substring search.
+
 ## The REAL `Scroll()` bug: vertical scroll was a complete no-op, same big-endian .w/.l
 ## class as the SetTextMode bug above (2026-09-07)
 - Direct continuation of "Scroll isn't working was a perception bug" above. After the

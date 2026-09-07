@@ -6,6 +6,38 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Dual playfield mode 3 (`lib/graphics.s`/`lib/bob.s`) gains working `Scroll()`, BOB support,
+  and a new `ClearPlayfield`:** building on the mode 3 (dual playfield) support below, `Scroll()`
+  and `CreateBob`/`PasteBob`/`MirrorBobHorizontally`/`MirrorBobVertically` no longer reject mode
+  3 - they now target whichever playfield `SetActivePlayfield` last selected, scrolling or
+  drawing into only that playfield's 3 owned bitplanes while leaving the sibling playfield
+  untouched. `BLITLINE` remains the only drawing function that still rejects mode 3 (its
+  line-mode geometry table has no dual-playfield entry); HAM6 remains unsupported for `Scroll`.
+  - **New function `ClearPlayfield(playfield: int) -> int`:** blitter-clears only the 3
+    bitplanes owned by one dual-playfield layer (`playfield` is `1` or `2`, same mapping as
+    `SetActivePlayfield`), leaving the sibling playfield's bytes untouched. Valid only in mode 3;
+    returns `-1` for any other mode or an invalid `playfield` argument. Unlike `ClearScreen`, it
+    does not reset the text cursor.
+  - Updated example: [examples/dual_playfield_demo.has](../examples/dual_playfield_demo.has)
+    now demonstrates a real BOB (`CreateBob`/`PasteBob`) bouncing on Playfield 2, a
+    `Scroll()`-ing stripe on Playfield 1 that is entirely independent of PF2, and
+    `ClearPlayfield(2)` wiping only Playfield 2 on a debug key press.
+  - New tests: [tests/test_bob_scroll_dualpf_api.py](../tests/test_bob_scroll_dualpf_api.py)
+    (11 tests) cover `ClearPlayfield`, `Scroll`, and the BOB mode-3 dispatch at the source level.
+
+### Fixed
+
+- **BOB functions silently mistreated HAM6 (mode 2) as hires in `lib/bob.s`:** `CreateBob`,
+  `MirrorBobHorizontally`, `MirrorBobVertically`, and the `PasteBob` draw dispatch previously
+  enumerated only lores and hires, so any other mode (including HAM6) fell through to the hires
+  (4-plane, 80-byte/row) code path instead of being rejected. Adding the mode 3 (dual playfield)
+  case above turned this into an explicit lores/hires/dual-playfield allow-list, so HAM6 now
+  fails cleanly instead: `CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically` return `-1`,
+  and `PasteBob` no-ops, rather than silently using the wrong plane count. BOBs were never
+  actually safe to use in HAM6; this closes that gap rather than papering over it.
+
+### Added
+
 - **Graphics mode 3 (dual playfield) in `lib/graphics.s`:** `SetGraphicsMode(3)` selects a
   classic OCS/ECS 320x256 dual-playfield mode - 6 line-interleaved bitplanes (40 bytes/plane/row,
   same convention as mode 0) split by hardware into Playfield 1 (bitplanes 1, 3, 5) and

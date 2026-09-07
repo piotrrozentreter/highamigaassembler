@@ -139,11 +139,26 @@ usable colors. `SetColor`/`LoadPalette` use these same indices and write directl
 #### ClearScreen() -> int
 Clears the current screen buffer to black.
 - **Mode 3 (dual playfield)**: clears both playfields at once (all 6 bitplanes). It does not
-  respect the active-playfield selector set by `SetActivePlayfield` - there is no way to clear
-  only one playfield.
+  respect the active-playfield selector set by `SetActivePlayfield`. See `ClearPlayfield` below
+  to clear only one playfield.
 
 ```has
 call ClearScreen();
+```
+
+#### ClearPlayfield(playfield: int) -> int
+Blitter-clears only the 3 bitplanes owned by one dual-playfield layer, leaving the sibling
+playfield's bytes untouched.
+- **Valid only in mode 3** (dual playfield) - returns `-1` immediately in any other graphics mode.
+- **playfield**: `1` or `2`, same mapping as `SetActivePlayfield`. Any other value returns `-1`
+  without clearing anything.
+- Unlike `ClearScreen`, this does **not** reset the text cursor - cursor position is shared
+  between playfields, not playfield-specific.
+- Returns 0 on success, -1 on error (wrong mode or invalid `playfield` argument).
+
+```has
+call SetGraphicsMode(3);
+call ClearPlayfield(2);   // Wipe only Playfield 2, leaving Playfield 1 untouched
 ```
 
 #### SwapScreen() -> int
@@ -220,6 +235,14 @@ playfield `SetActivePlayfield` last selected). They return `-1` without drawing 
 before a screen buffer has been initialized, or when `SetPixel`/`POINT`/`PLOT` receives invalid
 coordinates or color. Valid colors are 0-31 in mode 0, 0-15 in mode 1, and 0-7 in mode 3 (per
 playfield; color code 0 is transparent on both playfields).
+
+#### BOBs and graphics modes
+BOB helpers in `lib/bob.s` (`CreateBob`, `PasteBob`, `MirrorBobHorizontally`,
+`MirrorBobVertically` - see [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md)) work in mode 0
+(lores), mode 1 (hires), and mode 3 (dual playfield, pasting into whichever playfield
+`SetActivePlayfield` last selected). They explicitly reject HAM6 (mode 2) -
+`CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically` return `-1` and `PasteBob` no-ops -
+by design, since HAM6 has no equivalent per-plane BOB layout. This is intentional, not a gap.
 
 ### Text Functions
 

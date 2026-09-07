@@ -1,32 +1,48 @@
 // Dual Playfield Demo - graphics mode 3 (320x256, classic OCS/ECS dual playfield)
 //
-// Demonstrates the new dual-playfield graphics mode: two independently
-// drawable layers are composited by the hardware in a single frame.
+// Demonstrates the dual-playfield graphics mode's full feature set: two
+// independently drawable layers, each with its own Scroll()/BOB support,
+// composited by the hardware in a single frame.
 //   - Playfield 1 (background): a static picture-frame pattern of nested
-//     rectangles plus a circle, drawn once with SetActivePlayfield(1).
-//   - Playfield 2 (foreground): a HUD caption/footer plus a small box that
-//     bounces around the screen, drawn with SetActivePlayfield(2).
+//     rectangles plus a circle, drawn once with SetActivePlayfield(1), plus
+//     a thin striped band that Scroll()s left by 1px every frame, entirely
+//     independent of anything happening on PF2.
+//   - Playfield 2 (foreground): a HUD caption/footer plus a small BOB
+//     (CreateBob/PasteBob) that bounces around the screen, drawn with
+//     SetActivePlayfield(2). Pressing SPACE calls ClearPlayfield(2) to wipe
+//     only PF2's 3 owned bitplanes and redraw the HUD - proof that PF1's
+//     background (including the scrolling stripe) is left untouched.
 //
 // Each playfield only has 7 visible colors + transparent (color code 0).
-// Erasing the bouncing box on PF2 with color 0 reveals the PF1 background
+// Erasing the bouncing BOB on PF2 with color 0 reveals the PF1 background
 // through it - proof the two playfields are genuinely separate hardware
 // layers, not one shared 32-color screen.
 //
 // Double-buffered: the static content is drawn into both gfx_screen1_dualpf
-// and gfx_screen2_dualpf up front. Each frame, the box is redrawn into
+// and gfx_screen2_dualpf up front. Each frame, the BOB is redrawn into
 // whichever buffer is currently off-screen (erasing that buffer's own
 // 2-frames-stale position, since it's only touched every other frame) and
-// then flipped in - the buffer currently on screen is never written to.
+// then flipped in - the buffer currently on screen is never written to for
+// the BOB. PF1's scrolling stripe and the SPACE-triggered PF2 clear are
+// shared/background content instead, so - unlike the BOB - every change to
+// them is pushed into BOTH physical buffers (bracketed with
+// SwapScreen()...SwapScreen()), or the two buffers would permanently drift
+// apart.
 //
-// Not supported in mode 3 (see docs/GRAPHICS_LIBRARY_INTERFACE.md): Scroll(),
-// BOB creation/mirroring, and lib/gui.s widgets - this demo intentionally
-// only uses SetPixel/PLOT/LINE/RECTANGLE/CIRCLE/Text/ClearScreen, which are
-// dual-playfield aware.
-//
-// Compile: python3 -m hasc.cli examples/dual_playfield_demo.has -o build/dual_playfield_demo.s
-// Assemble: vasmm68k_mot -Fhunkexe -o build/dual_playfield_demo.o build/dual_playfield_demo.s
+// Build: ./scripts/build_example.sh examples/dual_playfield_demo.has
+//   The script auto-detects lib/*.s dependencies from extern declarations but
+//   does not know about per-example generated assets, so the BOB include
+//   (examples/dpf_bob_dual_playfield_bob.s, produced by tools/bob_importer.py
+//   - see the "extern var dpf_bob_dual_playfield_bob" declaration below) must
+//   be assembled and added to the link manually:
+//     vasmm68k_mot -Fhunk -devpac -I lib examples/dpf_bob_dual_playfield_bob.s -o build/dpf_bob_dual_playfield_bob.o
+//     vlink -bamigahunk build/dual_playfield_demo.o build/debug.o build/helpers.o \
+//       build/takeover.o build/graphics.o build/font8x8.o build/keyboard.o \
+//       build/sprite.o build/heap.o build/bob.o build/dpf_bob_dual_playfield_bob.o \
+//       -o build/dual_playfield_demo.exe
 
 const KEY_ESC = 69;
+const KEY_SPACE = 64;
 
 const BOX_SIZE = 8;
 const BOX_MIN_X = 24;
@@ -34,8 +50,14 @@ const BOX_MAX_X = 295;
 const BOX_MIN_Y = 24;
 const BOX_MAX_Y = 231;
 
+const STRIPE_Y0 = 118;
+const STRIPE_Y1 = 125;
+const STRIPE_HEIGHT = STRIPE_Y1 - STRIPE_Y0 + 1;
+const STRIPE_WIDTH = 8;
+
 code main:
     extern var fonts: byte;
+    extern var dpf_bob_dual_playfield_bob: int;
 
     extern func DebugSetEnabled(flag: int) -> int;
     extern func DebugClear() -> int;
@@ -46,6 +68,7 @@ code main:
 
     extern func SetGraphicsMode(mode: int) -> int;
     extern func SetActivePlayfield(playfield: int) -> int;
+    extern func ClearPlayfield(playfield: int) -> int;
     extern func SetColor(id: int, col: int) -> int;
     extern func SetFont(ptr: int) -> int;
     extern func ClearScreen() -> int;
@@ -54,6 +77,11 @@ code main:
     extern func RECTANGLE(x: int, y: int, width: int, height: int, color: int) -> int;
     extern func CIRCLE(cx: int, cy: int, radius: int, color: int) -> int;
     extern func Text(x: int, y: int, msg: int, color: int) -> int;
+    extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int,
+                        __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int,
+                        __reg(d6) pixels: int) -> int;
+    extern func CreateBob(descriptor_ptr: int, b: int) -> int;
+    extern func PasteBob(handle: int, x: int, y: int, mode: int) -> void;
     extern func UpdateCopperList() -> int;
     extern func Show() -> void;
     extern func SwapScreen() -> int;
@@ -71,9 +99,14 @@ code main:
         rts
     }
 
-    // Static PF1 backdrop: nested picture-frame rectangles plus a circle.
-    // Drawn once - PF1 never changes for the rest of the demo.
+    // Static PF1 backdrop: nested picture-frame rectangles, a circle, and a
+    // scrolling stripe band. Drawn once - PF1's picture frame never changes
+    // for the rest of the demo, but the stripe is scrolled every main-loop
+    // iteration via Scroll(), entirely independent of PF2.
     proc draw_background() -> void {
+        var sx: int;
+        var stripe_toggle: int;
+
         call SetActivePlayfield(1);
         call RECTANGLE(4, 4, 312, 248, 1);
         call RECTANGLE(20, 20, 280, 216, 2);
@@ -81,21 +114,36 @@ code main:
         call RECTANGLE(52, 52, 216, 152, 4);
         call CIRCLE(160, 128, 60, 6);
         call CIRCLE(160, 128, 40, 7);
+
+        // Alternating 8px-wide bars across the full screen width - Scroll()
+        // only supports a full-width horizontal range (see the main loop),
+        // so the band always spans x=0..319.
+        stripe_toggle = 0;
+        for sx = 0 to 319 by STRIPE_WIDTH {
+            if (stripe_toggle == 0) {
+                call RECTANGLE(sx, STRIPE_Y0, STRIPE_WIDTH, STRIPE_HEIGHT, 6);
+                stripe_toggle = 1;
+            } else {
+                call RECTANGLE(sx, STRIPE_Y0, STRIPE_WIDTH, STRIPE_HEIGHT, 7);
+                stripe_toggle = 0;
+            }
+        }
     }
 
-    // Static PF2 HUD text: drawn once - only the bouncing box changes per frame.
+    // Static PF2 HUD text: drawn once (and again after ClearPlayfield(2)) -
+    // only the bouncing BOB changes every frame otherwise.
     proc draw_hud() -> void {
         call SetActivePlayfield(2);
         call Text(1, 1, &hud_title, 1);
         call Text(9, 30, &hud_footer, 1);
     }
 
-    // Erases the box's old position (color 0 = transparent on PF2, revealing
-    // the PF1 background underneath) then draws it at the new position.
-    proc redraw_box(old_x: int, old_y: int, new_x: int, new_y: int) -> void {
+    // Erases the BOB's old position (color 0 = transparent on PF2, revealing
+    // the PF1 background underneath) then pastes it at the new position.
+    proc redraw_box(old_x: int, old_y: int, new_x: int, new_y: int, bob_id: int) -> void {
         call SetActivePlayfield(2);
         call RECTANGLE(old_x, old_y, BOX_SIZE, BOX_SIZE, 0);
-        call RECTANGLE(new_x, new_y, BOX_SIZE, BOX_SIZE, 2);
+        call PasteBob(bob_id, new_x, new_y, 1);
     }
 
     proc main() -> int {
@@ -107,6 +155,7 @@ code main:
         var dy: int = 2;
         var new_x: int;
         var new_y: int;
+        var bob_id: int;
         // 2-deep position history: each buffer is only ever drawn into once
         // every OTHER frame (never the one currently on screen), so the
         // stale position to erase from it is 2 frames old, not 1.
@@ -128,6 +177,12 @@ code main:
         }
         call DebugLogStr(&debug_mode_ready);
 
+        bob_id = CreateBob(&dpf_bob_dual_playfield_bob, 0);
+        if (bob_id == -1) {
+            call DebugLogStr(&debug_bob_failed);
+            return -1;
+        }
+
         call ClearScreen();
         call SetFont(&fonts);
 
@@ -144,7 +199,7 @@ code main:
 
         // PF2 palette: bright foreground colors (codes 1-7 -> COLOR9-COLOR15).
         call SetColor(9, $FFF);
-        call SetColor(10, $FF0);
+        call SetColor(10, $F02);   // code 2: dpf_bob's own imported color
 
         // Build identical static content (background + HUD + box) in both
         // dual-playfield buffers, then double-buffer the animation below -
@@ -152,11 +207,11 @@ code main:
         // the box tear (partial edges visible mid-scan).
         call draw_background();
         call draw_hud();
-        call redraw_box(box_x, box_y, box_x, box_y);
+        call redraw_box(box_x, box_y, box_x, box_y, bob_id);
         call SwapScreen();
         call draw_background();
         call draw_hud();
-        call redraw_box(box_x, box_y, box_x, box_y);
+        call redraw_box(box_x, box_y, box_x, box_y, bob_id);
         call SwapScreen();
 
         call InitKeyboard();
@@ -165,6 +220,28 @@ code main:
 
         while (key != KEY_ESC) {
             key = GetKey();
+
+            // Debug key: proves ClearPlayfield(2) leaves PF1 (including the
+            // scrolling stripe below) completely untouched. Applied to BOTH
+            // physical buffers, like any other shared PF2 content (compare
+            // draw_hud()'s own SetActivePlayfield(2) call).
+            if (key == KEY_SPACE) {
+                call ClearPlayfield(2);
+                call draw_hud();
+                call SwapScreen();
+                call ClearPlayfield(2);
+                call draw_hud();
+                call SwapScreen();
+            }
+
+            // PF1's scrolling stripe is shared background content, so -
+            // like the HUD above - it is pushed into BOTH physical buffers
+            // every frame, or the two would permanently drift apart.
+            call SetActivePlayfield(1);
+            call Scroll(0, STRIPE_Y0, 319, STRIPE_Y1, -1, 0, 1);
+            call SwapScreen();
+            call Scroll(0, STRIPE_Y0, 319, STRIPE_Y1, -1, 0, 1);
+            call SwapScreen();
 
             new_x = box_x + dx;
             new_y = box_y + dy;
@@ -191,7 +268,7 @@ code main:
             // before the flip - that's what caused the fragmented rectangle.)
             call WaitVBlank();
             call SwapScreen();
-            call redraw_box(trail2_x, trail2_y, new_x, new_y);
+            call redraw_box(trail2_x, trail2_y, new_x, new_y, bob_id);
             call UpdateCopperList();
 
             trail2_x = trail1_x;
@@ -210,6 +287,7 @@ data dual_playfield_debug_data:
     debug_start.b = "dual playfield demo start",0
     debug_mode_ready.b = "mode 3 ready",0
     debug_mode_failed.b = "SetGraphicsMode(3) failed",0
+    debug_bob_failed.b = "CreateBob(dpf_bob) failed",0
     debug_loop_start.b = "entering interactive loop - press ESC to quit",0
     debug_done.b = "dual playfield demo done",0
 
