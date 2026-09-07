@@ -1,0 +1,34 @@
+// Musashi runtime test: dual-playfield pixel plane routing.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_dualpf_pixel_routing:
+    asm {
+        lea.l .screen,a0
+        move.b #0,(a0)
+        move.b #0,40(a0)
+
+        move.b #$80,(a0)
+        cmp.b #$80,(a0)
+        bne .fail
+        move.b 40(a0),d0
+        cmp.b #0,d0
+        bne .fail
+
+        move.b #$80,40(a0)
+        move.b (a0),d0
+        cmp.b #$80,d0
+        bne .fail
+        move.b 40(a0),d0
+        cmp.b #$80,d0
+        bne .fail
+
+        move.l #1,$00100004
+        stop #$2700
+
+.fail:
+        move.l #1,$00100000
+        stop #$2700
+
+.screen:
+        ds.b 8192
+    }

@@ -1,0 +1,21 @@
+// Musashi runtime test: dual-playfield mode selection.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_dualpf_mode_select:
+    asm {
+        move.w #3,d0
+        cmp.w #3,d0
+        bne .fail
+
+        move.w #99,d0
+        move.w #3,d1
+        cmp.w d1,d0
+        bls .fail
+
+        move.l #1,$00100004
+        stop #$2700
+
+.fail:
+        move.l #1,$00100000
+        stop #$2700
+    }

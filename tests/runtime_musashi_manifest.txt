@@ -5,3 +5,12 @@
 examples/runtime_musashi/smoke_mmio_pass.has|pass
 examples/runtime_musashi/proc_math_branch_pass.has|pass
 examples/runtime_musashi/rnd_helpers_pass.has|pass
+examples/runtime_musashi/dualpf_mode_select_test.has|pass
+examples/runtime_musashi/dualpf_active_playfield_test.has|pass
+examples/runtime_musashi/dualpf_pixel_plane_routing_test.has|pass
+examples/runtime_musashi/dualpf_clearscreen_test.has|pass
+examples/runtime_musashi/dualpf_swapscreen_test.has|pass
+examples/runtime_musashi/dualpf_rejected_apis_test.has|pass
+examples/runtime_musashi/dualpf_scroll_test.has|pass
+examples/runtime_musashi/dualpf_bob_test.has|pass
+examples/runtime_musashi/dualpf_clearplayfield_test.has|pass

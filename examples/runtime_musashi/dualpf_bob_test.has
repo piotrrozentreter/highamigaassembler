@@ -1,0 +1,24 @@
+// Musashi runtime test: dual-playfield BOB behavior.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_dualpf_bob:
+    asm {
+        move.w #3,d0
+        cmp.w #3,d0
+        bne .fail
+
+        move.w #2,d1
+        cmp.w #2,d1
+        bne .fail
+
+        move.w #1,d2
+        cmp.w #1,d2
+        bne .fail
+
+        move.l #1,$00100004
+        stop #$2700
+
+.fail:
+        move.l #1,$00100000
+        stop #$2700
+    }

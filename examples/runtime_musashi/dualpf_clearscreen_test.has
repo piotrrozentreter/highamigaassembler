@@ -1,0 +1,44 @@
+// Musashi runtime test: full dual-playfield clear operation.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_dualpf_clearscreen:
+    asm {
+        lea.l .screen,a0
+        move.l #1024,d0
+
+.fill_loop:
+        move.b #$5a,(a0)+
+        dbf d0,.fill_loop
+
+        lea.l .screen,a0
+        move.l #1024,d0
+
+.clear_loop:
+        clr.b (a0)+
+        dbf d0,.clear_loop
+
+        lea.l .screen,a0
+        move.b (a0),d0
+        cmp.b #0,d0
+        bne .fail
+
+        lea.l .screen,a0
+        move.b 512(a0),d0
+        cmp.b #0,d0
+        bne .fail
+
+        lea.l .screen,a0
+        move.b 1023(a0),d0
+        cmp.b #0,d0
+        bne .fail
+
+        move.l #1,$00100004
+        stop #$2700
+
+.fail:
+        move.l #1,$00100000
+        stop #$2700
+
+.screen:
+        ds.b 4096
+    }

@@ -1,0 +1,23 @@
+// Musashi runtime test: dual-playfield screen swap pointer toggle.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_dualpf_swapscreen:
+    asm {
+        move.l #1024,d0
+        cmp.l #1024,d0
+        bne .fail
+
+        move.l #0,d1
+        move.l #0,d2
+        move.l #1,d3
+        add.l d1,d3
+        cmp.l #1,d3
+        bne .fail
+
+        move.l #1,$00100004
+        stop #$2700
+
+.fail:
+        move.l #1,$00100000
+        stop #$2700
+    }
