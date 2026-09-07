@@ -44,10 +44,11 @@
 const KEY_ESC = 69;
 const KEY_SPACE = 64;
 
-const BOX_SIZE = 8;
 const BOX_MIN_X = 24;
-const BOX_MAX_X = 295;
-const BOX_MIN_Y = 24;
+const BOX_MAX_X = 287;
+// Kept clear of the PF1 stripe (below) so the box's 2-frame-old cached
+// background never goes stale from the stripe's own every-frame scroll.
+const BOX_MIN_Y = 126;
 const BOX_MAX_Y = 231;
 
 const STRIPE_Y0 = 118;
@@ -81,6 +82,8 @@ code main:
                         __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int,
                         __reg(d6) pixels: int) -> int;
     extern func CreateBob(descriptor_ptr: int, b: int) -> int;
+    extern func GetBobBackground(handle: int, x: int, y: int) -> void;
+    extern func PasteBackground(handle: int, x: int, y: int) -> void;
     extern func PasteBob(handle: int, x: int, y: int, mode: int) -> void;
     extern func UpdateCopperList() -> int;
     extern func Show() -> void;
@@ -138,11 +141,23 @@ code main:
         call Text(9, 30, &hud_footer, 1);
     }
 
-    // Erases the BOB's old position (color 0 = transparent on PF2, revealing
-    // the PF1 background underneath) then pastes it at the new position.
+    // Places the BOB for the very first time in a given screen buffer: no
+    // prior background is saved yet, so there is nothing to restore.
+    proc place_box(x: int, y: int, bob_id: int) -> void {
+        call SetActivePlayfield(2);
+        call GetBobBackground(bob_id, x, y);
+        call PasteBob(bob_id, x, y, 1);
+    }
+
+    // Restores the PF1/PF2 background saved under the BOB's old position
+    // (RECTANGLE only draws an outline, not a fill, so it cannot erase the
+    // BOB's interior pixels - PasteBackground/GetBobBackground is the
+    // library's blitter-based save/restore pair for flicker-free movement),
+    // then saves the background at the new position and pastes the BOB there.
     proc redraw_box(old_x: int, old_y: int, new_x: int, new_y: int, bob_id: int) -> void {
         call SetActivePlayfield(2);
-        call RECTANGLE(old_x, old_y, BOX_SIZE, BOX_SIZE, 0);
+        call PasteBackground(bob_id, old_x, old_y);
+        call GetBobBackground(bob_id, new_x, new_y);
         call PasteBob(bob_id, new_x, new_y, 1);
     }
 
@@ -177,7 +192,7 @@ code main:
         }
         call DebugLogStr(&debug_mode_ready);
 
-        bob_id = CreateBob(&dpf_bob_dual_playfield_bob, 0);
+        bob_id = CreateBob(&dpf_bob_dual_playfield_bob, 1);
         if (bob_id == -1) {
             call DebugLogStr(&debug_bob_failed);
             return -1;
@@ -207,11 +222,11 @@ code main:
         // the box tear (partial edges visible mid-scan).
         call draw_background();
         call draw_hud();
-        call redraw_box(box_x, box_y, box_x, box_y, bob_id);
+        call place_box(box_x, box_y, bob_id);
         call SwapScreen();
         call draw_background();
         call draw_hud();
-        call redraw_box(box_x, box_y, box_x, box_y, bob_id);
+        call place_box(box_x, box_y, bob_id);
         call SwapScreen();
 
         call InitKeyboard();
