@@ -64,6 +64,7 @@ WAITBLIT:MACRO
     XDEF Scroll
     XDEF SetActivePlayfield
     XDEF ClearPlayfield
+    XDEF ScrollHorizontalScreen
     XDEF gfx_sprcop_dualpf
     XDEF gfx_active_playfield
 
@@ -810,6 +811,82 @@ ClearPlayfield:
     rts
 
 ; -----------------------------------------------------------------------------
+; Function: ScrollHorizontalScreen
+; Input: 8(a6)=px (signed fine-scroll offset, -15..15)
+; Output: d0=0 on success, -1 on error (px out of range or HAM6 mode)
+; Description: Sets the OCS/ECS hardware fine horizontal scroll (BPLCON1) for
+;              the active playfield. px>=0 scrolls right by px pixels; px<0
+;              scrolls left by -px pixels.
+; Notes: Only sets the sub-16-pixel hardware delay - callers still need to
+;    step their own bitplane pointers by whole words for scroll distances
+;    beyond one 16-pixel cell (this function never touches BPLxPT/BPL1MOD/
+;    BPL2MOD). Valid in modes 0, 1, and 3; HAM6 (mode 2) is rejected, same
+;    as Scroll. In mode 3 (dual playfield), only the nibble owned by
+;    gfx_active_playfield is updated - the sibling playfield's nibble is
+;    preserved via gfx_bplcon1_shadow, since BPLCON1 is a write-only custom
+;    chip register and cannot be read back. Modes 0/1 have a single
+;    playfield, so both BPLCON1 nibbles are written identically (required
+;    so odd and even bitplanes stay aligned). Direction encoding follows
+;    the classic OCS smooth-scroll idiom (see
+;    tmp/amiga_game_prog_assembly/chapter10B/scroll_bgnd.s for a reference
+;    implementation): px maps directly to the delay nibble for px>=0, and
+;    to 15-|px| for px<0. Only 16 hardware states exist for 31 possible px
+;    values, so px and px-15 (or px+15) alias to the same BPLCON1 nibble -
+;    this sets the sub-16-pixel phase only, not an absolute scroll position.
+; -----------------------------------------------------------------------------
+ScrollHorizontalScreen:
+    link a6,#0
+    move.l 8(a6),d0
+    cmp.l #15,d0
+    bgt .shs_error
+    cmp.l #-15,d0
+    blt .shs_error
+
+    cmp.w #2,gfx_current_mode
+    beq .shs_error
+
+    tst.l d0
+    blt.s .shs_negative
+    move.w d0,d1                    ; nibble = px (0..15)
+    bra.s .shs_have_nibble
+.shs_negative:
+    neg.l d0
+    moveq #15,d1
+    sub.w d0,d1                     ; nibble = 15-|px| (0..14)
+.shs_have_nibble:
+
+    cmp.w #3,gfx_current_mode
+    bne.s .shs_single
+
+    move.w gfx_bplcon1_shadow,d0
+    cmp.w #2,gfx_active_playfield
+    beq.s .shs_pf2
+    and.w #$FFF0,d0                 ; clear PF1 nibble (bits 0-3)
+    or.w d1,d0
+    bra.s .shs_write
+.shs_pf2:
+    lsl.w #4,d1
+    and.w #$FF0F,d0                 ; clear PF2 nibble (bits 4-7)
+    or.w d1,d0
+    bra.s .shs_write
+
+.shs_single:
+    move.w d1,d0
+    lsl.w #4,d0
+    or.w d1,d0                      ; mirror into both nibbles (odd+even planes)
+
+.shs_write:
+    move.w d0,gfx_bplcon1_shadow
+    move.w d0,BPLCON1(a5)
+    moveq #0,d0
+    bra.s .shs_done
+.shs_error:
+    moveq #-1,d0
+.shs_done:
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
 ; Function: Text
 ; Input: 8(a6)=x, 12(a6)=y, 16(a6)=string, 20(a6)=color
 ; Output: d0=0
@@ -1165,6 +1242,7 @@ _SetGraphicsMode:
     move.l a0,gfx_current_screen_ptr        ; Set initial screen
     move.w #%0101001000000000,BPLCON0(a5)   ; 5 bitplanes + color
     move.w #0,BPLCON1(a5)                   ; No scroll
+    move.w #0,gfx_bplcon1_shadow            ; Reset ScrollHorizontalScreen's shadow
     move.w #%100100,BPLCON2(a5)             ; Default priority
     move.w #160,BPL1MOD(a5)                 ; Modulo for interleaved
     move.w #160,BPL2MOD(a5)                 ; Modulo for interleaved
@@ -1194,6 +1272,7 @@ _SetGraphicsMode:
     jsr gfx_clear_screen_hires              ; Clear screen
     move.w #%1100001000000000,BPLCON0(a5)   ; 4 bitplanes + hires _ color
     move.w #0,BPLCON1(a5)                   ; No scroll
+    move.w #0,gfx_bplcon1_shadow            ; Reset ScrollHorizontalScreen's shadow
     move.w #%100100,BPLCON2(a5)             ; Default priority
     move.w #80*3,BPL1MOD(a5)                ; Hires modulo
     move.w #80*3,BPL2MOD(a5)                ; Hires modulo
@@ -1225,6 +1304,7 @@ _SetGraphicsMode:
     move.l a0,gfx_current_screen_ptr        ; Set initial screen
     move.w #%0110100000000000,BPLCON0(a5)   ; 6 bitplanes + HAM mode (bit 11 = 0x800)
     move.w #0,BPLCON1(a5)                   ; No scroll
+    move.w #0,gfx_bplcon1_shadow            ; Reset ScrollHorizontalScreen's shadow
     move.w #%100100,BPLCON2(a5)             ; Default priority
     move.w #0,BPL1MOD(a5)                   ; Modulo 0 for planar layout
     move.w #0,BPL2MOD(a5)                   ; Modulo 0 for planar layout
@@ -1254,6 +1334,7 @@ _SetGraphicsMode:
     move.l a0,gfx_current_screen_ptr        ; Set initial screen
     move.w #%0110011000000000,BPLCON0(a5)   ; 6 bitplanes + DBLPF (dual playfield) + color
     move.w #0,BPLCON1(a5)                   ; No scroll
+    move.w #0,gfx_bplcon1_shadow            ; Reset ScrollHorizontalScreen's shadow
     move.w #%1100100,BPLCON2(a5)            ; PF2 (foreground) priority over PF1 (background)
     move.w #200,BPL1MOD(a5)                 ; Modulo for 6-plane interleaved rows: (6-1)*40
     move.w #200,BPL2MOD(a5)                 ; Modulo for 6-plane interleaved rows
@@ -3136,6 +3217,13 @@ gfx_current_mode:
 ; meaningful when gfx_current_mode=3; see SetActivePlayfield.
 gfx_active_playfield:
     dc.w 1
+
+; Software mirror of hardware BPLCON1 (bits 0-3=PF1 fine scroll, bits 4-7=
+; PF2 fine scroll), maintained by ScrollHorizontalScreen since BPLCON1 is a
+; write-only custom chip register and cannot be read back to recover the
+; sibling playfield's nibble.
+gfx_bplcon1_shadow:
+    dc.w 0
 
 gfx_text_mode:
     dc.w 0  ; Text rendering mode (0=transparent, 1=opaque)

@@ -161,6 +161,24 @@ call SetGraphicsMode(3);
 call ClearPlayfield(2);   // Wipe only Playfield 2, leaving Playfield 1 untouched
 ```
 
+#### ScrollHorizontalScreen(px: int) -> int
+Sets the OCS/ECS hardware fine horizontal scroll register (`BPLCON1`) directly for the active
+playfield, instead of moving pixel data like `Scroll()` does.
+- **px**: signed offset, `-15..15`. `px >= 0` scrolls right by `px` pixels; `px < 0` scrolls left
+  by `-px` pixels. Out-of-range values return `-1` without writing any register.
+- **Modes 0, 1, 3** are supported (mode 3: active playfield only, via `SetActivePlayfield`); HAM6
+  (mode 2) returns `-1`, same as `Scroll`.
+- **Mode 3 (dual playfield)**: only the active playfield's `BPLCON1` nibble changes - the sibling
+  playfield's fine-scroll value is preserved untouched.
+- Does not move bitplane pointers - see [SCROLL_FUNCTION.md](SCROLL_FUNCTION.md#scrollhorizontalscreen-hardware-fine-scroll)
+  for full behavior and the classic OCS whole-word pointer-stepping technique this pairs with.
+- Returns 0 on success, -1 on error (`px` out of range or HAM6 mode).
+
+```has
+call SetActivePlayfield(1);
+call ScrollHorizontalScreen(5);   // Playfield 1 fine-scrolled right by 5px
+```
+
 #### SwapScreen() -> int
 Swaps between double buffers (toggles between screen1 and screen2).
 - **Mode 3 (dual playfield)**: toggles between the dual-playfield double buffers

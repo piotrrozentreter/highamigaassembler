@@ -6,6 +6,20 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **New function `ScrollHorizontalScreen(px: int) -> int` in `lib/graphics.s`:** sets the OCS/ECS
+  hardware fine horizontal scroll register (`BPLCON1`) directly for the active playfield, instead
+  of moving pixel data like `Scroll()`. `px` is a signed offset in `-15..15` (`px>=0`=right,
+  `px<0`=left); out-of-range values and HAM6 (mode 2) return `-1`. In dual-playfield mode (mode 3),
+  only the nibble owned by whichever playfield `SetActivePlayfield` last selected is updated - the
+  sibling playfield's fine-scroll value is preserved via a new software shadow (`gfx_bplcon1_shadow`)
+  since `BPLCON1` is a write-only custom chip register. Modes 0/1 write the same delay into both
+  nibbles so odd/even bitplanes stay aligned. Does not move bitplane pointers - callers still handle
+  whole-word stepping for scroll distances beyond one 16-pixel cell.
+  - New example: [examples/scroll_horizontal_screen_test.has](../examples/scroll_horizontal_screen_test.has).
+  - New tests: [tests/test_scroll_horizontal_screen_api.py](../tests/test_scroll_horizontal_screen_api.py)
+    (9 tests) cover range validation, HAM6 rejection, dual-playfield nibble independence, and the
+    per-mode `BPLCON1`/shadow reset sites at the source level.
+
 - **Dual playfield mode 3 (`lib/graphics.s`/`lib/bob.s`) gains working `Scroll()`, BOB support,
   and a new `ClearPlayfield`:** building on the mode 3 (dual playfield) support below, `Scroll()`
   and `CreateBob`/`PasteBob`/`MirrorBobHorizontally`/`MirrorBobVertically` no longer reject mode

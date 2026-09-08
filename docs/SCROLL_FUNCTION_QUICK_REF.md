@@ -67,6 +67,25 @@ if (Scroll(...) == 0) {
 - **Single `jsr`**: ~20 instruction bytes for parameter setup vs. 32 bytes stack-based
 - **Blitter operation**: Scrolling is accelerated but may have variable latency
 
+## ScrollHorizontalScreen (Hardware Fine Scroll)
+
+```has
+extern func ScrollHorizontalScreen(px: int) -> int;
+```
+
+| Param | Type | Range | Meaning |
+|-------|------|-------|---------|
+| `px`  | int  | -15..15 | Signed fine-scroll offset: >=0 right, <0 left |
+
+- Sets `BPLCON1` directly (OCS/ECS hardware register) - no CPU/Blitter copy, unlike `Scroll`.
+- Modes 0, 1, 3 (dual playfield: active playfield only, via `SetActivePlayfield`). HAM6 rejected.
+- **d0 = 0**: Success. **d0 = -1**: `px` out of range, or HAM6 mode.
+
+```has
+call ScrollHorizontalScreen(5);   // scroll active playfield right 5px
+call ScrollHorizontalScreen(-5);  // scroll active playfield left 5px
+```
+
 ## Common Errors
 
 | Error | Cause |
