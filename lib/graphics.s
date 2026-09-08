@@ -826,13 +826,19 @@ ClearPlayfield:
 ;    preserved via gfx_bplcon1_shadow, since BPLCON1 is a write-only custom
 ;    chip register and cannot be read back. Modes 0/1 have a single
 ;    playfield, so both BPLCON1 nibbles are written identically (required
-;    so odd and even bitplanes stay aligned). Direction encoding follows
-;    the classic OCS smooth-scroll idiom (see
-;    tmp/amiga_game_prog_assembly/chapter10B/scroll_bgnd.s for a reference
-;    implementation): px maps directly to the delay nibble for px>=0, and
-;    to 15-|px| for px<0. Only 16 hardware states exist for 31 possible px
-;    values, so px and px-15 (or px+15) alias to the same BPLCON1 nibble -
-;    this sets the sub-16-pixel phase only, not an absolute scroll position.
+;    so odd and even bitplanes stay aligned). BPLCON1's delay nibble is a
+;    single non-negative 0..15 hardware value with no bitplane-pointer
+;    compensation here, so it cannot wrap between 15 and 0 without a real
+;    ~15-pixel visual jump - confirmed the hard way: an earlier px-mod-16
+;    formula was mathematically continuous but still glitched at px=0,
+;    because modular "adjacency" (15 next to 0) isn't the same as physical
+;    adjacency on real hardware without a pointer move. Encoding is
+;    therefore nibble = |px|: a single V-shaped ramp from 0 outward in
+;    either direction that never wraps, so px and -px alias to the same
+;    nibble (the register has no memory of which side you approached it
+;    from - direction only exists in the caller's own px sequence over
+;    time). This sets the sub-16-pixel phase only, not an absolute scroll
+;    position.
 ; -----------------------------------------------------------------------------
 ScrollHorizontalScreen:
     link a6,#0
@@ -845,15 +851,10 @@ ScrollHorizontalScreen:
     cmp.w #2,gfx_current_mode
     beq .shs_error
 
-    tst.l d0
-    blt.s .shs_negative
-    move.w d0,d1                    ; nibble = px (0..15)
-    bra.s .shs_have_nibble
-.shs_negative:
-    neg.l d0
-    moveq #15,d1
-    sub.w d0,d1                     ; nibble = 15-|px| (0..14)
-.shs_have_nibble:
+    move.l d0,d1
+    bpl.s .shs_have_nibble
+    neg.l d1
+.shs_have_nibble:                    ; nibble = |px| (0..15), never wraps
 
     cmp.w #3,gfx_current_mode
     bne.s .shs_single

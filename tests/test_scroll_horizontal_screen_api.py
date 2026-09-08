@@ -67,15 +67,31 @@ def test_scrollhorizontalscreen_encodes_signed_px_into_nibble():
     graphics_s = _read_norm(GRAPHICS_S)
     block = _slice(graphics_s, "ScrollHorizontalScreen:", "Text:")
 
-    # px>=0 -> nibble = px directly.
-    assert re.search(
-        r"tst\.l d0\s*\n\s*blt\.s \.shs_negative\s*\n\s*move\.w d0,d1", block
-    )
-    # px<0 -> nibble = 15-|px|.
-    assert re.search(
-        r"\.shs_negative:\s*\n\s*neg\.l d0\s*\n\s*moveq #15,d1\s*\n\s*sub\.w d0,d1",
-        block,
-    )
+    # nibble = |px|: a single V-shaped ramp (0 outward in either direction)
+    # that never wraps between 15 and 0. Regression guard for two real bugs:
+    # an original 15-|px| formula jumped 2 nibbles at px=-1/0, and a later
+    # px-mod-16 "fix" was mathematically continuous but STILL glitched at
+    # px=0, because BPLCON1's delay has no bitplane-pointer compensation
+    # here, so a 15<->0 wrap is always a real ~15-pixel jump on real
+    # hardware regardless of how "adjacent" the raw numbers look mod 16.
+    assert re.search(r"move\.l d0,d1\s*\n\s*bpl\.s \.shs_have_nibble\s*\n\s*neg\.l d1", block)
+    assert "shs_negative" not in block
+    assert "and.w #$F,d1" not in block
+
+
+def test_scrollhorizontalscreen_nibble_mapping_never_wraps():
+    # Mirrors the fixed asm formula (nibble = |px|) in Python and checks that
+    # every step of the full bounce sequence (0 down to -15, back up to 0)
+    # changes the nibble by exactly +-1 in PLAIN (non-modular) terms - i.e.
+    # the nibble never touches both 0 and 15 in the same step, the property
+    # whose absence (under a mod-16 formula) still caused a glitch at px=0.
+    def nibble(px: int) -> int:
+        return abs(px)
+
+    pxs = list(range(0, -16, -1)) + list(range(-14, 1))
+    for a, b in zip(pxs, pxs[1:]):
+        step = nibble(b) - nibble(a)
+        assert step in (1, -1), f"non-adjacent nibble step {a}->{b}: {step}"
 
 
 def test_scrollhorizontalscreen_dualpf_preserves_sibling_nibble():
