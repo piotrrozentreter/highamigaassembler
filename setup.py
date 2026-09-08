@@ -2,15 +2,24 @@
 
 from collections import defaultdict
 from pathlib import Path
+from shutil import rmtree
 
 from setuptools import setup
+from setuptools.command.sdist import sdist as _sdist
 
 
 ROOT = Path(__file__).parent
-RESOURCE_DIRS = ("lib", "tools", "scripts", "examples", "guicreator")
-EXCLUDED_PARTS = {"__pycache__", "musashi_runner"}
+RESOURCE_DIRS = ("lib", "tools", "scripts", "guicreator")
+EXCLUDED_PARTS = {"__pycache__", "musashi_runner", "examples"}
 EXCLUDED_NAMES = {"musashi.lock"}
 DESTINATION_ROOT = Path("share") / "high-amiga-assembler"
+
+
+class HasSdist(_sdist):
+    def make_release_tree(self, base_dir, files):
+        super().make_release_tree(base_dir, files)
+        rmtree(Path(base_dir) / f"{self.distribution.get_name().replace('-', '_')}.egg-info",
+              ignore_errors=True)
 
 
 def collect_resource_files():
@@ -28,7 +37,7 @@ def collect_resource_files():
                 or any("musashi" in part.lower() for part in relative_file.parts)
             ):
                 continue
-            if source_file.suffix in {".pyc", ".pyo"}:
+            if source_file.suffix.lower() in {".md", ".pyc", ".pyo"}:
                 continue
             relative_parent = source_file.parent.relative_to(ROOT)
             destination = DESTINATION_ROOT / relative_parent
@@ -36,4 +45,4 @@ def collect_resource_files():
     return sorted(grouped_files.items())
 
 
-setup(data_files=collect_resource_files())
+setup(data_files=collect_resource_files(), cmdclass={"sdist": HasSdist})
