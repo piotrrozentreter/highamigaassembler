@@ -35,6 +35,7 @@
     include "exec_lib.i"
 
     SECTION fileio_data,DATA
+    CNOP 0,4
 
 FILEIO_DOS_LVO_OPEN      EQU -30
 FILEIO_DOS_LVO_CLOSE     EQU -36
@@ -56,6 +57,7 @@ fileio_dos_base:
     dc.l 0
 
     SECTION fileio_code,CODE
+    CNOP 0,4
 
     XDEF FileIoInit
     XDEF FileIoDone

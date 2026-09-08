@@ -1176,6 +1176,292 @@
   compile of `scroll_demo.has` unaffected (fix is confined to hand-written `lib/graphics.s`,
   not compiler-generated code). These 4 examples were previously "passing" only because the
   bug silently no-op'd instead of erroring - expect their actual on-screen vertical-scroll
-  behavior to visibly change now that it really runs.</newString>
+  behavior to visibly change now that it really runs.
+
+## Using ScrollHorizontalScreen from example .has code (2026-09-08)
+- Added a 3rd effect to `examples/scroll_demo.has`: whole-screen hardware fine-scroll bounce
+  (0 down to -HBOUNCE_RANGE=-15, back to 0, forever) via `ScrollHorizontalScreen(px)`, layered
+  on top of the existing double-buffered vertical/horizontal `Scroll()` ticker effects.
+  Pattern: one shared `next_hscroll_offset()` proc (mirrors the existing `next_vbounce_dir()`
+  style) advances a bss `hscroll_pos`/`hscroll_dir` pair and returns the value to apply that
+  frame; two `if` guards (not `else if` - HAS's if/else needs braces per side, no dangling
+  `else if` chain shorthand used anywhere in this codebase) clamp+flip direction at each bound.
+- **Timing lesson (new, not previously recorded)**: unlike the `Scroll()` calls (which write
+  pixel DATA into the current back buffer and are safe anywhere in the loop body), a direct
+  hardware-register write like `ScrollHorizontalScreen` (BPLCON1) is live and NOT
+  copper/double-buffered - unlike Scroll()'s per-buffer data writes, it affects whichever frame
+  is CURRENTLY being scanned out, immediately. Call it as the very first statement after
+  `WaitVBlank()` returns (before `Show()`/`SwapScreen()`/`GetKey()`/the per-buffer `Scroll()`
+  calls), so the new value applies to the whole upcoming frame instead of only whatever
+  scanlines are left once heavier mid-loop work finishes - otherwise you'd get a deterministic
+  per-frame horizontal "kink" partway down the screen. Only needs ONE call per iteration (not
+  duplicated per physical buffer like pixel-data draws), consistent with the earlier finding
+  that no copper-list builder re-writes `BPLCON1` per frame.
+- Verified end-to-end: `python -m hasc.cli examples/scroll_demo.has --cpu {68000,68020}`,
+  `vasmm68k_mot -Fhunk -m{68000,68020}` (syntax-clean both), and a full
+  `bash scripts/build_example.sh examples/scroll_demo.has` link (needs the Windows Git-Bash
+  `/usr/bin`-before-System32 PATH fix noted elsewhere in this file) - produced
+  `build/scroll_demo.exe` with zero warnings.
+
+## ScrollHorizontalScreen negative-px nibble formula was a REAL bug (found via user-reported
+## visual glitch, 2026-09-08, same day as adding the bounce demo above)
+## **CORRECTION: the fix documented in this entry (px mod 16 via AND $F) was INSUFFICIENT -
+## user reported the identical glitch persisted. See the follow-up entry further below for the
+## actual working fix (nibble = |px|). Kept this entry intact as a record of the wrong turn -
+## the diagnostic reasoning about the seam location was right, the "mod 16 = smooth" hardware
+## assumption was wrong.**
+- User report: "when moving from left to right at the right peak it blink[s] as [if] suddenly
+  moved couple of pixel to left again" - i.e. exactly at the px=-1 -> px=0 transition (the
+  bounce's "right peak"/return-to-0 point added in the entry above).
+- Root cause: `ScrollHorizontalScreen`'s original encoding used `nibble = px` for `px>=0` but
+  `nibble = 15-|px|` for `px<0`. These two branches are NOT continuous at the px=0/px=-1 seam:
+  nibble(0)=0 but nibble(-1)=15-1=**14**, a jump of 2 in nibble-space (should have been a
+  1-step change to nibble 15) every single time the bounce crossed zero - the exact glitch
+  reported. The rest of the negative branch (px=-1 down to px=-15: nibbles 14,13,...,0) WAS
+  internally smooth; only the seam at px=0 was broken. This is why it looked like "a couple of
+  pixels" rather than a huge jump - only that one boundary was wrong, everywhere else was fine.
+- Diagnostic method: **derived and hand-traced the actual px->nibble table for both formula
+  branches instead of guessing** - listing nibble(px) for px=-15..15 immediately exposed the
+  non-monotonic seam at 0/-1 (14 directly after 0, skipping 15 entirely). Cross-checked against
+  the project's own cited reference (`tmp/amiga_game_prog_assembly/chapter10B/scroll_bgnd.s`,
+  `scroll_background`): its formula is `d1 = $F - (bgnd_x & $F)` where `bgnd_x` is an
+  always-non-negative monotonic counter - i.e. the reference never needed to handle negative
+  input at all, so the buggy `15-|px|` extension to signed px was this project's own invention,
+  not something the reference actually validated for negative numbers.
+- **Fix**: replaced the entire branchy `tst.l`/`blt.s`/`neg.l`/`moveq`/`sub.w` sequence (6
+  instructions across 2 branches) with 2 unconditional instructions: `move.w d0,d1` /
+  `and.w #$F,d1` - i.e. nibble = px AND $F, the two's-complement "low nibble" trick that gives
+  the true mod-16 value for ANY signed input (positive or negative) with no branching. Verified
+  by hand this leaves ALL non-negative px (0..15) byte-for-byte behaviorally identical (px&0xF
+  is a no-op when 0<=px<=15), so this is a pure bugfix for negative px only, zero behavior
+  change for the positive/right-scroll direction.
+  - General reusable trick: **`value AND $F` (or `AND #(N-1)` for any power-of-2 N) is the
+    correct/continuous mod-N operation for a signed two's-complement register, regardless of
+    sign** - prefer it over hand-rolled `tst`/`neg`/`sub` sign-branching whenever a hardware
+    field needs "wrap in a fixed-width nibble/byte/word" semantics for a signed input. The
+    branchy version silently breaks exactly at the sign boundary unless painstakingly derived
+    to match - as happened here.
+  - Also updates the aliasing period claimed in the doc comment: was "px and px-15 (or px+15)
+    alias" (an artifact of the broken formula), now correctly "px and px-16 (or px+16) alias"
+    (true mod-16 periodicity) - a 31-value domain over 16 hardware states still has to alias
+    somewhere, but now the aliasing pairs are the mathematically consistent ones, not an
+    arbitrary byproduct of a discontinuous formula.
+- Test fallout (expected, same pattern as other "test encoded the old buggy behavior" fixes in
+  this file): `tests/test_scroll_horizontal_screen_api.py`'s
+  `test_scrollhorizontalscreen_encodes_signed_px_into_nibble` asserted the exact old
+  tst/neg/sub instruction sequence - rewritten to assert the new `move.w d0,d1` / `and.w #$F,d1`
+  pair instead. Added a NEW test,
+  `test_scrollhorizontalscreen_nibble_mapping_is_continuous_across_zero`, that reimplements the
+  fixed formula (`px & 0xF`) in pure Python and walks the full 30-step bounce sequence
+  (0->-15->0) asserting every consecutive step changes the nibble by exactly +-1 mod 16 - a
+  regression guard directly encoding the property whose absence caused this bug, not just a
+  source-text pattern match. Gotcha while writing it: an off-by-one in the test's own px-list
+  construction (`range(-15, 1)` appended after `range(0, -16, -1)`) duplicated `-15` at the
+  join (both lists include it), producing a spurious same-value "0 step" failure unrelated to
+  the real formula - fixed by starting the return leg at `-14` instead of `-15`. Lesson:
+  double-check a hand-built test fixture's own sequence for accidental duplicate boundary
+  values before trusting a failure as a real bug in the code under test.
+- Verified: `python -m pytest tests -q` full suite (711 passed/1 skipped, same as baseline
+  count) and full `bash scripts/build_example.sh` link for both `examples/scroll_demo.has` and
+  `examples/scroll_horizontal_screen_test.has` (the latter's assertions are all on return
+  codes/range validation, unaffected by the nibble-value fix). No HAS-level example source
+  needed any change - this was purely an internal hand-written-library encoding bug, the public
+  px>=0/px<0 direction contract is unchanged.
+
+## Follow-up: the REAL ScrollHorizontalScreen fix - hardware delay is non-wrapping, not mod-16
+## (2026-09-08, same day, user re-reported "still blinking when reaches right edge")
+- The `px & 0xF` (mod-16) fix above did NOT fix the glitch - user reported the exact same
+  right-edge blink after rebuilding. This is decisive empirical evidence against the "mod 16 =
+  smooth" assumption: nibble(0)=0 and nibble(-1)=15 ARE "adjacent" in modular arithmetic (a
+  clean -1 step, wrapping 0->15), yet the glitch persisted identically - proving the hardware
+  does NOT treat delay=15 and delay=0 as visually adjacent just because they're numerically
+  adjacent mod 16.
+- **Real root cause**: `BPLCON1`'s delay nibble is a single non-negative 0..15 hardware value
+  with no compensating bitplane-pointer movement in this function (by explicit design/scope -
+  see the function's own docs). The classic OCS technique (this file's own cited reference,
+  `tmp/amiga_game_prog_assembly/chapter10B/scroll_bgnd.s`) only achieves a smooth wrap from
+  delay=0 back to delay=15 (or vice versa) by ALSO stepping the bitplane pointer by one word at
+  that exact instant, to compensate for the ~15-pixel discontinuity the delay-alone wrap would
+  otherwise cause. Since `ScrollHorizontalScreen` deliberately never touches the bitplane
+  pointer, ANY encoding that makes the delay value wrap between 15 and 0 during normal use will
+  show a real ~15-pixel jump - regardless of which formula produces that wrap, mod-16 or
+  otherwise. My first "fix" made the encoding mathematically prettier without changing this
+  physical fact.
+- **Actual fix**: encode `nibble = |px|` (absolute value) instead of any mod-16/wraparound
+  formula. This is a single V-shaped ramp centered at px=0 (nibble 0), increasing monotonically
+  to nibble 15 as `|px|` grows in EITHER direction, and critically **never wraps at all** - for
+  the demo's full bounce cycle (px: 0,-1,-2,...,-15,-14,...,-1,0) the nibble sequence is
+  0,1,2,...,15,14,...,1,0, i.e. a plain triangle wave where every single step is a real +-1, with
+  the register NEVER jumping between its two extremes (0 and 15) in one step. Implementation:
+  `move.l d0,d1` / `bpl.s .shs_have_nibble` / `neg.l d1` (3 instructions, simpler than both
+  previous attempts) - unchanged behavior for px>=0 (nibble=px directly, exactly as always).
+  - Consequence for the "aliasing" contract: since nibble=|px|, `px` and `-px` now alias to the
+    SAME nibble (e.g. px=5 and px=-5 both write nibble 5) - the hardware register genuinely
+    cannot distinguish "shifted right by N" from "shifted left by N" on its own; direction is
+    purely a property of the caller's own px sequence over time (which way it's been moving),
+    not something stored in the register value itself. This is a DIFFERENT aliasing shape than
+    either previous formula (was px<->px-15, then px<->px-16, now px<->-px) - each rewrite
+    changes which pairs of px values are indistinguishable, since 31 input values can never
+    injectively map to 16 hardware states no matter which formula is chosen.
+- **Meta-lesson (the important one)**: for a write-only hardware register with a bounded
+  discrete range, "the mapping is mathematically continuous under modular arithmetic" is NOT
+  sufficient evidence that it's *visually* continuous - you must also verify (or find documented
+  proof) that the hardware/technique actually treats the wrap point as adjacent, which for OCS
+  fine-scroll specifically requires a bitplane-pointer step that this function intentionally
+  omits. When a "principled" fix doesn't resolve a user-reported visual bug on the very first
+  retry, don't assume a second, smaller issue - re-derive the physical model from scratch rather
+  than patching the same formula family again. The working formula here (plain magnitude, no
+  wraparound) is actually simpler than both discarded attempts, not more complex - a good sign
+  the earlier ones were solving the wrong problem.
+- Test updates (2nd rewrite of the same test in one day): `test_scrollhorizontalscreen_encodes_signed_px_into_nibble`
+  now asserts the `move.l d0,d1` / `bpl.s .shs_have_nibble` / `neg.l d1` sequence, and explicitly
+  asserts the OLD `and.w #$F,d1` text is ABSENT (guards against silently reverting to the
+  insufficient fix). Renamed the Python simulation test to
+  `test_scrollhorizontalscreen_nibble_mapping_never_wraps` (`nibble(px)=abs(px)`), asserting
+  every consecutive step in the full bounce sequence is a plain `+-1` (no `% 16`, since there's
+  no wraparound left to allow for at all now).
+- Verified again: full `pytest tests -q` (711 passed/1 skipped, unchanged) and full
+  `bash scripts/build_example.sh examples/scroll_demo.has` link, clean.
+- **Still unverified (documented limitation, not fixed)**: none of this was checked against real
+  hardware or an emulator (no Amiga emulator available in this sandbox) - the fix is derived
+  from first-principles reasoning about BPLCON1 plus the user's two consistent bug reports
+  (before and after the first fix), not from a direct visual/runtime observation of the "after"
+  state. If a third report of the same symptom comes in, question the `|px|`-magnitude model
+  itself next (e.g. maybe direction truly does need a separate coarse pointer nudge that this
+  function's scope was never supposed to skip) rather than trying a 4th encoding tweak blind.
+- **User confirmed the `|px|` fix actually works** ("That works now!") - closes the loop on the
+  ScrollHorizontalScreen saga above; the non-wrapping magnitude model was correct.
+
+## ScrollHorizontalScreen applied per-playfield in dual-playfield mode (2026-09-08)
+- Extended `examples/dual_playfield_demo.has` with the same 0->-15->0 fine-scroll bounce, but
+  scoped to PF1 only (the "figures" - nested-rectangle picture frame + circle + stripe), leaving
+  PF2 (the flying BOB) untouched - exactly the mode-3 per-playfield-nibble use case
+  `ScrollHorizontalScreen` was designed for (`SetActivePlayfield(1)` before the call; the
+  function only updates the nibble owned by whichever playfield is currently active, via
+  `gfx_bplcon1_shadow` read/modify/write, and PF2's nibble is untouched automatically).
+- Style choice: unlike `scroll_demo.has` (bss globals + a dedicated `next_hscroll_offset()`
+  proc, needed because multiple procs shared that state), this file already keeps ALL per-frame
+  animation state (`box_x/y`, `dx/dy`, `trail1/2_x/y`) as plain LOCALS inside `main()` with the
+  bounce-clamp logic inlined directly in the loop - matched that existing convention instead
+  (local `hscroll_pos`/`hscroll_dir` with initializers, inline `if`/`if` clamp block, no new
+  proc, no bss globals, no separate "px" temp var - passed `hscroll_pos` straight into the call).
+  Lesson: prefer matching a FILE's own existing state-management convention over copying a
+  pattern from a different example, even for the "same" feature.
+- Timing: this file's loop only calls `WaitVBlank()` once (right before the final box
+  redraw+flip), unlike `scroll_demo.has` which calls it at the top of the loop - placed the
+  `SetActivePlayfield(1)`/`ScrollHorizontalScreen(hscroll_pos)` pair immediately after THIS
+  file's own `WaitVBlank()` call (before `SwapScreen()`/`redraw_box()`), preserving the
+  "write live hardware register as early as possible after vblank" principle for wherever a
+  given file's vblank wait actually sits, rather than assuming a fixed loop shape.
+- Verified: `python -m hasc.cli --cpu {68000,68020}` + `vasmm68k_mot -Fhunk -m{68000,68020}`
+  clean (pre-existing unused-extern warnings for `Show`/`LINE`/`SetPixel` are unrelated,
+  present before this change too); full manual link (per this file's own documented BOB-asset
+  steps, `scripts/build_example.sh` doesn't know about per-example generated assets) produced
+  `build/dual_playfield_demo.exe` cleanly. `pytest tests -q` unchanged at 711 passed/1 skipped.
+
+## dual_playfield_demo.has: widening the bouncing BOB's Y range required moving the stripe, not
+## just changing a bound (2026-09-08, same day)
+- User: box only reached screen center vertically (`BOX_MIN_Y=126`) before bouncing back; wanted
+  it to reach the top edge. `BOX_MIN_Y` used to be artificially high specifically to stay below
+  the PF1 stripe band (`STRIPE_Y0/Y1`, originally 118-125) - the ORIGINAL design deliberately
+  kept the box's whole path below the stripe so its cached-background save/restore
+  (`GetBobBackground`/`PasteBackground`) would never restore a stale (already-scrolled-past)
+  patch of the stripe's continuously-scrolling pixels.
+- Simply lowering `BOX_MIN_Y` (e.g. to 24, matching the file's existing 24px screen-edge-margin
+  convention already used for `BOX_MIN_X`) would make the box's full path cross straight through
+  the stripe band, reintroducing exactly the staleness bug the original bound was designed to
+  avoid - now as a real recurring artifact (small mis-scrolled patches "stamped" into the stripe
+  every time the box transits, which then get carried along by the ongoing per-frame `Scroll()`
+  instead of self-correcting, since `Scroll()` just shifts whatever pixel values already exist).
+  **Fix: relocate the stripe (not just widen the box's range)** - moved `STRIPE_Y0/STRIPE_Y1`
+  from 118-125 down to 241-248 (below `BOX_MAX_Y`), so the box's now-full-height path (24-231)
+  and the stripe never overlap at all, preserving the original no-overlap invariant while still
+  satisfying "reach the top edge".
+- **BOB position anchor confirmed**: `PasteBob(handle, x, y, mode)` treats `(x,y)` as the
+  TOP-LEFT corner (`lib/bob.s` `DrawBob`/`DrawBobWithMask` use x/y directly as a blit-destination
+  origin, no centering math) - so a box at `y=BOX_MAX_Y` with `height=H` (read from the BOB
+  runtime struct, `dpf_bob_dual_playfield_bob` has height=8) occupies rows
+  `BOX_MAX_Y .. BOX_MAX_Y+H-1`, NOT centered on `BOX_MAX_Y`. Getting the stripe's clearance gap
+  right required accounting for this (`241 - (231+8-1) = 3px` clear, not the naive
+  `241-231=10px` you'd get from ignoring the BOB's own height) - always add the sprite/BOB's
+  height when computing "does this Y range touch that Y range" for a top-left-anchored blit.
+- Only the two `const` values changed (`STRIPE_Y0`/`STRIPE_Y1`) plus `BOX_MIN_Y` - the
+  stripe-drawing loop in `draw_background()` and the `Scroll()` calls in the main loop both
+  already reference the const names (not hardcoded numbers), so relocating the stripe required
+  no other code changes; same parameterized-const pattern paid off here as it did for the
+  `HBOUNCE_RANGE` addition earlier this session.
+- Verified: `python -m hasc.cli --cpu {68000,68020}` clean, `vasmm68k_mot -Fhunk` both targets
+  clean (same pre-existing unused-extern warnings, unrelated), full manual link produced
+  `build/dual_playfield_demo.exe`, `pytest tests -q` unchanged (711 passed/1 skipped). As with
+  the ScrollHorizontalScreen fixes above, the actual on-screen visual result (does the box now
+  visibly reach the top, does the relocated stripe look right) is NOT verified - no emulator in
+  this sandbox; only static/logical correctness and the known-invariant (box/stripe non-overlap)
+  are confirmed.
+
+## Follow-up: user reported "no rectangle strip moving at all" after the above relocation
+## (2026-09-08, same day)
+- Investigated whether the stripe code had actually been removed/broken: re-read the file
+  (`draw_background()`'s stripe-drawing loop and the main loop's two `Scroll()` calls both still
+  present, still referencing `STRIPE_Y0`/`STRIPE_Y1`/`STRIPE_WIDTH`/`STRIPE_HEIGHT`) and
+  recompiled to inspect the actual generated assembly - confirmed `jsr Scroll` (x2, bracketed by
+  `SwapScreen`) and the correct `move.l #216,-(a7)` / `move.l #223,-(a7)` immediates were
+  genuinely emitted. Also re-checked `Scroll`'s own dual-playfield validation path
+  (`.scroll_h_dualpf_pixel` in `lib/graphics.s`) and `_gfx_can_plot`/`RECTANGLE`/`LINE`'s
+  clipping (`cmp.l #256,d1` bound) - nothing rejects or silently no-ops Y values in the
+  216-248 range. **Conclusion: the code was not removed and is not logically broken** - so the
+  reported symptom is a real/perceived VISIBILITY problem, not a code-removal or codegen bug.
+- **Root cause (most likely)**: the previous fix (see entry above) squeezed the relocated stripe
+  into a cramped ~13px gap between the box's max reach (`BOX_MAX_Y=231` + 8px BOB height = 238)
+  and the picture frame's bottom border (251) - only ~3px clearance on each side. Parked right
+  against the frame's own border line, in the least-attention-grabbing corner of the screen, an
+  8px scrolling band (itself only THIN OUTLINE squares, since `RECTANGLE` draws borders only,
+  not fills - confirmed pre-existing, unrelated to this session's edits) is very easy to miss
+  entirely, especially compared to its original prominent, roomy position at y=118-125 (near
+  vertical center).
+- **Fix**: trimmed `BOX_MAX_Y` from 231 to 200 (box footprint now reaches ~208, still a huge
+  improvement over the ORIGINAL 126-231 range and still reaches near the top via unchanged
+  `BOX_MIN_Y=24`) and moved the stripe to `STRIPE_Y0/Y1 = 216/223` - now with a comfortable ~9px
+  gap above (from the box's footprint) and ~28px gap below (to the frame border), instead of a
+  cramped ~3px squeeze on both sides. Trading a modest amount of the box's bottom-reach (not
+  something the user complained about) for a clearly-separated, more visible stripe was judged
+  the better trade-off over trying to preserve the full BOX_MAX_Y=231 reach.
+- Honesty check included in the response to the user: explicitly said the diagnosis is a
+  best-effort static one (verified codegen is correct/unchanged in behavior, only the position
+  changed) since there's no emulator here to visually confirm the stripe is now clearly moving -
+  invited a follow-up report if it's still not visible, which would point at a genuinely
+  different runtime cause instead of just cramped positioning.
+- Tooling note: `grep_search` returned suspiciously empty results for strings that DEFINITELY
+  existed in the just-written build output (`jsr Scroll`, `#216`, `#223`, `#241`) in this
+  session, while `read_file` on the same path immediately showed them correctly - treat a
+  surprising all-empty `grep_search` result on a freshly-written build artifact as suspect and
+  cross-check with a direct `read_file` before concluding "the code isn't there" (don't let a
+  flaky search result drive a wrong diagnosis).
+- Verified again: full recompile+vasm (both CPU targets, clean) + full manual link
+  (`build/dual_playfield_demo.exe`) + `pytest tests -q` (711 passed/1 skipped, unchanged).
+
+## Follow-up 2: user actually wanted the stripe at screen center, not just "visible"
+## (2026-09-08, same day)
+- After confirming the stripe was genuinely visible (just poorly positioned near the bottom
+  border), user's real ask was simpler than assumed: move it to the screen center (this is the
+  stripe's ORIGINAL pre-session position, ~118-125, which the box's extended range had displaced
+  it away from). Re-centered precisely on the 256-line screen (center row 127.5): `STRIPE_Y0/Y1
+  = 124/131`.
+- **Deliberately did NOT also shrink `BOX_MIN_Y`/`BOX_MAX_Y` to dodge this new center position**
+  - center (124-131) sits inside almost any usable box range by definition, so avoiding it
+    entirely would gut the box's travel range back toward the original narrow problem. Left
+    `BOX_MIN_Y=24`/`BOX_MAX_Y=200` unchanged; the box's path now crosses the centered stripe
+    band every cycle. Documented (in-code comment, one line) that this can briefly show a
+    couple of already-scrolled-past stripe pixels via the box's cached-background restore -
+    accepted as a minor, disclosed trade-off per explicit user direction, not silently ignored.
+  - Lesson: once "keep the box's path and the stripe non-overlapping" and "put the stripe at
+    the screen center" become mutually exclusive (center is generally reachable from any
+    reasonably-sized bounce range), stop trying to satisfy both with clever positioning -
+    follow the user's explicit, latest instruction and clearly flag the known trade-off in one
+    line, rather than re-litigating the earlier invariant against their direct request.
+- Verified: recompiled both CPU targets (confirmed via direct `read_file` of the generated .s,
+  not `grep_search` - see the tooling-flakiness note in the previous entry - showing
+  `move.l #124,-(a7)` / `move.l #131,-(a7)` at the `Scroll()` call sites), vasm clean both
+  targets, full manual link produced `build/dual_playfield_demo.exe`, `pytest tests -q`
+  unchanged (711 passed/1 skipped).</newString>
 </invoke>
 

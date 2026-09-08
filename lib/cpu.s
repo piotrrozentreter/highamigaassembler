@@ -14,6 +14,7 @@ EXECBASE_PTR    EQU $0004
 EB_ATTNFLAGS    EQU $0128
 
     SECTION cpu_code,CODE
+    CNOP 0,4
 
     XDEF GetCPUType
 

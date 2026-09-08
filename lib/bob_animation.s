@@ -34,6 +34,7 @@ ANIM_PLAYING        EQU 0
 ANIM_LOOPING        EQU 1
 
     SECTION bob_animation_code,CODE
+    CNOP 0,4
 
 ; -----------------------------------------------------------------------------
 ; Function: CreateBobAnimation

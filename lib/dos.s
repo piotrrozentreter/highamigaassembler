@@ -30,6 +30,7 @@
     include "exec_lib.i"
 
     SECTION dos_data,DATA
+    CNOP 0,4
 
 DOS_LVO_OUTPUT      EQU -60
 DOS_LVO_WRITE        EQU -48
@@ -48,6 +49,7 @@ dos_num_buffer:
     ds.b 16
 
     SECTION dos_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API

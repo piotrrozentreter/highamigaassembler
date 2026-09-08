@@ -305,13 +305,47 @@ proc main() -> int {
 }
 ```
 
+## ScrollHorizontalScreen (Hardware Fine Scroll)
+
+`ScrollHorizontalScreen` is a separate, lightweight function that sets the OCS/ECS hardware
+fine-scroll register (`BPLCON1`) directly, instead of moving pixel data with the CPU/Blitter like
+`Scroll` does. It targets the *active playfield* (whichever `SetActivePlayfield` last selected, in
+mode 3) and only covers the sub-16-pixel scroll phase.
+
+```has
+extern func ScrollHorizontalScreen(px: int) -> int;
+```
+
+- **px**: signed pixel offset, `-15..15`. `px >= 0` scrolls right by `px` pixels; `px < 0` scrolls
+  left by `-px` pixels. Values outside this range return `-1` without writing any register.
+- **Supported modes:** 0 (lores), 1 (hires), and 3 (dual playfield, active playfield only). HAM6
+  (mode 2) is rejected, same as `Scroll`.
+- **Dual playfield (mode 3):** only the active playfield's `BPLCON1` nibble is updated; the
+  sibling playfield's fine-scroll value is preserved untouched.
+- **Scope:** this only sets the hardware delay - it does **not** move bitplane pointers or touch
+  `BPL1MOD`/`BPL2MOD`. Continuous smooth scrolling beyond one 16-pixel cell still requires the
+  caller to step its own bitplane pointers, exactly like the classic OCS scrolling technique.
+- Returns `0` on success, `-1` on error (`px` out of range or HAM6 mode).
+
+```has
+call SetGraphicsMode(3);
+call SetActivePlayfield(1);
+call ScrollHorizontalScreen(5);    // Playfield 1 fine-scrolled right by 5px
+call SetActivePlayfield(2);
+call ScrollHorizontalScreen(-3);   // Playfield 2 independently scrolled left by 3px
+```
+
+See [examples/scroll_horizontal_screen_test.has](../examples/scroll_horizontal_screen_test.has) for
+a compile-time test covering single- and dual-playfield modes plus the range/HAM6 error cases.
+
 ## Future Enhancements
 
 The `Scroll` function is designed to support future expansion:
 
 - **Blitter acceleration** for horizontal scrolling
 - **Configurable fill color** for newly exposed areas
-- **Sub-pixel scrolling** for smoother animation
+- **Sub-pixel scrolling** for smoother animation of `Scroll`'s CPU/Blitter copies (hardware
+  sub-16-pixel scrolling is already available separately via `ScrollHorizontalScreen` above)
 - **Clipping and masking** for complex scroll regions
 
 Until these features are implemented, the function provides stable, correct vertical scrolling for games, animations, and UI applications on the Amiga platform.
@@ -322,3 +356,4 @@ Until these features are implemented, the function provides stable, correct vert
 - [SCROLL_FUNCTION_DESIGN.md](SCROLL_FUNCTION_DESIGN.md) – Technical design and implementation details
 - [examples/scroll_comprehensive_test.has](../examples/scroll_comprehensive_test.has) – Comprehensive test suite
 - [examples/scroll_function_demo.has](../examples/scroll_function_demo.has) – Usage examples and helper functions
+- [examples/scroll_horizontal_screen_test.has](../examples/scroll_horizontal_screen_test.has) – `ScrollHorizontalScreen` compile-time test

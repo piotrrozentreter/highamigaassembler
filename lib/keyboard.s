@@ -9,6 +9,7 @@
     include "hardware.i"
 
             SECTION    keyboard_data,DATA
+            CNOP 0,4
 
 ;****************************************************************
 ; VARIABLES

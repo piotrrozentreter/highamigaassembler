@@ -38,6 +38,7 @@
     include "hardware.i"
 
     SECTION gui_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API
@@ -1854,6 +1855,7 @@ GetGuiMouseY:
 ; Amiga bit numbering: bit 7 = leftmost pixel, bit 0 = rightmost pixel.
 ; ============================================================
     SECTION gui_data,DATA
+    CNOP 0,4
 
 gui_lmask:
     dc.b $FF,$7F,$3F,$1F,$0F,$07,$03,$01

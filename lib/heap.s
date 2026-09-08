@@ -38,6 +38,7 @@ heap_start:
 heap_end:
 
     SECTION heap,code
+    CNOP 0,4
 
 HeapInit:
     movem.l a0-a1/d0,-(a7)

@@ -23,10 +23,12 @@ pr_MsgPort  EQU $5c                       ; Process.pr_MsgPort
 pr_CLI      EQU $ac                       ; Process.pr_CLI (0 => started from Workbench)
 
     SECTION wbstartup_data,DATA
+    CNOP 0,4
 
 wb_msg      dc.l 0                        ; WBStartupMessage, 0 when started from CLI
 
     SECTION code,CODE
+    CNOP 0,4
 
 ;----------------------------------------------------------------
 ; Function: WBStartup

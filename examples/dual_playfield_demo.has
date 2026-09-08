@@ -6,7 +6,11 @@
 //   - Playfield 1 (background): a static picture-frame pattern of nested
 //     rectangles plus a circle, drawn once with SetActivePlayfield(1), plus
 //     a thin striped band that Scroll()s left by 1px every frame, entirely
-//     independent of anything happening on PF2.
+//     independent of anything happening on PF2. The whole PF1 layer (frame,
+//     circle, and stripe together) also fine-scrolls left one pixel per
+//     frame up to HBOUNCE_RANGE (15) pixels and back, forever, via
+//     ScrollHorizontalScreen(1) - a live BPLCON1 register bounce that only
+//     touches PF1's own nibble, leaving PF2 (the bob) completely still.
 //   - Playfield 2 (foreground): a HUD caption/footer plus a small BOB
 //     (CreateBob/PasteBob) that bounces around the screen, drawn with
 //     SetActivePlayfield(2). Pressing SPACE calls ClearPlayfield(2) to wipe
@@ -46,15 +50,23 @@ const KEY_SPACE = 64;
 
 const BOX_MIN_X = 24;
 const BOX_MAX_X = 287;
-// Kept clear of the PF1 stripe (below) so the box's 2-frame-old cached
-// background never goes stale from the stripe's own every-frame scroll.
-const BOX_MIN_Y = 126;
-const BOX_MAX_Y = 231;
+// Same 24px screen-edge margin as X on top, reaching near the top edge.
+const BOX_MIN_Y = 24;
+const BOX_MAX_Y = 200;
 
-const STRIPE_Y0 = 118;
-const STRIPE_Y1 = 125;
+// Centered on the screen (256 lines, center row 127.5). The box's path now
+// crosses this band every cycle - restoring the box's 2-frame-old cached
+// background there can briefly show a couple of already-scrolled-past
+// stripe pixels, accepted so the stripe sits at the requested center
+// position rather than squeezed into a corner.
+const STRIPE_Y0 = 124;
+const STRIPE_Y1 = 131;
 const STRIPE_HEIGHT = STRIPE_Y1 - STRIPE_Y0 + 1;
 const STRIPE_WIDTH = 8;
+
+// Hardware fine-scroll (ScrollHorizontalScreen) bounce range - its px
+// argument only accepts -15..15, so this is also its maximum.
+const HBOUNCE_RANGE = 15;
 
 code main:
     extern var fonts: byte;
@@ -69,6 +81,7 @@ code main:
 
     extern func SetGraphicsMode(mode: int) -> int;
     extern func SetActivePlayfield(playfield: int) -> int;
+    extern func ScrollHorizontalScreen(px: int) -> int;
     extern func ClearPlayfield(playfield: int) -> int;
     extern func SetColor(id: int, col: int) -> int;
     extern func SetFont(ptr: int) -> int;
@@ -178,6 +191,10 @@ code main:
         var trail1_y: int = 128;
         var trail2_x: int = 160;
         var trail2_y: int = 128;
+        // PF1-only whole-playfield fine-scroll bounce state (see the main
+        // loop below) - starts at 0 and moves left first.
+        var hscroll_pos: int = 0;
+        var hscroll_dir: int = -1;
 
         call DebugClear();
         call DebugSetEnabled(1);
@@ -277,11 +294,29 @@ code main:
                 dy = -dy;
             }
 
+            // PF1-only whole-playfield fine-scroll bounce: left one pixel
+            // per frame to HBOUNCE_RANGE, then back to 0, forever - PF2 (the
+            // bob) is untouched, since ScrollHorizontalScreen only updates
+            // the nibble owned by whichever playfield is currently active.
+            hscroll_pos = hscroll_pos + hscroll_dir;
+            if (hscroll_pos <= -HBOUNCE_RANGE) {
+                hscroll_pos = -HBOUNCE_RANGE;
+                hscroll_dir = 1;
+            }
+            if (hscroll_pos >= 0) {
+                hscroll_pos = 0;
+                hscroll_dir = -1;
+            }
+
             // Draw into the off-screen buffer only, then flip - never touch
             // the buffer currently on screen. (The earlier attempt drew into
             // BOTH buffers every frame, including the one still on screen
             // before the flip - that's what caused the fragmented rectangle.)
             call WaitVBlank();
+            // BPLCON1 is live (not copper/double-buffered) - write it right
+            // after the vblank wait, targeting PF1 only.
+            call SetActivePlayfield(1);
+            call ScrollHorizontalScreen(hscroll_pos);
             call SwapScreen();
             call redraw_box(trail2_x, trail2_y, new_x, new_y, bob_id);
             call UpdateCopperList();

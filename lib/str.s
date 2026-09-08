@@ -17,6 +17,7 @@
 ;   ItoaAlloc(d0=value) -> d0=allocated string or 0 if no memory (must free with HeapFree)
 
     SECTION str_code,code
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API
@@ -32,6 +33,7 @@
     XREF HeapAlloc
 
     SECTION str_code,code
+    CNOP 0,4
 
 ; -----------------------------------------------------------------------------
 ; Function: StrLen

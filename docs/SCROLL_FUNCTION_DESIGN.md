@@ -425,3 +425,16 @@ extern func Scroll_Stack(x0: int, y0: int, x1: int, y1: int,
 ```
 
 **Benefit**: ~37% less instruction overhead + zero stack manipulation.
+
+---
+
+## Appendix: ScrollHorizontalScreen Uses a Different (Stack) Convention
+
+`ScrollHorizontalScreen(px: int) -> int` is a separate hardware-register function (sets `BPLCON1`
+fine-scroll directly) that intentionally does **not** follow this document's register-based `__reg`
+design - it takes its single `px` argument on the stack (`8(a6)`), matching the plain calling
+convention used by `SetActivePlayfield`/`ClearPlayfield`/`SetFont` rather than `Scroll`'s 7-register
+ABI. A single-argument function has no register-pressure motivation for a custom ABI, so it follows
+the library's default convention instead. See
+[SCROLL_FUNCTION.md](SCROLL_FUNCTION.md#scrollhorizontalscreen-hardware-fine-scroll) for its full
+behavior.

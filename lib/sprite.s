@@ -54,6 +54,7 @@ MAX_SPRITE_SIZE EQU 512  ; Max bytes per sprite (32 lines * 2 planes * 2 words +
 
 
     SECTION sprites_struct,DATA_C
+    CNOP 0,4
 
 ; Empty sprite data for unused or hidden slots. Sprite DMA must always point at
 ; chip RAM, even for invisible sprites.
@@ -70,6 +71,7 @@ sprite_chip_data:
     ENDR
 
 	SECTION sprite_data, DATA
+    CNOP 0,4
 	
 ; Per-sprite metadata table (16 bytes each):
 ; Offset 0: dc.l data_ptr (pointer to this sprite's chip RAM slot)
@@ -98,6 +100,7 @@ sprite_palettes:
     ENDR
 
     SECTION sprite_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API

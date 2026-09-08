@@ -1,0 +1,75 @@
+// ScrollHorizontalScreen - hardware OCS/ECS fine horizontal scroll (BPLCON1)
+//
+// Demonstrates the active-playfield hardware fine-scroll register write:
+// px in [-15..15], px>=0 scrolls right, px<0 scrolls left. This only sets
+// the sub-16-pixel delay - it does not move bitplane pointers, so a caller
+// doing continuous smooth scrolling still steps its own pointers by whole
+// words once px wraps past +-15.
+//
+// Build: python3 -m hasc.cli examples/scroll_horizontal_screen_test.has -o build/scroll_horizontal_screen_test.s
+
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func SetActivePlayfield(playfield: int) -> int;
+    extern func ScrollHorizontalScreen(px: int) -> int;
+
+    public main;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        var result: int;
+
+        // Mode 0 (lores, single playfield): direct fine-scroll writes.
+        result = SetGraphicsMode(0);
+        if (result != 0) {
+            return -1;
+        }
+        result = ScrollHorizontalScreen(5);   // expect: 0 (scroll right 5px)
+        if (result != 0) {
+            return -1;
+        }
+        result = ScrollHorizontalScreen(-5);  // expect: 0 (scroll left 5px)
+        if (result != 0) {
+            return -1;
+        }
+
+        // Mode 3 (dual playfield): each playfield's fine scroll is independent.
+        result = SetGraphicsMode(3);
+        if (result != 0) {
+            return -1;
+        }
+        call SetActivePlayfield(1);
+        result = ScrollHorizontalScreen(15);  // expect: 0 (PF1 at max right offset)
+        if (result != 0) {
+            return -1;
+        }
+        call SetActivePlayfield(2);
+        result = ScrollHorizontalScreen(-15); // expect: 0 (PF2 independent of PF1)
+        if (result != 0) {
+            return -1;
+        }
+
+        // Edge cases: out-of-range px and HAM6 (mode 2) must both fail.
+        result = ScrollHorizontalScreen(16);  // expect: -1 (out of range)
+        if (result != -1) {
+            return -1;
+        }
+        result = ScrollHorizontalScreen(-16); // expect: -1 (out of range)
+        if (result != -1) {
+            return -1;
+        }
+        result = SetGraphicsMode(2);
+        if (result != 0) {
+            return -1;
+        }
+        result = ScrollHorizontalScreen(1);   // expect: -1 (HAM6 unsupported)
+        if (result != -1) {
+            return -1;
+        }
+
+        return 0;
+    }

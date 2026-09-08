@@ -58,6 +58,7 @@
 ; =============================================================================
 
     SECTION gui_intuition_data,DATA
+    CNOP 0,4
 
 gui_int_name:
     dc.b "intuition.library",0
@@ -110,6 +111,7 @@ gui_evt_my:
 ; =============================================================================
 
     SECTION gui_intuition_bss,BSS
+    CNOP 0,4
 
 gui_nw:
     ds.b NW_SIZEOF
@@ -147,6 +149,7 @@ gui_list_it:
 ; =============================================================================
 
     SECTION gui_intuition_code,CODE
+    CNOP 0,4
 
     XDEF GuiInit
     XDEF GuiShutdown

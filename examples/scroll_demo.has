@@ -8,10 +8,14 @@
 //      (left, then right, alternating), fed one font pixel-column at a
 //      time as each Scroll() call exposes a fresh column at the strip's
 //      leading edge (horizontal Scroll()).
+//   3) The whole screen (background plus both effects above) fine-scrolls
+//      left one pixel per frame up to HBOUNCE_RANGE (15) pixels, then back
+//      to 0, forever - a live BPLCON1 register bounce via
+//      ScrollHorizontalScreen(), independent of the Scroll() effects above.
 //
-// Expected behavior: both regions animate continuously and simultaneously
-// until ESC is pressed, then the program returns to DOS (the debug log
-// flushes to the DOS window after ReleaseSystem, as before).
+// Expected behavior: all three effects animate continuously and
+// simultaneously until ESC is pressed, then the program returns to DOS (the
+// debug log flushes to the DOS window after ReleaseSystem, as before).
 // Compile: python3 -m hasc.cli examples/scroll_demo.has -o /tmp/scroll_demo.s
 // Assemble: vasmm68k_mot -Fhunkexe -o /tmp/scroll_demo.o /tmp/scroll_demo.s
 
@@ -29,6 +33,10 @@ const DIR_TICK_COL = 28;
 const VTEXT_Y0 = 96;
 const VTEXT_Y1 = 111;
 const VBOUNCE_RANGE = 8;
+
+// Hardware fine-scroll (ScrollHorizontalScreen) bounce range - its px
+// argument only accepts -15..15, so this is also its maximum.
+const HBOUNCE_RANGE = 15;
 
 code main:
     extern var fonts: byte;
@@ -52,6 +60,7 @@ code main:
     extern func WaitVBlank() -> int;
     extern func InitKeyboard() -> void;
     extern func GetKey() -> byte;
+    extern func ScrollHorizontalScreen(px: int) -> int;
     extern func Scroll(__reg(d0) x0: int, __reg(d1) y0: int, __reg(d2) x1: int, 
                        __reg(d3) y1: int, __reg(d4) hor: int, __reg(d5) vert: int, 
                        __reg(d6) pixels: int) -> int;
@@ -79,6 +88,24 @@ code main:
             vbounce_dir = -vbounce_dir;
         }
         return d;
+    }
+
+    // Advances the shared whole-screen hardware fine-scroll offset (applied
+    // via ScrollHorizontalScreen, a live BPLCON1 write - not Scroll()) and
+    // returns the value to write this frame: bounces between 0 and
+    // -HBOUNCE_RANGE, moving the entire display left one pixel per frame
+    // until it reaches -HBOUNCE_RANGE, then back right to 0, forever.
+    proc next_hscroll_offset() -> int {
+        hscroll_pos = hscroll_pos + hscroll_dir;
+        if (hscroll_pos <= -HBOUNCE_RANGE) {
+            hscroll_pos = -HBOUNCE_RANGE;
+            hscroll_dir = 1;
+        }
+        if (hscroll_pos >= 0) {
+            hscroll_pos = 0;
+            hscroll_dir = -1;
+        }
+        return hscroll_pos;
     }
 
     proc draw_static_screen() -> void {
@@ -181,6 +208,7 @@ code main:
         var vbounce_step: int;
         var ticker_edge_x: int;
         var ticker_bits: int;
+        var hscroll_px: int;
 
         call DebugClear();
         call DebugSetEnabled(1);
@@ -207,6 +235,10 @@ code main:
         // for good instead of holding it for the reverse leg.
         vbounce_dir = 1;
         vbounce_count = 0;
+        // Whole-screen hardware fine-scroll bounce: starts at 0 and moves
+        // left first, same rationale as vbounce_dir above.
+        hscroll_pos = 0;
+        hscroll_dir = -1;
 
         // Build identical initial frames in both buffers.
         call draw_static_screen();
@@ -220,6 +252,13 @@ code main:
 
         while (key != KEY_ESC) {
             call WaitVBlank();
+            // BPLCON1 is a live hardware register (not copper/double-
+            // buffered) - write it as early as possible after the vblank
+            // wait so the new fine-scroll value applies to the whole frame
+            // about to be displayed, not just whatever scanlines remain once
+            // later, heavier work (Scroll/SwapScreen/redraws below) finishes.
+            hscroll_px = next_hscroll_offset();
+            call ScrollHorizontalScreen(hscroll_px);
             call Show();
             call SwapScreen();
             key = GetKey();
@@ -288,3 +327,5 @@ bss scroll_demo_state:
     phase_timer.l: 1
     vbounce_dir.l: 1
     vbounce_count.l: 1
+    hscroll_pos.l: 1
+    hscroll_dir.l: 1

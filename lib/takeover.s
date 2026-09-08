@@ -15,6 +15,7 @@ DMASET      EQU %1000001111000000
 
   include "hardware.i"
   SECTION takeover_data,DATA
+  CNOP 0,4
 
 ;************************************************************************
 ; VARIABLES
@@ -33,6 +34,7 @@ old_int3      dc.l       0                    ; saved level-3 autovector (VERTB/
 old_int4      dc.l       0
 
     SECTION code,CODE
+    CNOP 0,4
 
 ;****************************************************************
 ; Public API

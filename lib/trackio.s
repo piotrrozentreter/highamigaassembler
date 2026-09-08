@@ -44,6 +44,7 @@
     include "hardware.i"
 
     SECTION trackio_data,DATA
+    CNOP 0,4
 
 TRACKIO_MAGIC            EQU $48415354
 TRACKIO_VERSION          EQU 1
@@ -73,6 +74,7 @@ trackio_cur_cyl:         dc.b 0
                          even
 
     SECTION trackio_code,CODE
+    CNOP 0,4
 
     XDEF TrackIoInit
     XDEF TrackIoDone
@@ -706,6 +708,7 @@ TrackIo_DecLong:
     rts
 
     SECTION trackio_bss,BSS
+    CNOP 0,4
 
 trackio_encoded:         ds.b 12960
 trackio_decoded:         ds.b 5940
