@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.9.7
+**Version:** 0.9.8
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -70,17 +70,32 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
    - Python 3.8 or higher
    - `vasm` and `vlink` (for assembly and linking) - optional but recommended
 
-2. **Install Python dependencies**:
+2. **Install HAS** (recommended: creates a `hasc` command on your PATH):
 
-   ```bash
-   pip install -r requirements.txt
+  ```powershell
+  py -m pip install --user pipx
+  py -m pipx ensurepath
    ```
+
+  Open a new terminal, then install the wheel attached to the required GitHub Release:
+
+  ```powershell
+  pipx install https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+  ```
+
+  Replace `X.Y.Z` with the chosen release version. To install from a local checkout while
+  developing, use `py -m pip install -e .` instead.
 
 3. **Verify installation**:
 
-   ```bash
-   python -m hasc.cli --help
+  ```powershell
+  hasc --help
    ```
+
+4. **Install the optional Amiga toolchain separately** when you need to produce an executable.
+  HAS compiles `.has` files to `.s` assembly; it does not include, download, or redistribute
+  `vasm` or `vlink`. Download those tools separately and add their directory to `PATH`, then
+  verify them with `vasmm68k_mot -h` and `vlink -h`.
 
 ### Your First Program
 
@@ -104,7 +119,7 @@ code main:
 **Compile to assembly**:
 
 ```bash
-python -m hasc.cli hello.has -o hello.s
+hasc hello.has -o hello.s
 ```
 
 68000 is the default CPU target. Select the opt-in 68020 target when generating
@@ -112,7 +127,7 @@ scaled indexed addressing for dynamic array, typed-pointer, struct-array, and
 two-dimensional accesses:
 
 ```bash
-python -m hasc.cli hello.has --cpu 68020 -o hello-68020.s
+hasc hello.has --cpu 68020 -o hello-68020.s
 vasmm68k_mot -m68020 -Fhunkexe -o hello-68020.o hello-68020.s
 ```
 
@@ -621,7 +636,7 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.9.7** - Active Development
+**Version 0.9.8** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 

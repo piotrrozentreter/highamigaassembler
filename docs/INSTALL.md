@@ -8,23 +8,38 @@
 
 ## Installation Steps
 
-### 1. Install Python Dependencies
+### 1. Install HAS
 
-Navigate to the HAS directory and install required packages:
+Install [pipx](https://pipx.pypa.io/) once. It installs the command-line compiler in an isolated
+environment and adds its command directory to your user PATH:
 
-```bash
-pip install -r requirements.txt
+```powershell
+py -m pip install --user pipx
+py -m pipx ensurepath
 ```
 
-This will install:
-- `lark-parser` - For parsing HAS source files
+Open a new terminal, then install the wheel attached to the selected GitHub Release:
+
+```powershell
+pipx install https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+```
+
+Replace `X.Y.Z` with the release version. To upgrade, run `pipx upgrade hasc`; to remove HAS, run
+`pipx uninstall hasc`.
+
+As an alternative when pipx is unavailable:
+
+```powershell
+py -m pip install --user https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+```
 
 ### 2. Verify Installation
 
 Test the compiler installation:
 
-```bash
-python -m hasc.cli --help
+```powershell
+hasc --help
+hasc --version
 ```
 
 You should see the HAS compiler help message.
@@ -34,14 +49,43 @@ You should see the HAS compiler help message.
 Compile a simple example:
 
 ```bash
-python -m hasc.cli examples/add.has -o test.s
+hasc examples/add.has -o test.s
 ```
 
 If successful, you'll have a `test.s` assembly file.
 
-### 4. (Optional) Install vasm and vlink
+### Packaged Resources
 
-To create executable Amiga programs, you need the vasm assembler and vlink linker:
+The release wheel also includes the HAS assembly libraries, example programs, asset tools, and
+Linux build scripts. Their installation directory depends on the Python environment used by pipx
+or pip. For a pipx installation, locate the package with:
+
+```bash
+pipx runpip hasc show high-amiga-assembler
+```
+
+The resources are installed below that environment's `share/high-amiga-assembler/` directory:
+`lib/`, `examples/`, `tools/`, `scripts/`, and `guicreator/`. Copy an example into a writable
+project directory before changing it. The included shell scripts are Linux-oriented; they require
+separately installed `vasm` and `vlink` when they assemble or link an executable.
+
+All packaged Python asset tools are available as `has-*` commands, for example:
+
+```bash
+has-bob-importer image.png 5 --outdir include
+has-sprite-importer sprite.png --outdir include
+has-tile-importer tiles.png --help
+has-gui-creator --help
+```
+
+Install HAS with its `tools` extra when a converter needs Pillow or amitools. The supplied shell
+scripts remain resource files only; they are not registered as commands. Musashi runtime files are
+not part of the release package.
+
+### 4. Install vasm and vlink separately to assemble and link
+
+HAS creates `.s` assembly files but does not package, install, download, or redistribute the vasm
+assembler or vlink linker. Download them separately, add their directory to `PATH`, and verify:
 
 #### Linux/macOS:
 
@@ -75,7 +119,7 @@ With vasm/vlink installed:
 
 ```bash
 # Compile HAS to assembly
-python -m hasc.cli examples/add.has -o add.s
+hasc examples/add.has -o add.s
 
 # Assemble and link
 ./scripts/build.sh add.s add.o add
@@ -149,6 +193,24 @@ pip install -r requirements.txt
 python -m hasc.cli examples/add.has -o /tmp/add.s
 python -m hasc.cli examples/shift_operators_demo.has -o /tmp/shift.s
 ```
+
+## Maintainer Release Checklist
+
+1. Update `hasc.__version__` and add a user-facing entry under `Unreleased` in
+    [CHANGELOG.md](CHANGELOG.md).
+2. Run `python -m pytest tests -q`, then compile a smoke example with both `--cpu 68000` and
+    `--cpu 68020`.
+3. On Linux, run `bash scripts/build_has_package.sh`. It builds the wheel and source distribution
+    outside the repository's `build/` directory, validates them with Twine, and writes them to
+    `dist/`. Pass an output directory as its first argument when needed.
+4. Install the produced wheel into a clean environment to verify `hasc --version` and a sample
+    compilation.
+5. Commit the release changes, create a matching tag such as `v0.9.8`, and push the tag. The
+    GitHub Release workflow verifies the tag/version match, rebuilds, tests, and attaches the
+    wheel and source distribution to the release.
+6. In a clean Windows terminal, install the attached wheel with pipx, verify `where hasc`, and
+    compile an example. Confirm that the release notes still state the separate `vasm`/`vlink`
+    requirement for assembly and linking.
 
 ## Quick Test
 

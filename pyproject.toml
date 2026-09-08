@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "high-amiga-assembler"
+dynamic = ["version"]
+description = "High Assembler compiler for Motorola 68000 Amiga development"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [
+    { name = "Piotr Rozentreter" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Topic :: Software Development :: Compilers",
+]
+dependencies = [
+    "lark>=1.1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+]
+tools = [
+    "amitools>=0.5.0",
+    "Pillow>=8.0",
+]
+
+[project.scripts]
+hasc = "hasc.cli:main"
+has-bob-importer = "hasc.tool_runner:bob_importer"
+has-bob-strip-importer = "hasc.tool_runner:bob_strip_importer"
+has-c64-font-converter = "hasc.tool_runner:c64_font_converter"
+has-c64-sprites-to-bobs = "hasc.tool_runner:c64_sprites_to_bobs"
+has-create-trackio-adf = "hasc.tool_runner:create_trackio_adf"
+has-frame-merger = "hasc.tool_runner:frame_merger"
+has-gif-splitter = "hasc.tool_runner:gif_splitter"
+has-ham6-gen = "hasc.tool_runner:ham6_gen"
+has-iff-importer = "hasc.tool_runner:iff_importer"
+has-q16-helper = "hasc.tool_runner:q16_helper"
+has-sprite-importer = "hasc.tool_runner:sprite_importer"
+has-sprite-strip-importer = "hasc.tool_runner:sprite_strip_importer"
+has-texturepacker-atlas-importer = "hasc.tool_runner:texturepacker_atlas_importer"
+has-tile-importer = "hasc.tool_runner:tile_importer"
+has-gui-creator = "guicreator.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/rozensoftware/highamigaassembler"
+Repository = "https://github.com/rozensoftware/highamigaassembler"
+
+[tool.setuptools.packages.find]
+include = ["hasc*", "guicreator*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "hasc.__version__" }

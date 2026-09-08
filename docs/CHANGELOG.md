@@ -4,7 +4,19 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-09-08
+
 ### Added
+
+- **Installable Python package and `hasc` command:** HAS can now be distributed as a standard
+  wheel (`high-amiga-assembler`) and installed from a GitHub Release with `pipx`, placing `hasc`
+  on the user's PATH. `python -m hasc` is also supported. The compiler package contains the HAS
+  compiler only: users must still download and configure `vasm` and `vlink` separately before
+  assembling or linking Amiga executables.
+  - All packaged Python asset tools are also available as `has-*` commands, and the GUI creator
+    is available as `has-gui-creator`. The `examples`, `guicreator`, `lib`, `scripts`, and `tools`
+    resource folders are included in release artifacts; shell scripts are not registered as commands
+    and Musashi runtime files are excluded.
 
 - **New function `ScrollHorizontalScreen(px: int) -> int` in `lib/graphics.s`:** sets the OCS/ECS
   hardware fine horizontal scroll register (`BPLCON1`) directly for the active playfield, instead

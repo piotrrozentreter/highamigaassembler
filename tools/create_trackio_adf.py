@@ -24,7 +24,7 @@ import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Set, Tuple
 
 ADF_SIZE = 901120
 SECTOR_SIZE = 512
@@ -42,7 +42,7 @@ class Asset:
     data: bytes
 
 
-def parse_asset(value: str) -> tuple[int, Path]:
+def parse_asset(value: str) -> Tuple[int, Path]:
     if ":" not in value:
         raise argparse.ArgumentTypeError(
             f"Invalid --asset '{value}'. Expected format: <id>:<path>"
@@ -64,7 +64,7 @@ def parse_asset(value: str) -> tuple[int, Path]:
 
 
 def load_assets(specs: List[str]) -> List[Asset]:
-    seen_ids: set[int] = set()
+    seen_ids: Set[int] = set()
     assets: List[Asset] = []
 
     for spec in specs:
