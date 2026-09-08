@@ -28,6 +28,7 @@ ECLOCK_PAL_HI   EQU 10          ; high word of the PAL E-clock (10<<16)+54019
 CHUNK_MS_MAX    EQU 90          ; max ms per CIA one-shot load (16-bit timer)
 
     SECTION timer_code,CODE
+    CNOP 0,4
 
     XDEF WaitMs
 

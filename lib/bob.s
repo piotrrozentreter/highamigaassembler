@@ -21,6 +21,7 @@ WAITBLIT:MACRO
 	ENDM
 
     SECTION bob_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API

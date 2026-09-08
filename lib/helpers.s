@@ -5,12 +5,14 @@
 ; =============================================================================
 
     SECTION helper_data,DATA
+    CNOP 0,4
 
 ; AMOS-compatible RNG seed
 rnd_seed:
     dc.l $1234ABCD
 
     SECTION code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API

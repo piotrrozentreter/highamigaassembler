@@ -26,6 +26,7 @@
 // negative value is never reinterpreted as a huge unsigned number.
 
 code main:
+    asm { jmp main }
     // Both operands unsigned -> unsigned multiply.
     proc u_mul(a: u32, b: u32) -> u32 {
         // expect (68020): "mulu.l" emitted, no muls.l
@@ -82,5 +83,3 @@ code main:
 
         return half + rest;
     }
-
-    asm { jmp main }

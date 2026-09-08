@@ -12,6 +12,7 @@
 // sequence, because `extb.l` is 68020-exclusive.
 
 code main:
+    asm { jmp main }
     proc byte_param_extend(v: byte) -> int {
         // expect (68020): "extb.l"
         // expect (68000): "ext.w" + "ext.l"
@@ -31,5 +32,3 @@ code main:
         result = byte_local_extend();
         return result;
     }
-
-    asm { jmp main }

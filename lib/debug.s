@@ -29,6 +29,7 @@
     include "exec_lib.i"
 
     SECTION debug_data,DATA
+    CNOP 0,4
 
 DEBUG_BUFFER_SIZE   EQU 4096
 DOS_LVO_WRITE       EQU -48
@@ -55,6 +56,7 @@ debug_tmp_line:
     ds.b 16
 
     SECTION debug_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API

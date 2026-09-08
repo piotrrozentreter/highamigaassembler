@@ -27,6 +27,7 @@ mouse_rbtn_prev      dc.w 0                 ; previous right mouse button state
 mouse_rbtn_pressed   dc.w 0                 ; right mouse button press edge
 mouse_rbtn_released  dc.w 0                 ; right mouse button release edge
             SECTION    code,CODE
+            CNOP 0,4
 
 ;****************************************************************
 ; Public API

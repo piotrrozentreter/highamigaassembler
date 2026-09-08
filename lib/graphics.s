@@ -28,6 +28,7 @@ WAITBLIT:MACRO
     ENDM
 
     SECTION graphics_code,CODE
+    CNOP 0,4
 
 ; =============================================================================
 ; Public API
@@ -3197,6 +3198,7 @@ Scroll:
     rts
 
     SECTION graphics_data,DATA
+    CNOP 0,4
 
 gfx_current_screen_ptr:
     dc.l 0  ; Current screen pointer
@@ -3236,6 +3238,7 @@ gfx_text_mode:
 ; uses generic section types; place these sections as data and adjust
 ; placement in the linker/loader if you need chip RAM allocation.
     SECTION copper,DATA_C
+    CNOP 0,4
 
 gfx_copperlist_lores:
     ifnd DISABLE_320x256
@@ -3528,6 +3531,7 @@ gfx_null_sprite:
 ; is set, so a disabled mode can no longer be selected at runtime and corrupt
 ; the shrunk buffer.
     SECTION screen,bss_c
+    CNOP 0,4
 
 gfx_screen1:
     ifnd DISABLE_320x256

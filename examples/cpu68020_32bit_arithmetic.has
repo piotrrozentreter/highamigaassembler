@@ -11,6 +11,7 @@
 // range on purpose, so this file only compiles successfully with --cpu 68020.
 
 code main:
+    asm { jmp main }
     proc scale_large(value: int) -> int {
         // expect (68020): "muls.l" emitted, no ext.l preamble, compiles cleanly
         // expect (68000): compile error - "outside signed 16-bit range"
@@ -34,5 +35,3 @@ code main:
         result = modulo_large(result);
         return result;
     }
-
-    asm { jmp main }
