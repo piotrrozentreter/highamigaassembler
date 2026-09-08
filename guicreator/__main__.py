@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 from . import has_export, hasmeta
 from .model import MetadataManager
@@ -59,7 +60,7 @@ def _validate(path: Path) -> int:
     return 1
 
 
-def _export(layout: Path, output: Path | None, preserve: bool) -> int:
+def _export(layout: Path, output: Optional[Path], preserve: bool) -> int:
     manager: MetadataManager = hasmeta.load(layout)
     problems = manager.validate()
     for problem in problems:

@@ -314,5 +314,5 @@ When implementing or using the Scroll function:
 ---
 
 **Last Updated**: 2026-09-06  
-**HAS Version**: 0.9.7  
+**HAS Version**: 0.9.8
 **Status**: Design Phase (Reference Implementation)

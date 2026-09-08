@@ -1,0 +1,13 @@
+include LICENSE
+include VERSION
+recursive-include lib *
+recursive-include tools *.py
+recursive-include scripts *.sh
+recursive-include scripts/tests *
+recursive-include examples *
+recursive-include guicreator *
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude *musashi*
+prune tools/musashi_runner
+prune examples/runtime_musashi

@@ -3,28 +3,13 @@ import sys
 import subprocess
 from datetime import datetime
 from collections import Counter
-from . import parser, codegen, validator
+import os
+from . import __version__, parser, codegen, validator
 from . import ast
 from . import reachability
 from .target import CpuTarget, TargetSpec
-import os
 from lark.exceptions import LarkError, UnexpectedInput, UnexpectedToken, UnexpectedCharacters
 
-_internal_version = "0.9.7"
-
-# Read version from VERSION file
-def _get_version():
-    try:
-        version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "VERSION")
-        with open(version_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("Version"):
-                    return line.split()[-1].strip()
-        return _internal_version
-    except:
-        return _internal_version
-
-__version__ = _get_version()
 __author__ = "Piotr Rozentreter"
 
 

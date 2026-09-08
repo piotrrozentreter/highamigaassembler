@@ -17,7 +17,7 @@ import re
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .model import (
     DEFAULT_IDCMP,
@@ -189,7 +189,7 @@ def _control_line(c: Control) -> str:
     return "{CALL_HAS_CMD: ADD_CONTROL(" + ", ".join(parts) + ")}"
 
 
-def save(manager: MetadataManager, path: Path, source_name: str | None = None) -> Path:
+def save(manager: MetadataManager, path: Path, source_name: Optional[str] = None) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = render(manager, source_name or path.stem)
