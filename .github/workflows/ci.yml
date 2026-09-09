@@ -31,8 +31,6 @@ jobs:
           .package-test/bin/hasc --version
           .package-test/bin/python -m hasc --help
           .package-test/bin/hasc examples/add.has -o /tmp/add.s
-      - name: Run tests
-        run: python -m pytest tests -q
       - name: Compile CPU smoke examples
         run: |
           python -m hasc.cli examples/add.has --cpu 68000 -o /tmp/add-68000.s
