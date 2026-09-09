@@ -80,7 +80,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
   Open a new terminal, then install the wheel attached to the required GitHub Release:
 
   ```powershell
-  pipx install https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+  pipx install https://github.com/rozensoftware/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
   ```
 
   Replace `X.Y.Z` with the chosen release version. To install from a local checkout while
