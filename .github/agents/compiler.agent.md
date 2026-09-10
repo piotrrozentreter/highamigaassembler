@@ -39,6 +39,16 @@ Compiler-development specialist for HAS internals, focused on safe behavior chan
 - See [docs/CPU_68020_IMPLEMENTATION_PLAN.md](../../docs/CPU_68020_IMPLEMENTATION_PLAN.md) for the phased 68020 roadmap (Phase 0 guardrails, Phase 1 full-extension indexed addressing, Phase 2 `.w` index selection implemented; Phase 3 memory-indirect and Phase 4 instruction substitutions deferred) and known scope decisions (e.g. struct-field displacement folding deliberately scoped to 68020-only to preserve 68000 output stability).
 - Validate 68020 output with `vasmm68k_mot -m68020 -Fhunkexe` and 68000 output with `vasmm68k_mot -m68000 -Fhunkexe` when the toolchain is available; report both results separately, not just one.
 
+## Python Engineering Patterns
+
+- For non-trivial new code, refactors, or growing dispatch chains (not one-line bug fixes), consult
+  the `python-compiler-engineering` skill (`.github/skills/python-compiler-engineering/SKILL.md`) for
+  idiomatic patterns: dispatch tables vs long `if/elif` chains, dataclass/AST hygiene, symbol-table
+  scoping, register allocator invariants, error handling, and testing approaches specific to `hasc/`.
+- That skill covers *how* to write the Python; `compiler-python.instructions.md` and the correctness
+  rules below always take precedence on *what is allowed to change* (register lifecycle, ABI, CPU
+  targets, two-pass validation semantics).
+
 ## Out of Scope
 
 - Broad documentation rewrites (delegate to docs agent).
