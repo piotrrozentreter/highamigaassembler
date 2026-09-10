@@ -2077,19 +2077,23 @@ class CodeGen:
                         arg = expr.args[idx]
                         code += self._emit_push_arg(arg, params, locals_info, "    ", frame_reg=frame_reg)
 
-                # Load register parameters
-                for idx, reg in reg_params:
+                # Load register parameters. Only stash a value on the stack when a
+                # later register argument isn't provably safe (e.g. a nested call
+                # may clobber this ABI register before the callee is entered) -
+                # see _reg_param_protection_flags; the trailing parameter never needs it.
+                protect = self._reg_param_protection_flags(reg_params, expr.args)
+                for k, (idx, reg) in enumerate(reg_params):
                     if idx < len(expr.args):
                         arg = expr.args[idx]
                         arg_code = self._emit_expr(arg, params, locals_info, reg, "d1", target_type=callee_params[idx].ptype, frame_reg=frame_reg)
                         code.extend(arg_code)
-                        # Stabilize each argument before evaluating the next one: a
-                        # nested call in a sibling expression may clobber this ABI
-                        # register before the callee is entered.
-                        code.append(f"    move.l {reg},-(a7)")
+                        if protect[k]:
+                            code.append(f"    move.l {reg},-(a7)")
 
-                for _, reg in reversed(reg_params):
-                    code.append(f"    move.l (a7)+,{reg}")
+                for k in range(len(reg_params) - 1, -1, -1):
+                    idx, reg = reg_params[k]
+                    if protect[k] and idx < len(expr.args):
+                        code.append(f"    move.l (a7)+,{reg}")
 
                 code.append(f"    jsr {expr.name}")
 
@@ -2144,6 +2148,30 @@ class CodeGen:
                 code.append(f"    move.l {dest_reg},{reg_left}")
             return code
         return [f"    ; expr not supported: {expr}", f"    move.l #0,{reg_left}"]
+
+    def _is_simple_call_arg(self, expr) -> bool:
+        """True if evaluating expr touches only its own destination register (a
+        plain literal or variable reference) - mirrors the classification
+        _emit_push_arg already uses to skip a temp register for stack args."""
+        expr = self._normalize_expr(expr)
+        return isinstance(expr, (ast.Number, ast.VarRef))
+
+    def _reg_param_protection_flags(self, reg_params, args):
+        """Decide, per (arg_idx, register) entry in reg_params (declaration order),
+        whether its loaded value must be stashed on the stack before evaluating
+        later register arguments. A position only needs protection if some LATER
+        register argument is missing or not provably safe (e.g. a nested call
+        that could clobber ABI registers) - so the trailing register parameter
+        never needs protection."""
+        flags = [False] * len(reg_params)
+        later_is_risky = False
+        for k in range(len(reg_params) - 1, -1, -1):
+            flags[k] = later_is_risky
+            idx, _reg = reg_params[k]
+            arg = args[idx] if idx < len(args) else None
+            if arg is None or not self._is_simple_call_arg(arg):
+                later_is_risky = True
+        return flags
 
     def _emit_push_arg(self, arg, params, locals_info, indent="    ", frame_reg="a6"):
         """Emit instructions to push an argument on the stack, trying to avoid a temp register."""
@@ -3757,17 +3785,24 @@ class CodeGen:
                     for l in code:
                         self.emit(l)
 
-            for idx, reg in reg_params:
+            # Only stash a value on the stack when a later register argument isn't
+            # provably safe (e.g. a nested call) - see _reg_param_protection_flags;
+            # the trailing parameter never needs it.
+            protect = self._reg_param_protection_flags(reg_params, stmt.args)
+            for k, (idx, reg) in enumerate(reg_params):
                 if idx < len(stmt.args):
                     arg = stmt.args[idx]
                     code = self._emit_expr(arg, params, locals_info, reg, frame_reg=frame_reg)
                     for l in code:
                         for sub in str(l).splitlines():
                             self.emit(sub if sub.startswith(indent) else indent + sub)
-                    self.emit(indent + f"move.l {reg},-(a7)")
+                    if protect[k]:
+                        self.emit(indent + f"move.l {reg},-(a7)")
 
-            for _, reg in reversed(reg_params):
-                self.emit(indent + f"move.l (a7)+,{reg}")
+            for k in range(len(reg_params) - 1, -1, -1):
+                idx, reg = reg_params[k]
+                if protect[k] and idx < len(stmt.args):
+                    self.emit(indent + f"move.l (a7)+,{reg}")
 
             # Emit parameter comments (show register or stack)
             for idx, p in enumerate(callee_params):
