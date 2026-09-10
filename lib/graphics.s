@@ -20,6 +20,14 @@
 GFX_FONT_PLANES      EQU 5                ; Font assets are always expanded to 5 planes
     endif
 
+    ifnd GFX_SPACE_CODE
+GFX_SPACE_CODE       EQU 32
+    endif
+
+    ifnd GFX_SPACE_GLYPH
+GFX_SPACE_GLYPH      EQU 16
+    endif
+
 ; Poll DMACONR until the blitter is idle. Same technique as lib/bob.s.
 WAITBLIT:MACRO
     tst DMACONR(a5)         ;for compatibility
@@ -2000,11 +2008,13 @@ _DrawChar:
     move.l a0,d1
     tst.l d1
     beq .dc_done
+    cmpi.b #GFX_SPACE_CODE,d0
+    bne.s .dc_normal_char
+    moveq #GFX_SPACE_GLYPH,d1
+    bra.s .dc_index_ok
+.dc_normal_char:
     moveq #0,d1
     move.b d0,d1
-    ; Every font asset here (font8x8.s, c64_font_converter.py output) maps
-    ; glyph = ascii-32 with glyph 0 left blank for space - no special case
-    ; needed, just clamp codes below the first printable character.
     sub.l #32,d1
     tst.l d1
     bge .dc_index_ok
