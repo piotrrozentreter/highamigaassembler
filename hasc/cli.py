@@ -33,6 +33,8 @@ def _count_ast_nodes(node, counter: Counter) -> None:
         counter["proc_count"] += 1
     elif isinstance(node, ast.FuncDecl):
         counter["func_decl_count"] += 1
+    elif isinstance(node, ast.StructVarDecl):
+        counter["struct_count"] += 1
     elif isinstance(node, ast.While):
         counter["while_count"] += 1
     elif isinstance(node, ast.DoWhile):
@@ -92,6 +94,7 @@ def _build_asm_statistics(mod: ast.Module, asm_body: str) -> str:
         "; --- HAS Build Statistics ---\n"
         f"; Source procedures: {ast_counts['proc_count']}\n"
         f"; Source declarations: {ast_counts['func_decl_count']}\n"
+        f"; Source structures: {ast_counts['struct_count']}\n"
         f"; Source loops total: {total_loops} (while={ast_counts['while_count']}, do_while={ast_counts['do_while_count']}, for={ast_counts['for_loop_count']}, repeat={ast_counts['repeat_loop_count']})\n"
         f"; Assembly lines total: {total_lines}\n"
         f"; Assembly lines non-empty: {non_empty_lines}\n"

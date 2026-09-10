@@ -8,7 +8,7 @@ both behaviours, on both CPU targets.
 
 import pytest
 
-from hasc import ast, codegen, parser
+from hasc import ast, cli, codegen, parser
 from hasc.target import CpuTarget, TargetSpec
 
 
@@ -123,6 +123,21 @@ code main:
                   for v in item.variables if isinstance(v, ast.StructVarDecl))
     field = struct.fields[0]
     assert (field.size_suffix, field.signed) == expected
+
+
+def test_asm_statistics_counts_struct_declarations():
+    module = parser.parse("""
+bss probe:
+    struct s { x: int }
+    struct arr[2] { y: long }
+
+code main:
+    proc end() -> int { return 0; }
+""")
+
+    stats = cli._build_asm_statistics(module, "move.l #1,d0\n")
+
+    assert "; Source structures: 2\n" in stats
 
 
 # --- Validator ---------------------------------------------------------------
