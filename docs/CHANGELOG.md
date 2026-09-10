@@ -4,7 +4,33 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
-## [0.9.8] - 2026-09-08
+### Fixed
+
+- **Peephole optimizer could silently drop a real function call.** `_fold_immediate_to_memory`'s
+  (and `_fold_clr_to_memory`'s) "one-gap" variant folds `move #N,dX` / `<gap>` / `move dX,MEM` into
+  a single `move #N,MEM`, but `_is_branch` did not recognize `jsr`/`bsr` as a control-transfer
+  instruction, so a `jsr` sitting in the gap looked like a harmless no-op. For a call whose only
+  register argument is a literal and whose result is stored straight to memory (e.g.
+  `result = SetGraphicsMode(0);`), this folded the argument load and the return-value store
+  together and deleted the `jsr` in between - the callee was never actually invoked. Fixed by
+  making `_is_branch` (`hasc/peepholeopt.py`) also recognize `jsr`/`bsr`, which are rejected as an
+  unsafe "gap" instruction at all of its call sites (both one-gap folds, plus the redundant-compare
+  eliminator's control-flow reset check). Affected real examples:
+  [examples/scroll_test.has](../examples/scroll_test.has),
+  [examples/scroll_comprehensive_test.has](../examples/scroll_comprehensive_test.has).
+
+### Changed
+
+- **Leaner code generation for calls to `__reg(...)`-parameterized procs/funcs.** Calling a
+  function with register-passed parameters no longer unconditionally pushes each computed
+  argument to the stack and immediately pops it back before `jsr`. The stash is now only emitted
+  for a register argument when a *later* register argument (in declaration order) isn't provably
+  side-effect-free (e.g. a nested call) - the previous universal round-trip was only ever needed
+  to protect against that specific case. Applies identically to `--cpu 68000` and `--cpu 68020`,
+  and to `proc`, forward `func`, and `extern func` call sites alike (e.g. native library calls).
+  No behavior change - fewer instructions only.
+
+
 
 ### Added
 

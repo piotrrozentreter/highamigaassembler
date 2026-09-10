@@ -312,6 +312,12 @@ code main:
     restore_first = body.index("move.l (a7)+,a0\n    ; param first")
     assert first_push < nested_call < restore_first
 
+    # The trailing (second) argument has nothing after it before jsr, so its
+    # own stash is redundant and must not be emitted.
+    call_pos = body.index("jsr pair")
+    assert "move.l a1,-(a7)" not in body[nested_call:call_pos]
+    assert "move.l (a7)+,a1" not in body[:call_pos]
+
 
 def test_d0_register_argument_does_not_replace_call_result():
     source = """
@@ -345,6 +351,73 @@ code main:
     body = body[body.index("use:"):]
     call_pos = body.index("jsr consume")
     assert "move.l (a7)+,d0" not in body[call_pos:]
+
+
+def test_all_simple_register_args_skip_stack_stash():
+    source = """
+code main:
+    native proc combine(__reg(d0) a: long, __reg(d1) b: long) -> long {
+        asm { add.l d1,d0; }
+    }
+
+    proc use(x: int, y: int) -> int {
+        var r: int = combine(x, y);
+        return r;
+    }
+    """
+    module = parser.parse(source)
+    for target in (BASELINE, TARGET_68020):
+        body = codegen.CodeGen(module, target).gen()
+        body = body[body.index("use:"):body.index("rts", body.index("use:"))]
+        assert "move.l d0,-(a7)" not in body
+        assert "move.l (a7)+,d0" not in body
+        # Only the pre-existing caller-register preservation (regs_to_save) may
+        # still touch the stack here - exactly one push/pop pair, for d1 only.
+        assert body.count("-(a7)") == 1
+        assert body.count("(a7)+") == 1
+
+
+def test_single_register_arg_with_complex_expression_skips_stash():
+    source = """
+code main:
+    native proc double_it(__reg(d0) value: long) -> long {
+        asm { add.l d0,d0; }
+    }
+
+    proc use(a: int, b: int) -> int {
+        var r: int = double_it(a + b);
+        return r;
+    }
+    """
+    module = parser.parse(source)
+    for target in (BASELINE, TARGET_68020):
+        body = codegen.CodeGen(module, target).gen()
+        body = body[body.index("use:"):body.index("rts", body.index("use:"))]
+        # A lone register parameter never needs protection - nothing else
+        # touches its register before jsr, regardless of argument complexity.
+        assert "-(a7)" not in body
+        assert "(a7)+" not in body
+
+
+def test_call_statement_all_simple_register_args_skip_stack_stash():
+    source = """
+code main:
+    native proc combine(__reg(d0) a: long, __reg(d1) b: long) -> void {
+        asm { add.l d1,d0; }
+    }
+
+    proc use(x: int, y: int) -> void {
+        call combine(x, y);
+    }
+    """
+    module = parser.parse(source)
+    for target in (BASELINE, TARGET_68020):
+        body = codegen.CodeGen(module, target).gen()
+        body = body[body.index("use:"):body.index("rts", body.index("use:"))]
+        assert "move.l d0,-(a7)" not in body
+        assert "move.l (a7)+,d0" not in body
+        assert body.count("-(a7)") == 1
+        assert body.count("(a7)+") == 1
 
 
 def test_pointer_warning_does_not_suggest_address_of_pointer_value():

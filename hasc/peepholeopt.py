@@ -304,9 +304,12 @@ def _is_label(line):
 
 
 def _is_branch(line):
-    """Check if line is a branch instruction."""
+    """Check if line is a branch, or any other control transfer (jsr/bsr) whose
+    target can arbitrarily modify registers/flags - callers rely on this to
+    reject such lines as a safe no-op "gap" instruction."""
     branch_ops = ['bra', 'beq', 'bne', 'blt', 'ble', 'bgt', 'bge', 
-                  'blo', 'bls', 'bhi', 'bhs', 'bcc', 'bcs', 'bpl', 'bmi']
+                  'blo', 'bls', 'bhi', 'bhs', 'bcc', 'bcs', 'bpl', 'bmi',
+                  'jsr', 'bsr']
     for op in branch_ops:
         if f' {op} ' in line or f' {op}.' in line or line.strip().startswith(op):
             return True
