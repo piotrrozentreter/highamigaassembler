@@ -33,5 +33,5 @@ jobs:
           .package-test/bin/hasc examples/add.has -o /tmp/add.s
       - name: Compile CPU smoke examples
         run: |
-          python -m hasc.cli examples/add.has --cpu 68000 -o /tmp/add-68000.s
-          python -m hasc.cli examples/add.has --cpu 68020 -o /tmp/add-68020.s
+          .package-test/bin/python -m hasc.cli examples/add.has --cpu 68000 -o /tmp/add-68000.s
+          .package-test/bin/python -m hasc.cli examples/add.has --cpu 68020 -o /tmp/add-68020.s
