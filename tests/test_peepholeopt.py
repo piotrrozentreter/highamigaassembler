@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from hasc.peepholeopt import (
     peephole_optimize,
     _eliminate_redundant_flag_test,
+    _optimize_cmp_zero_to_tst,
     _fold_clr_to_memory,
     _fold_neg_one,
     _eliminate_tst_after_andi_neg,
@@ -169,6 +170,53 @@ class TestEliminateRedundantFlagTest:
         inp = _asm("eor.l d1,d0", "tst.l d0", "bne lbl")
         out = _eliminate_redundant_flag_test(inp)
         assert "tst.l" not in _join(out)
+
+
+# ---------------------------------------------------------------------------
+# _optimize_cmp_zero_to_tst
+# ---------------------------------------------------------------------------
+
+class TestOptimizeCmpZeroToTst:
+    def test_rewrites_all_sizes_and_boundary_data_registers(self):
+        inp = _asm(
+            "cmp.b #0,d0",
+            "cmp.w #0,d7",
+            "cmp.l #0,d0",
+            "cmp.b #0,d7",
+            "cmp.w #0,d0",
+            "cmp.l #0,d7",
+        )
+        assert _optimize_cmp_zero_to_tst(inp) == _asm(
+            "tst.b d0",
+            "tst.w d7",
+            "tst.l d0",
+            "tst.b d7",
+            "tst.w d0",
+            "tst.l d7",
+        )
+
+    def test_preserves_indentation_comment_and_line_ending(self):
+        inp = ["\t  cmp.w   #0,  d7   ; direction check\n"]
+        assert _optimize_cmp_zero_to_tst(inp) == [
+            "\t  tst.w d7   ; direction check\n"
+        ]
+
+    def test_does_not_rewrite_unsupported_operands_or_forms(self):
+        inp = _asm(
+            "cmp.l #0,a0",
+            "cmp.l #0,(a0)",
+            "cmp #0,d0",
+            "cmp.l #1,d0",
+            "cmp.l #-1,d0",
+            "cmp.l #0,d8",
+            "cmp.l #0,dx",
+        )
+        assert _optimize_cmp_zero_to_tst(inp) == inp
+
+    def test_full_pipeline_registers_cmp_zero_rewrite(self):
+        assert peephole_optimize(_asm("cmp.l #0,d2", "beq done")) == _asm(
+            "tst.l d2", "beq done"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +445,7 @@ if __name__ == "__main__":
 
     test_classes = [
         TestEliminateRedundantFlagTest,
+        TestOptimizeCmpZeroToTst,
         TestFoldNegOne,
         TestEliminateTstAfterAndiNeg,
         TestPeepholeIntegration,

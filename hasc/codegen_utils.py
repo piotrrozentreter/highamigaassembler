@@ -1,5 +1,7 @@
 """Utility functions for code generation."""
 
+import re
+
 from . import ast
 
 
@@ -105,12 +107,16 @@ def expr_to_comment(expr):
 
 
 def emit_add_immediate(indent, reg, value):
-    """Emit ADD instruction with immediate value.
-    Uses ADDQ for values 0-7 (one instruction), ADD.L for larger values."""
-    if 0 <= value <= 7:
+    """Emit a conservative long-word immediate addition."""
+    is_data_reg = re.fullmatch(r"d[0-7]", reg) is not None
+    is_address_reg = re.fullmatch(r"a[0-7]", reg) is not None
+
+    if (is_data_reg or is_address_reg) and 1 <= value <= 8:
         return f"{indent}addq.l #{value},{reg}"
-    else:
-        return f"{indent}add.l #{value},{reg}"
+    if is_address_reg and 9 <= value <= 32767:
+        # LEA is one 4-byte instruction; ADDQ/LEA on An leave CCR unchanged.
+        return f"{indent}lea {value}({reg}),{reg}"
+    return f"{indent}add.l #{value},{reg}"
 
 
 def frame_offset(offset, frame_reg="a6"):

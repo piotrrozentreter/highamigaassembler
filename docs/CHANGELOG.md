@@ -32,6 +32,13 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Changed
 
+- **Smaller, faster 68000-compatible instruction selection.** Immediate additions now use
+  `addq.l` for the complete encodable range `1..8`; positive address-register additions from
+  `9..32767` use `lea d16(An),An`; and the peephole optimizer replaces sized `cmp #0,Dn` tests
+  with matching `tst Dn` instructions. The same conservative rules apply to both CPU targets.
+  Devpac-mode build scripts also pass vasm's `-opt-allbra` after `-devpac`, allowing the assembler
+  to select short encodings for unsized branches while retaining final-displacement ownership.
+
 - **Leaner code generation for calls to `__reg(...)`-parameterized procs/funcs.** Calling a
   function with register-passed parameters no longer unconditionally pushes each computed
   argument to the stack and immediately pops it back before `jsr`. The stash is now only emitted

@@ -44,7 +44,7 @@ if ! command -v vlink &>/dev/null; then
     exit 1
 fi
 
-VASM_FLAGS=(-Fhunk -devpac -I "$LIB")
+VASM_FLAGS=(-Fhunk -devpac -opt-allbra -I "$LIB")
 
 mkdir -p "$BUILD"
 

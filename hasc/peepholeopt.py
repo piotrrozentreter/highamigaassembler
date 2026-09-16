@@ -42,6 +42,7 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
         optimized = _fold_neg_one(optimized)
         optimized = _eliminate_tst_after_andi_neg(optimized)
         optimized = _eliminate_redundant_flag_test(optimized)
+        optimized = _optimize_cmp_zero_to_tst(optimized)
         
         if len(optimized) < prev_len:
             changed = True
@@ -739,6 +740,39 @@ def _eliminate_redundant_flag_test(lines):
 
         optimized.append(lines[i])
         i += 1
+
+    return optimized
+
+
+def _optimize_cmp_zero_to_tst(lines):
+    """Replace sized CMP-zero tests on data registers with TST."""
+    optimized = []
+
+    for line in lines:
+        line_ending = ""
+        body = line
+        if body.endswith("\r\n"):
+            body, line_ending = body[:-2], "\r\n"
+        elif body.endswith("\n"):
+            body, line_ending = body[:-1], "\n"
+
+        instruction, separator, comment = body.partition(";")
+        match = re.fullmatch(
+            r"(?P<indent>[ \t]*)cmp\.(?P<size>[bwl])[ \t]+#0,[ \t]*"
+            r"(?P<reg>d[0-7])(?P<trailing>[ \t]*)",
+            instruction,
+        )
+        if not match:
+            optimized.append(line)
+            continue
+
+        rewritten = (
+            f"{match.group('indent')}tst.{match.group('size')} {match.group('reg')}"
+            f"{match.group('trailing')}"
+        )
+        if separator:
+            rewritten += separator + comment
+        optimized.append(rewritten + line_ending)
 
     return optimized
 

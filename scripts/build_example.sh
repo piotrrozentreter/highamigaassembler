@@ -290,7 +290,7 @@ echo "[1/3] HAS compile..."
 (cd "$ROOT" && "$PYTHON" -m hasc.cli "$REL_SRC" -o "$OUT_S")
 
 echo "[2/3] Assemble objects..."
-VASM_FLAGS=(-Fhunk -devpac -I "$LIB_DIR")
+VASM_FLAGS=(-Fhunk -devpac -opt-allbra -I "$LIB_DIR")
 "$VASM" "${VASM_FLAGS[@]}" "$OUT_S" -o "$OUT_O"
 
 OBJECTS=("$OUT_O")
