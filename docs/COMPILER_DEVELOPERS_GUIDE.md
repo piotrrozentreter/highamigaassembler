@@ -407,6 +407,15 @@ target-neutral; legality is decided before optimization by indexed-address
 lowering. Generated output must be assembled with matching `vasmm68k_mot -m68000`
 or `-m68020` flags.
 
+Conservative target-neutral instruction selection currently includes three rules:
+
+- Immediate additions use `addq.l` for values `1..8`. Positive additions from `9..32767`
+    to address registers use `lea d16(An),An`; other values retain `add.l`.
+- The peephole optimizer rewrites only sized `cmp.b/.w/.l #0,Dn` instructions to matching
+    `tst` instructions. Address registers, memory operands, and unsized comparisons are excluded.
+- Build scripts using vasm's Devpac mode place `-opt-allbra` after `-devpac`, re-enabling safe
+    shortening of unsized branches. Branch displacement and final encoding remain assembler-owned.
+
 ### CodeGen Architecture (codegen.py)
 
 The `CodeGen` class is the heart of the compiler (2800+ lines). Understanding its organization is crucial.

@@ -233,14 +233,14 @@ echo "[1/3] HAS compile..."
 (cd "$ROOT" && "$PYTHON" -m hasc.cli "$REL_SRC" -o "$OUT_S")
 
 echo "[2/3] Assemble objects..."
-VASM_FLAGS=(-Fhunk -devpac -I "$LIB_DIR")
+VASM_FLAGS=(-Fhunk -devpac -opt-allbra -I "$LIB_DIR")
 "$VASM" "${VASM_FLAGS[@]}" "$OUT_S" -o "$OUT_O"
 
 OBJECTS=("$OUT_O")
 for lib in "${SELECTED_LIBS[@]}"; do
     obj="$BUILD/$(basename "${lib%.s}").o"
     if [[ "$(basename "$lib")" == "heap.s" && -n "${HEAP_MEMORY:-}" ]]; then
-        heap_flags=(-Fhunk -devpac -I "$LIB_DIR" -D "HEAP_MEMORY=${HEAP_MEMORY}")
+        heap_flags=(-Fhunk -devpac -opt-allbra -I "$LIB_DIR" -D "HEAP_MEMORY=${HEAP_MEMORY}")
         "$VASM" "${heap_flags[@]}" "$lib" -o "$obj"
     else
         "$VASM" "${VASM_FLAGS[@]}" "$lib" -o "$obj"

@@ -41,9 +41,9 @@ echo "[1/3] Compile HAS -> assembly"
 (cd "$ROOT" && "$PYTHON" -m hasc.cli "$SRC" -o "$BUILD/fileio_demo.s")
 
 echo "[2/3] Assemble objects"
-"$VASM" -Fhunk -devpac -I "$LIB" "$BUILD/fileio_demo.s" -o "$BUILD/fileio_demo.o"
-"$VASM" -Fhunk -devpac -I "$LIB" "$LIB/fileio.s" -o "$BUILD/fileio.o"
-"$VASM" -Fhunk -devpac -I "$LIB" "$LIB/takeover.s" -o "$BUILD/takeover.o"
+"$VASM" -Fhunk -devpac -opt-allbra -I "$LIB" "$BUILD/fileio_demo.s" -o "$BUILD/fileio_demo.o"
+"$VASM" -Fhunk -devpac -opt-allbra -I "$LIB" "$LIB/fileio.s" -o "$BUILD/fileio.o"
+"$VASM" -Fhunk -devpac -opt-allbra -I "$LIB" "$LIB/takeover.s" -o "$BUILD/takeover.o"
 
 echo "[3/3] Link executable"
 "$VLINK" -bamigahunk \

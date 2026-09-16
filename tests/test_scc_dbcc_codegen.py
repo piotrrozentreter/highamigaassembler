@@ -420,7 +420,7 @@ code test:
 """
         asm = proc_body(compile_src(src), "for_dynamic_step")
         assert "dbra" not in asm
-        assert "cmp.l #0,d2" in asm
+        assert "tst.l d2" in asm
         assert re.search(r"\bbeq\s+endfor\d+\b", asm)
         assert re.search(r"\bblt\s+endfor\d+_desc\b", asm)
         assert re.search(r"\bbgt\s+endfor\d+\b", asm)
