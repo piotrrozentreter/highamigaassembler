@@ -1,0 +1,52 @@
+// Musashi runtime: word-array reservation must not overlap the next label (C2),
+// and singleton/string inits must actually land in memory (C3).
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+// Note: test_runtime_musashi.sh flattens DATA after CODE for -Fbin.
+
+data DATA:
+    words.w[4]
+    marker.w = $A5A5
+    bytes.b[4] = {7}
+    msg.b[6] = "Hi"
+
+code runtime_arrays:
+    asm {
+        jsr run_test
+        stop #$2700
+    }
+
+    proc run_test() -> int {
+        // Fill all four words; a 4-byte reservation would smash marker.
+        words[0] = $1111;
+        words[1] = $2222;
+        words[2] = $3333;
+        words[3] = $4444;
+
+        if (marker != $A5A5) {
+            asm "move.l #1,$00100000";
+            return 1;
+        }
+        if (bytes[0] != 7) {
+            asm "move.l #1,$00100000";
+            return 2;
+        }
+        if (bytes[1] != 0) {
+            asm "move.l #1,$00100000";
+            return 3;
+        }
+        if (msg[0] != 72) {  // 'H'
+            asm "move.l #1,$00100000";
+            return 4;
+        }
+        if (msg[1] != 105) { // 'i'
+            asm "move.l #1,$00100000";
+            return 5;
+        }
+        if (msg[2] != 0) {
+            asm "move.l #1,$00100000";
+            return 6;
+        }
+
+        asm "move.l #1,$00100004";
+        return 0;
+    }

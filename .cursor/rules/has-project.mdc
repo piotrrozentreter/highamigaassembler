@@ -1,0 +1,41 @@
+---
+description: HAS project identity, pipeline, dual-CPU targets, and non-negotiable safety rules
+alwaysApply: true
+---
+
+# HAS (High Assembler) — Project Rules
+
+Python compiler: `.has` → Motorola 68000/68020 assembly for Amiga (`vasm` + `vlink`). Version 0.9.8, assembly-first, not production-ready.
+
+## Pipeline
+
+`.has` → Parser (`hasc/parser.py`) → AST → Validator (two-pass) → optional reachability strip → CodeGen + peephole → `.s`
+
+## Dual CPU targets
+
+- `--cpu 68000` (default) and `--cpu 68020` (opt-in).
+- Gate features via `hasc/target.py` capability flags — never ad-hoc `cpu == "68020"` checks.
+- Validate changes on **both** targets; keep 68000 output stable unless intentionally changed.
+
+## Non-negotiables
+
+- No implicit `main()` / runtime bootstrap — execution starts at first code instruction.
+- Never mutate AST nodes during validation; store metadata externally.
+- Free every allocated register on all paths (including errors/early returns).
+- Use `ast.size_suffix()` for `.b/.w/.l` — do not default everything to `.l`.
+- Preserve ABI / stack layout; document intentional breaks.
+- Chip RAM (`data_chip` / `bss_chip` / `DATA_C`) only for DMA-visible data; ask if unsure.
+- Linux: always `.venv/bin/python3` — never bare `python` / `python3`.
+
+## Agent map (Cursor ↔ GitHub)
+
+| Cursor rule | GitHub source | Use for |
+|---|---|---|
+| `compiler` | `.github/agents/compiler.agent.md` | `hasc/` implementation |
+| `review` | `.github/agents/review.agent.md` | severity-based review |
+| `tests` | `.github/agents/tests.agent.md` | example/vasm/Musashi validation |
+| `docs` | `.github/agents/docs.agent.md` | README/docs/changelog sync |
+| `gamedev` | `.github/agents/gamedev.agent.md` | Amiga game/hardware code |
+| `amigados` | `.github/agents/amigados.agent.md` | OS-cooperative tools |
+
+Skills live under `.github/skills/` (assembly-validator, has-language, python-compiler-engineering, regression-sweep). Quirks: `.github/repo-memory/codegen-quirks.md`.

@@ -13,6 +13,7 @@ def compile_src(src: str) -> str:
     mod = has_parser.parse(src)
     validator = has_validator.Validator(mod)
     validator.validate()
+    validator.apply_resolutions()
     return has_codegen.CodeGen(mod).gen()
 
 

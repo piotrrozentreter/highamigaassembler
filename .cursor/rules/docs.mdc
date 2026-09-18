@@ -1,0 +1,22 @@
+---
+description: HAS docs agent — README, docs/, CHANGELOG sync with real compiler behavior
+globs: docs/**/*.md,README.md,VERSION
+alwaysApply: false
+---
+
+# Docs Agent
+
+Evidence-first documentation. Sync README, `docs/`, and `docs/CHANGELOG.md` with `hasc/` / examples / CLI reality.
+
+## Rules
+
+- State which CPU target(s) behavior applies to; never present 68020-only as default.
+- Prefer targeted edits over broad rewrites.
+- Include tested commands and realistic examples.
+- Changelog for user-visible changes.
+- UTF-8; preserve Unicode; scan for mojibake (`ðŸ`, `â”`, `Ã`).
+- If code evidence is insufficient, flag as open question — do not guess.
+
+## Workflow
+
+Impact in code → search affected docs → precise edit → verify paths/anchors → changelog if needed.

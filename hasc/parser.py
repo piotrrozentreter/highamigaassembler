@@ -550,15 +550,22 @@ class ASTBuilder(Transformer):
                     # Number
                     parsed_values.append(self._parse_number(self._val(val)))
             
-            # If single value, store as scalar; if multiple, store as values list
-            if len(parsed_values) == 1:
+            # Array declarations always store initializers in `values` (even a
+            # singleton or string), so the emitter does not drop them. Scalars
+            # keep a lone value in `value`; multi-value without dims infers array.
+            if is_array:
+                values = parsed_values
+            elif len(parsed_values) == 1:
                 value = parsed_values[0]
             else:
                 values = parsed_values
-                # Infer array dimensions from values if not explicitly specified
-                if not is_array and values is not None:
+                # Infer array dimensions from values if not explicitly specified.
+                # Strings expand to their character count (matches validator).
+                if values is not None:
                     is_array = True
-                    dimensions = [len(values)]
+                    dimensions = [
+                        sum(len(v) if isinstance(v, str) else 1 for v in values)
+                    ]
         
         return ast.GlobalVarDecl(
             name=name,
@@ -658,13 +665,18 @@ class ASTBuilder(Transformer):
                     parsed_values.append(str_val[1:-1] if str_val.startswith('"') else str_val)
                 else:
                     parsed_values.append(self._parse_number(self._val(val)))
-            if len(parsed_values) == 1:
+            if is_array:
+                values = parsed_values
+            elif len(parsed_values) == 1:
                 value = parsed_values[0]
             else:
                 values = parsed_values
-                if not is_array and values is not None:
+                if values is not None:
                     is_array = True
-                    dimensions = [len(values)]
+                    # Strings expand to their character count (matches validator).
+                    dimensions = [
+                        sum(len(v) if isinstance(v, str) else 1 for v in values)
+                    ]
 
         return ast.GlobalVarDecl(
             name=name,

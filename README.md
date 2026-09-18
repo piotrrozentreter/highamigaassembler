@@ -407,7 +407,7 @@ hasc/                       # Compiler package
 ├── codegen.py              # 68000/68020 assembly generation
 ├── codegen_indexed_address.py, indexed_address.py  # Indexed addressing
 ├── target.py               # CPU capability definitions
-├── register_allocator.py   # Register allocation and spilling
+├── register_allocator.py   # Allocator helper (unused by CodeGen today; see codegen-quirks)
 ├── peepholeopt.py          # Post-generation optimizations
 └── macro_expander.py, reachability.py, asm_substitution.py
 

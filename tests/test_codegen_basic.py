@@ -35,6 +35,7 @@ def compile_src(src: str, target=None) -> str:
     mod = has_parser.parse(src)
     validator = has_validator.Validator(mod)
     validator.validate()
+    validator.apply_resolutions()
     cg = has_codegen.CodeGen(mod, target) if target else has_codegen.CodeGen(mod)
     return cg.gen()
 

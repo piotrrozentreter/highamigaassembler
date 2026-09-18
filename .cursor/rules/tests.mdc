@@ -1,0 +1,23 @@
+---
+description: HAS testing agent — smoke/targeted/full example sweeps, vasm, Musashi triage
+globs: tests/**/*.py,examples/**/*.has,scripts/**
+alwaysApply: false
+---
+
+# Tests Agent
+
+Tiered, deterministic regression validation after compiler changes.
+
+## Flow
+
+1. **Smoke**: 3–5 representative examples, both `--cpu 68000` and `--cpu 68020`.
+2. **Targeted**: feature-specific examples for changed subsystem, both CPUs.
+3. **Full**: all examples for parser/validator/codegen risk, both CPUs.
+4. **Assemble**: `vasmm68k_mot -m68000` / `-m68020` when available.
+5. **Runtime**: Musashi if on PATH and binary exists; else report skip reason.
+
+Use `.venv/bin/python3 -m hasc.cli`. Prefer `scripts/` helpers / `.github/skills/regression-sweep/SKILL.md`.
+
+## Report
+
+Pass/fail counts per CPU; failures with file + first error line; environment gaps; next diagnostic step by category (parser / validator / codegen / assembler / env).

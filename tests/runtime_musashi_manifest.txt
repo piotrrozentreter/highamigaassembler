@@ -4,6 +4,9 @@
 
 examples/runtime_musashi/smoke_mmio_pass.has|pass
 examples/runtime_musashi/proc_math_branch_pass.has|pass
+examples/runtime_musashi/dbra_call_d7_pass.has|pass
+examples/runtime_musashi/areg_param_store_pass.has|pass
+examples/runtime_musashi/data_array_layout_pass.has|pass
 examples/runtime_musashi/rnd_helpers_pass.has|pass
 examples/runtime_musashi/dualpf_mode_select_test.has|pass
 examples/runtime_musashi/dualpf_active_playfield_test.has|pass

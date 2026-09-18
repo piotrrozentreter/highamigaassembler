@@ -51,7 +51,9 @@ def test_emit_add_immediate_falls_back_for_noncanonical_inputs():
 
 def _compile(src, target):
     module = has_parser.parse(src)
-    has_validator.Validator(module).validate()
+    val = has_validator.Validator(module)
+    val.validate()
+    val.apply_resolutions()
     return has_codegen.CodeGen(module, target).gen()
 
 

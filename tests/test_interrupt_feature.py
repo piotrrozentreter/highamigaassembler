@@ -43,7 +43,9 @@ code main:
 
 def _compile(src, cpu="68000"):
     mod = has_parser.parse(src)
-    has_validator.Validator(mod).validate()
+    val = has_validator.Validator(mod)
+    val.validate()
+    val.apply_resolutions()
     cg = has_codegen.CodeGen(mod, target=TargetSpec.for_cpu(cpu))
     return cg.gen()
 

@@ -96,8 +96,7 @@ class CodeGen:
         """Return 'b'|'w'|'l' for a struct-field read whose layout is known, else None.
 
         Covers `s.field`, `arr[i].field` and `(*p).field` / `p->field`. The pointer
-        form is only resolved through an explicitly declared pointer type; codegen's
-        name-similarity fallback guess is not a sound basis for a width proof.
+        form is only resolved through an explicitly declared pointer type.
         """
         if not isinstance(expr, ast.MemberAccess):
             return None
@@ -671,17 +670,16 @@ class CodeGen:
         locals_info = []
         offset = 0
 
-        # CRITICAL FIX: Allocate stack space for data register parameters (d0-d7)
+        # Allocate stack space for register parameters (d0-d7 and a0-a6).
         # These must be saved immediately in prologue before they can be clobbered
-        # EXCEPT for native functions - they use registers directly without stack
-        # IMPORTANT: All register params use fixed 4-byte slots (move.l always stores 4 bytes)
-        # regardless of their declared type (byte/word/long). This prevents overwriting adjacent frame data.
+        # (RHS evaluation / jsr destroy caller-saved regs). Native functions keep
+        # registers live and skip this. Always use fixed 4-byte slots (move.l).
         saved_reg_params = {}  # Maps param name -> (register, offset)
         if not proc.native:
             for param in params:
                 reg = param.register
-                if reg and reg != 'None' and reg.startswith('d'):
-                    # Data register parameter - needs 4-byte stack slot (always, for safety)
+                if reg and reg != 'None' and (reg.startswith('d') or reg.startswith('a')):
+                    # Register parameter - needs 4-byte stack slot (always, for safety)
                     # We store via move.l regardless of type, so always reserve 4 bytes
                     offset += 4  # Fixed 4-byte allocation for register params
                     # Align offset to 4-byte boundary for safety
@@ -843,59 +841,30 @@ class CodeGen:
                         if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
                             struct_type = param_obj.ptype.rstrip('*').strip()
 
-                    # Fallback: try name-based inference
-                    if not struct_type:
-                        for sname in self.struct_info:
-                            if var_name.startswith(sname.lower()) or var_name.endswith('_' + sname.lower()):
-                                struct_type = sname
-                                break
-
-                if struct_type and struct_type in self.struct_info:
-                    sinfo = self.struct_info[struct_type]
-                    if field in sinfo['fields']:
-                        fs = sinfo['fields'][field]
-                        offset = fs['offset']
-                        suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
-                        operand = "(a0)" if offset == 0 else f"{offset}(a0)"
-                        if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
-                            code.extend(codegen_indexed_address.emit_narrow_element_load(
-                                self, operand, reg_left,
-                                1 if suffix == '.b' else 2, True))
-                            return code
-                        # Dereference pointer with offset: field at (a0, offset)
-                        # Clear register first for byte/word to avoid garbage in upper bits
-                        if suffix in ('.b', '.w'):
-                            code.append(f"    clr.l {reg_left}")
-                        code.append(f"    move{suffix} {operand},{reg_left}")
-                        return code
-                    else:
-                        return [f"    ; unknown field {field} in dereferenced struct", f"    move.l #0,{reg_left}"]
-                else:
-                    # Last resort: assume x.l at 0, y.l at 4, active.b at 8 (common pattern)
-                    offset = 0
-                    if field == 'x':
-                        offset = 0
-                        suffix = '.l'
-                    elif field == 'y':
-                        offset = 4
-                        suffix = '.l'
-                    elif field == 'active':
-                        offset = 8
-                        suffix = '.b'
-                    elif field == 'dir':
-                        offset = 9
-                        suffix = '.b'
-                    else:
-                        return [f"    ; unknown field {field} in dereferenced struct", f"    move.l #0,{reg_left}"]
-
-                    # Generate code with guessed offset (clear register for byte/word)
-                    if suffix in ('.b', '.w'):
-                        code.append(f"    clr.l {reg_left}")
-                    if offset == 0:
-                        code.append(f"    move{suffix} (a0),{reg_left}")
-                    else:
-                        code.append(f"    move{suffix} {offset}(a0),{reg_left}")
+                if not struct_type or struct_type not in self.struct_info:
+                    ptr_desc = var_name if isinstance(ptr_operand, ast.VarRef) else 'expression'
+                    self._fail(
+                        f"Cannot resolve pointee struct type for (*{ptr_desc}).{field}; "
+                        f"declare a typed pointer (e.g. 'T*') whose pointee is a known struct"
+                    )
+                sinfo = self.struct_info[struct_type]
+                if field not in sinfo['fields']:
+                    self._fail(f"Unknown struct member '{struct_type}.{field}'")
+                fs = sinfo['fields'][field]
+                offset = fs['offset']
+                suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
+                operand = "(a0)" if offset == 0 else f"{offset}(a0)"
+                if fs.get('signed') and suffix in ('.b', '.w') and reg_left.startswith('d'):
+                    code.extend(codegen_indexed_address.emit_narrow_element_load(
+                        self, operand, reg_left,
+                        1 if suffix == '.b' else 2, True))
                     return code
+                # Dereference pointer with offset: field at (a0, offset)
+                # Clear register first for byte/word to avoid garbage in upper bits
+                if suffix in ('.b', '.w'):
+                    code.append(f"    clr.l {reg_left}")
+                code.append(f"    move{suffix} {operand},{reg_left}")
+                return code
 
             # Handle simple variable member access
             elif isinstance(base, ast.VarRef):
@@ -1191,8 +1160,8 @@ class CodeGen:
                 if reg == 'None':
                     reg = None
                 if reg:
-                    # Parameter is in a register (only for address registers like a0-a3)
-                    # Data register parameters are saved to locals_info and handled above
+                    # Parameter is in a register (address regs on native procs;
+                    # non-native register params are saved to locals_info above)
                     if reg != reg_left:
                         return [f"    move.l {reg},{reg_left}"]
                     else:
@@ -2098,7 +2067,13 @@ class CodeGen:
                     if protect[k] and idx < len(expr.args):
                         code.append(f"    move.l (a7)+,{reg}")
 
+                # Callee may run its own dbra loops (sharing d7); protect outer counter.
+                save_d7 = self.dbra_depth > 0
+                if save_d7:
+                    code.append("    move.l d7,-(a7)  ; save dbra counter across call")
                 code.append(f"    jsr {expr.name}")
+                if save_d7:
+                    code.append("    move.l (a7)+,d7  ; restore dbra counter")
 
                 # Clean up stack parameters
                 stack_arg_count = len(stack_params)
@@ -2112,7 +2087,12 @@ class CodeGen:
                 # No signature info - use stack-based convention
                 for arg in reversed(expr.args):
                     code += self._emit_push_arg(arg, params, locals_info, "    ", frame_reg=frame_reg)
+                save_d7 = self.dbra_depth > 0
+                if save_d7:
+                    code.append("    move.l d7,-(a7)  ; save dbra counter across call")
                 code.append(f"    jsr {expr.name}")
+                if save_d7:
+                    code.append("    move.l (a7)+,d7  ; restore dbra counter")
                 if len(expr.args) > 0:
                     code.append(self._emit_add_immediate("    ", "a7", 4*len(expr.args)))
 
@@ -2223,8 +2203,8 @@ class CodeGen:
                 if reg == 'None':
                     reg = None
                 if reg:
-                    # Parameter is in a register (only address registers like a0-a3)
-                    # Data register parameters are saved to locals_info and handled above
+                    # Parameter is in a register (address regs on native procs;
+                    # non-native register params are saved to locals_info above)
                     lines.append(f"{indent}move.l {reg},-(a7)")
                     return lines
                 else:
@@ -2603,10 +2583,11 @@ class CodeGen:
 
     def _dbra_loop_enter(self, indent):
         """Reserve d7 for a dbra loop counter (RepeatLoop or the ForLoop fast path below).
-        d7 is the single register conventionally reserved compiler-wide for dbra counters
-        (see RegisterAllocator), so a loop nested inside another active dbra loop must
-        save/restore the outer counter around its own use. Returns True when nested; pass
-        the same value to _dbra_loop_exit so it knows whether to restore it."""
+        CodeGen owns d7 for this purpose: all active dbra-counter loops share that single
+        register, so a loop nested inside another active dbra loop must save/restore the
+        outer counter around its own use. Call emission also saves/restores d7 around jsr
+        while dbra_depth > 0 (callees may run their own dbra loops). Returns True when
+        nested; pass the same value to _dbra_loop_exit so it knows whether to restore."""
         nested = self.dbra_depth > 0
         if nested:
             self.emit(indent + "move.l d7,-(a7)  ; save outer loop counter (nested dbra loop)")
@@ -2628,7 +2609,9 @@ class CodeGen:
           assignment target, an inline-asm `@var_name` substitution, etc.), checked via
           whole-word text matching over every string field. This is a superset of exact
           identifier matches, so it can only over-block (safe), never miss a real use.
-        - A macro call is present - macro bodies can reference caller-scope variables by
+        - A macro call, CallStmt, or Call expression is present - any of these can emit
+          jsr, and the callee may itself use d7 as a dbra counter (destroying the outer
+          for-dbra counter). Macro bodies can also reference caller-scope variables by
           name (non-hygienic substitution) without that name appearing in the call's own
           arguments, so a hidden reference cannot be ruled out statically.
 
@@ -2644,7 +2627,8 @@ class CodeGen:
         if node is None:
             return False
         node = self._normalize_expr(node)
-        if isinstance(node, ast.MacroCall):
+        # Any call form that can emit jsr (or expand to code that might) blocks for-dbra.
+        if isinstance(node, (ast.MacroCall, ast.CallStmt, ast.Call)):
             return True
         if isinstance(node, str):
             return re.search(rf'\b{re.escape(var_name)}\b', node) is not None
@@ -2801,27 +2785,17 @@ class CodeGen:
                             var_name = ptr_operand.name
                             local_info = next((l for l in locals_info if l[0] == var_name), None)
                             if local_info:
-                                # Reload pointer directly from local variable
+                                # Reload pointer directly from local / saved register param slot
                                 _, _, offset = local_info
                                 self.emit(indent + f"move.l {self._frame_offset(offset, frame_reg)},a0")
                             else:
-                                # Not a local, try parameter
-                                param_obj = next((p for p in params if p.name == var_name), None)
-                                if param_obj and param_obj.register:
-                                    # Register parameter - should be saved to stack, load from there
-                                    # Find which saved register slot
-                                    reg_params = [p for p in params if p.register and p.register != 'None']
-                                    if param_obj in reg_params:
-                                        idx = reg_params.index(param_obj)
-                                        # Saved registers are below frame pointer
-                                        off = -4 * (len(reg_params) - idx)
-                                        self.emit(indent + f"move.l {off}({frame_reg}),a0")
-                                elif param_obj:
-                                    # Stack parameter
-                                    stack_params = [p for p in params if not (p.register and p.register != 'None')]
-                                    idx = stack_params.index(param_obj)
-                                    off = 8 + 4 * idx
-                                    self.emit(indent + f"move.l {off}({frame_reg}),a0")
+                                # Unsaved register param (native) or stack param — use _emit_expr
+                                ptr_code = self._emit_expr(ptr_operand, params, locals_info, "a0", "d1", target_type=None, frame_reg=frame_reg)
+                                for l in ptr_code:
+                                    for sub in str(l).splitlines():
+                                        self.emit(sub if sub.startswith(indent) else indent + sub)
+                                if ptr_code and "a0" not in ptr_code[-1]:
+                                    self.emit(indent + f"move.l d0,a0")
                         else:
                             # Complex expression for pointer - evaluate it
                             ptr_code = self._emit_expr(ptr_operand, params, locals_info, "a0", "d1", target_type=None, frame_reg=frame_reg)
@@ -2832,75 +2806,42 @@ class CodeGen:
                             if ptr_code and "a0" not in ptr_code[-1]:
                                 self.emit(indent + f"move.l d0,a0")
 
-                        # Try to infer struct type from variable type info
+                        # Resolve struct type from declared pointer type only (no guessing)
                         struct_type = None
                         if isinstance(ptr_operand, ast.VarRef):
                             var_name = ptr_operand.name
-                            # Look in locals_info which has (name, vtype, offset)
                             local_info = next((l for l in locals_info if l[0] == var_name), None)
                             if local_info and len(local_info) > 1:
                                 vtype = local_info[1]
-                                # vtype might be like "bullet*" or "Enemy*"
                                 if vtype and vtype.endswith('*'):
                                     struct_type = vtype.rstrip('*').strip()
-                                # DEBUG
                                 if self.print_debug:
                                     self.emit(f"; DEBUG: var={var_name} vtype={vtype} struct_type={struct_type}")
 
-                            # Check function parameters if not found in locals
                             if not struct_type:
                                 param_obj = next((p for p in params if p.name == var_name), None)
                                 if param_obj and param_obj.ptype and param_obj.ptype.endswith('*'):
                                     struct_type = param_obj.ptype.rstrip('*').strip()
 
-                            # Fallback: try name-based inference
-                            if not struct_type:
-                                for sname in self.struct_info:
-                                    if var_name.startswith(sname.lower()) or var_name.endswith('_' + sname.lower()):
-                                        struct_type = sname
-                                        break
-
-                        # DEBUG
                         if self.print_debug:
                             self.emit(f"; DEBUG: struct_type={struct_type} field={field} in_struct_info={struct_type in self.struct_info if struct_type else False}")
 
-                        if struct_type and struct_type in self.struct_info:
-                            sinfo = self.struct_info[struct_type]
-                            if field in sinfo['fields']:
-                                fs = sinfo['fields'][field]
-                                offset = fs['offset']
-                                suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
-                                # Store through pointer: field at (a0, offset)
-                                if offset == 0:
-                                    self.emit(indent + f"move{suffix} d0,(a0)")
-                                else:
-                                    self.emit(indent + f"move{suffix} d0,{offset}(a0)")
-                            else:
-                                self.emit(indent + f"; unknown field {field} in dereferenced struct")
+                        if not struct_type or struct_type not in self.struct_info:
+                            ptr_desc = ptr_operand.name if isinstance(ptr_operand, ast.VarRef) else 'expression'
+                            self._fail(
+                                f"Cannot resolve pointee struct type for (*{ptr_desc}).{field}; "
+                                f"declare a typed pointer (e.g. 'T*') whose pointee is a known struct"
+                            )
+                        sinfo = self.struct_info[struct_type]
+                        if field not in sinfo['fields']:
+                            self._fail(f"Unknown struct member '{struct_type}.{field}'")
+                        fs = sinfo['fields'][field]
+                        offset = fs['offset']
+                        suffix = { 'b': '.b', 'w': '.w', 'l': '.l' }.get(fs['size_suffix'], '.l')
+                        if offset == 0:
+                            self.emit(indent + f"move{suffix} d0,(a0)")
                         else:
-                            # Last resort: assume x.l at 0, y.l at 4, active.b at 8 (common pattern)
-                            offset = 0
-                            if field == 'x':
-                                offset = 0
-                                suffix = '.l'
-                            elif field == 'y':
-                                offset = 4
-                                suffix = '.l'
-                            elif field == 'active':
-                                offset = 8
-                                suffix = '.b'
-                            elif field == 'dir':
-                                offset = 9
-                                suffix = '.b'
-                            else:
-                                self.emit(indent + f"; unknown field {field} in dereferenced struct")
-                                return
-
-                            # Generate code with guessed offset
-                            if offset == 0:
-                                self.emit(indent + f"move{suffix} d0,(a0)")
-                            else:
-                                self.emit(indent + f"move{suffix} d0,{offset}(a0)")
+                            self.emit(indent + f"move{suffix} d0,{offset}(a0)")
 
                     # Handle simple variable member access
                     elif isinstance(base, ast.VarRef):
@@ -3740,14 +3681,9 @@ class CodeGen:
         """Return True if a data-section variable's label must start at an even
         address on the 68000 (word/long data). Byte-only data has no alignment
         requirement. Mirrors the same "unsuffixed size defaults to long" rule the
-        data-section emitter below uses when actually emitting dc.b/w/l."""
+        data-section emitter below uses when actually emitting dc.b/w/l / ds.b/w/l."""
         if isinstance(var, ast.StructVarDecl):
             return self._struct_needs_even_align(var)
-        if var.is_array and var.dimensions and not var.values:
-            # Uninitialized data-section arrays are reserved with ds.b (raw bytes)
-            # regardless of declared element size - see emitter below - so no
-            # alignment is actually needed for that reservation.
-            return False
         return (var.size or 'l') in ('w', 'l')
 
     def _bss_var_needs_even_align(self, var) -> bool:
@@ -3846,7 +3782,13 @@ class CodeGen:
                 elif reg is None:
                     self.emit(indent + f"; param {p.name}: {p.ptype} on stack")
 
+            # Callee may run its own dbra loops (sharing d7); protect outer counter.
+            save_d7 = self.dbra_depth > 0
+            if save_d7:
+                self.emit(indent + "move.l d7,-(a7)  ; save dbra counter across call")
             self.emit(indent + f"jsr {stmt.name}")
+            if save_d7:
+                self.emit(indent + "move.l (a7)+,d7  ; restore dbra counter")
 
             stack_arg_count = len(stack_params)
             if stack_arg_count > 0:
@@ -3862,7 +3804,12 @@ class CodeGen:
                 code = self._emit_push_arg(arg, params, locals_info, indent, frame_reg=frame_reg)
                 for l in code:
                     self.emit(l)
+            save_d7 = self.dbra_depth > 0
+            if save_d7:
+                self.emit(indent + "move.l d7,-(a7)  ; save dbra counter across call")
             self.emit(indent + f"jsr {stmt.name}")
+            if save_d7:
+                self.emit(indent + "move.l (a7)+,d7  ; restore dbra counter")
             if len(stmt.args) > 0:
                 self.emit(self._emit_add_immediate(indent, "a7", 4*len(stmt.args)))
 
@@ -3976,26 +3923,45 @@ class CodeGen:
                             self.emit(f"{var.name}_{fname} equ {var.name}+{off}")
                     else:
                         if var.is_array and var.dimensions:
-                            # Array initialization
-                            if var.values:
-                                elem_size = 1 if var.size == 'b' else (2 if var.size == 'w' else 4)
-                                suffix = ast.size_suffix(elem_size)
-                                # Properly quote string values in the array
+                            # Array initialization / reservation
+                            elem_size = 1 if var.size == 'b' else (2 if var.size == 'w' else 4)
+                            suffix = ast.size_suffix(elem_size)
+                            count = 1
+                            for dim in var.dimensions:
+                                count *= int(dim)
+
+                            # Prefer values; fall back to scalar `value` when the
+                            # parser left a singleton on an array (defensive).
+                            # data_var_uninit sets value=0 with values=None — keep
+                            # that on the ds reservation path below.
+                            init_values = var.values
+                            if not init_values and var.value is not None:
+                                if var.values is not None or isinstance(var.value, str) or var.value != 0:
+                                    init_values = [var.value]
+
+                            if init_values:
                                 formatted_values = []
-                                for v in var.values:
+                                for v in init_values:
                                     if isinstance(v, str):
                                         formatted_values.append(f'"{v}"')
                                     else:
                                         formatted_values.append(str(v))
                                 values_str = ",".join(formatted_values)
                                 self.emit(indent + f"dc{suffix} {values_str}")
-                                data_offset += sum(len(v) if isinstance(v, str) else elem_size for v in var.values)
+                                filled_elems = sum(
+                                    len(v) if isinstance(v, str) else 1 for v in init_values
+                                )
+                                data_offset += sum(
+                                    len(v) if isinstance(v, str) else elem_size for v in init_values
+                                )
+                                # Pad remaining declared elements with zeros
+                                if filled_elems < count:
+                                    pad = count - filled_elems
+                                    self.emit(indent + f"dcb{suffix} {pad},0")
+                                    data_offset += pad * elem_size
                             else:
-                                total_size = 1
-                                for dim in var.dimensions:
-                                    total_size *= dim
-                                self.emit(indent + f"ds.b {total_size}  ; array")
-                                data_offset += total_size
+                                self.emit(indent + f"ds{suffix} {count}  ; array")
+                                data_offset += count * elem_size
                         elif var.values:
                             elem_size = 1 if var.size == 'b' else (2 if var.size == 'w' else 4)
                             size_suffix = '.' + (var.size or 'l')
@@ -4190,7 +4156,7 @@ class CodeGen:
                             link_param = f"#0" if localsize == 0 else f"#-{localsize}"
                             self.emit(indent + f"link a6,{link_param}")
 
-                            # CRITICAL FIX: Save data register parameters immediately after link
+                            # CRITICAL FIX: Save register parameters immediately after link
                             # to prevent them from being clobbered before use
                             for param_name, (reg, offset) in saved_reg_params.items():
                                 self.emit(indent + f"move.l {reg},{-offset}(a6)  ; save {param_name} from {reg}")

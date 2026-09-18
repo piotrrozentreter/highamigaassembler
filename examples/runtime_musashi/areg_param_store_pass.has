@@ -1,0 +1,39 @@
+// Musashi runtime: __reg(a0) pointer param store after RHS that clobbers a0.
+// Reloads must come from the saved frame slot (H2).
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+// Note: test_runtime_musashi.sh flattens BSS after CODE for -Fbin.
+
+bss BSS:
+    struct Rec { x.l, y.l }
+
+code runtime_areg:
+    asm {
+        jsr run_test
+        stop #$2700
+    }
+
+    proc write_xy(__reg(a0) p: Rec*) -> void {
+        // RHS of the second store evaluates a call that clobbers a0;
+        // the field store must reload p from its spilled frame slot.
+        (*p).x = 11;
+        (*p).y = clobber_a0_and_return(22);
+    }
+
+    proc clobber_a0_and_return(__reg(d0) v: int) -> int {
+        asm "move.l #0,a0";
+        return v;
+    }
+
+    proc run_test() -> int {
+        Rec.x = 0;
+        Rec.y = 0;
+        call write_xy(&Rec);
+        if (Rec.x == 11) {
+            if (Rec.y == 22) {
+                asm "move.l #1,$00100004";
+                return 0;
+            }
+        }
+        asm "move.l #1,$00100000";
+        return 1;
+    }

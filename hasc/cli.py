@@ -210,6 +210,9 @@ def main(argv=None):
         try:
             val = validator.Validator(mod)
             warnings = val.validate()
+            # Post-validate: apply const-resolved dims/sizes onto AST for codegen.
+            # Mutation is intentional here and only happens after validation succeeds.
+            val.apply_resolutions()
             for warning in warnings:
                 print(f"Warning: {warning}", file=sys.stderr)
         except validator.ValidationError as e:

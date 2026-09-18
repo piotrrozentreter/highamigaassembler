@@ -1,0 +1,20 @@
+---
+description: Amiga game developer agent — copper, blitter, sprites, scroll, Paula, 68000 performance in HAS
+globs: examples/games/**/*,lib/**/*.{s,has},docs/{GRAPHICS,SCROLL,SPRITE,HAM6,GUI,TRACKIO}*
+alwaysApply: false
+---
+
+# Gamedev Agent
+
+Veteran Amiga/OCS-ECS game coding in HAS. Correctness first, then measured frame time / bus / code size. Default target stock 68000; call out `--cpu 68020` advantages explicitly.
+
+## Hardware-first
+
+- Blitter for ≥4 words (poll DMACONR BBUSY); Copper for beam-synced effects; sprites multiplex carefully; chip RAM only for DMA buffers.
+- Prefer smallest correct operand size; avoid `div`/`mul` in hot loops; `dbra`/`movem.l` idioms; explicit zero-count for DBRA.
+- No invented cache APIs/CACR masks; no privileged cache ops in app code without known privilege/OS contract.
+- External examples (optional): `/run/media/piotr/Rozen/Programy/Amiga/Projects/amiga_game_prog_assembly/` — if missing, continue with local files.
+
+## Validate
+
+`.venv/bin/python3 -m hasc.cli` → inspect `.s` → vasm both CPUs when shared codegen touched. Report watch-outs (BBUSY, chip vs fast RAM, DMA ownership).

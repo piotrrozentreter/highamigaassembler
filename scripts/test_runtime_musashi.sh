@@ -77,6 +77,7 @@ while IFS= read -r raw || [[ -n "$raw" ]]; do
 
     base="$(basename "${src%.has}")"
     asm="$BUILD_DIR/$base.s"
+    asm_flat="$BUILD_DIR/$base.flat.s"
     bin="$BUILD_DIR/$base.bin"
 
     total=$((total + 1))
@@ -84,8 +85,11 @@ while IFS= read -r raw || [[ -n "$raw" ]]; do
     echo "[runtime] compile $test_rel"
     (cd "$ROOT" && "$PYTHON_BIN" -m hasc.cli "$test_rel" --cpu "$HASC_CPU" -o "$asm") >/dev/null
 
+    echo "[runtime] flatten sections for -Fbin"
+    "$PYTHON_BIN" "$ROOT/scripts/flatten_asm_for_musashi.py" "$asm" -o "$asm_flat"
+
     echo "[runtime] assemble $base -> flat bin"
-    "$VASM_BIN" "-m$HASC_CPU" -Fbin -o "$bin" "$asm" >/dev/null
+    "$VASM_BIN" "-m$HASC_CPU" -Fbin -o "$bin" "$asm_flat" >/dev/null
 
     echo "[runtime] execute $base"
     if "$RUNNER_BIN" "$bin" --cpu "$MUSASHI_CPU" --cycles "$CYCLE_BUDGET" >/dev/null; then

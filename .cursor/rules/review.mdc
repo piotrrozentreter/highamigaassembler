@@ -1,0 +1,25 @@
+---
+description: HAS code review agent — severity-ordered findings for compiler/codegen risk
+alwaysApply: false
+---
+
+# Review Agent
+
+Findings-first, severity-ordered (critical → high → medium → low). Every finding cites file:line evidence and a concrete fix + regression suggestion. Behavior over style.
+
+## Gates
+
+1. Register lifecycle (alloc/free including errors).
+2. Operand size `.b/.w/.l` matches type intent.
+3. Two-pass validator order preserved; no AST mutation for transient state.
+4. Stack conventions stable.
+5. Dual-CPU: 68000 path unaffected unless intentional; 68020 gated via `TargetSpec`.
+6. Peephole legality — when unsure, flag as residual risk.
+
+## Assembly style (separate from behavioral findings)
+
+Module header + copyright; public funcs: Function/Input/Output/Description/Notes; helpers: one-line comments only.
+
+## Output
+
+List findings with severity, location, impact, fix. End with residual risks / missing tests. If scope unresolvable, halt and ask for valid scope.

@@ -1,0 +1,30 @@
+// Musashi runtime: outer repeat calls inner that also uses dbra (d7).
+// Without d7 save/restore across jsr, the outer loop hangs until cycle budget.
+// PASS MMIO: 0x00100004, FAIL MMIO: 0x00100000
+
+code runtime_d7:
+    asm {
+        jsr run_test
+        stop #$2700
+    }
+
+    proc run_test() -> int {
+        var hits: int = 0;
+        repeat 4 {
+            call bump();
+            hits = hits + 1;
+        }
+        if (hits == 4) {
+            asm "move.l #1,$00100004";
+        } else {
+            asm "move.l #1,$00100000";
+        }
+        return hits;
+    }
+
+    proc bump() -> void {
+        // Inner dbra loop clobbers d7 unless the caller saved it.
+        repeat 3 {
+            asm "nop";
+        }
+    }

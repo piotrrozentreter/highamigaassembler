@@ -487,6 +487,56 @@ code test:
         asm = proc_body(compile_src(src), "delay_loop")
         assert "dbra" in asm
 
+    def test_call_stmt_in_body_blocks_dbra(self):
+        """call inner() must disable for-dbra the same way a MacroCall / bare call does,
+        so an outer unused-var for cannot leave d7 live across a jsr into a dbra callee."""
+        src = """
+code test:
+    proc inner(dummy: int) -> int {
+        var sum: int = 0;
+        repeat 3 {
+            sum = sum + 1;
+        }
+        return sum;
+    }
+
+    proc for_with_call(dummy: int) -> int {
+        var sum: int = 0;
+        var i: int = 0;
+        for i = 0 to 9 {
+            call inner(0);
+            sum = sum + 1;
+        }
+        return sum;
+    }
+"""
+        asm = proc_body(compile_src(src), "for_with_call")
+        assert "dbra" not in asm
+        assert "jsr inner" in asm
+
+    def test_bare_call_in_body_blocks_dbra(self):
+        """Bare function call (MacroCall -> CallStmt) already blocked via MacroCall;
+        keep the regression that it still disables for-dbra."""
+        src = """
+code test:
+    proc inner(dummy: int) -> int {
+        return 1;
+    }
+
+    proc for_with_bare_call(dummy: int) -> int {
+        var sum: int = 0;
+        var i: int = 0;
+        for i = 0 to 9 {
+            inner(0);
+            sum = sum + 1;
+        }
+        return sum;
+    }
+"""
+        asm = proc_body(compile_src(src), "for_with_bare_call")
+        assert "dbra" not in asm
+        assert "jsr inner" in asm
+
 
 # ---------------------------------------------------------------------------
 # d7 nesting safety: RepeatLoop and the ForLoop fast path share one register
@@ -620,6 +670,69 @@ code test:
         assert not self.SAVE_RE.search(first)
         assert not self.SAVE_RE.search(second)
 
+    def test_call_inside_repeat_saves_d7_around_jsr(self):
+        """RepeatLoop always uses dbra; a call in the body must save/restore d7 around
+        jsr so a callee that also uses dbra cannot clobber the outer counter."""
+        src = """
+code test:
+    proc inner(dummy: int) -> int {
+        var n: int = 0;
+        repeat 3 {
+            n = n + 1;
+        }
+        return n;
+    }
+
+    proc outer_repeat_call(dummy: int) -> int {
+        var sum: int = 0;
+        repeat 5 {
+            call inner(0);
+            sum = sum + 1;
+        }
+        return sum;
+    }
+"""
+        asm = proc_body(compile_src(src), "outer_repeat_call")
+        assert count_instruction(asm, "dbra") == 1
+        assert "jsr inner" in asm
+        # Save/restore must bracket the jsr (not merely appear somewhere in the proc).
+        lines = [l.strip() for l in asm.splitlines()]
+        jsr_idx = next(i for i, l in enumerate(lines) if re.search(r"\bjsr\s+inner\b", l))
+        assert self.SAVE_RE.search(lines[jsr_idx - 1]), (
+            f"expected d7 save immediately before jsr, got: {lines[jsr_idx - 1]!r}"
+        )
+        assert self.RESTORE_RE.search(lines[jsr_idx + 1]), (
+            f"expected d7 restore immediately after jsr, got: {lines[jsr_idx + 1]!r}"
+        )
+
+    def test_expr_call_inside_repeat_saves_d7_around_jsr(self):
+        """Expression-form calls (ast.Call) must also protect d7 while dbra_depth > 0."""
+        src = """
+code test:
+    proc inner(dummy: int) -> int {
+        var n: int = 0;
+        repeat 2 {
+            n = n + 1;
+        }
+        return n;
+    }
+
+    proc outer_repeat_expr_call(dummy: int) -> int {
+        var sum: int = 0;
+        repeat 4 {
+            sum = sum + inner(0);
+        }
+        return sum;
+    }
+"""
+        asm = proc_body(compile_src(src), "outer_repeat_expr_call")
+        assert count_instruction(asm, "dbra") == 1
+        assert "jsr inner" in asm
+        lines = [l.strip() for l in asm.splitlines()]
+        jsr_idx = next(i for i, l in enumerate(lines) if re.search(r"\bjsr\s+inner\b", l))
+        assert self.SAVE_RE.search(lines[jsr_idx - 1])
+        assert self.RESTORE_RE.search(lines[jsr_idx + 1])
+
 
 # ---------------------------------------------------------------------------
 # Direct unit tests for the AST-walking eligibility helper
@@ -659,6 +772,16 @@ class TestForBodyBlocksDbraUnit:
     def test_macro_call_always_blocks(self):
         cg = _empty_codegen()
         body = [ast.MacroCall(name="do_something", args=[])]
+        assert cg._for_body_blocks_dbra(body, "i") is True
+
+    def test_call_stmt_always_blocks(self):
+        cg = _empty_codegen()
+        body = [ast.CallStmt(name="inner", args=[])]
+        assert cg._for_body_blocks_dbra(body, "i") is True
+
+    def test_call_expr_always_blocks(self):
+        cg = _empty_codegen()
+        body = [ast.ExprStmt(expr=ast.Call(name="inner", args=[]))]
         assert cg._for_body_blocks_dbra(body, "i") is True
 
     def test_nested_if_reference_blocks(self):

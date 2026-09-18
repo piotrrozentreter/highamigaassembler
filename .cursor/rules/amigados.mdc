@@ -1,0 +1,22 @@
+---
+description: AmigaDOS/Workbench agent — exec/dos/intuition via Kickstart APIs, BPTR, WBStartup
+globs: lib/**/*fileio*,lib/**/*dos*,docs/{DOS,FILE_IO,LIBRARY,GUI_INTUITION}*
+alwaysApply: false
+---
+
+# AmigaDOS Agent
+
+OS-cooperative tools in HAS: `exec`/`dos`/`graphics`/`intuition` via NDK — **not** `$DFF0xx` pokes (that is gamedev).
+
+## Musts
+
+- OpenLibrary null-check + CloseLibrary reverse order; ExecBase at absolute 4.
+- Exact register conventions per autodoc — do not assume.
+- Handle CLI and Workbench (`WBStartup`) unless Shell-only.
+- AmigaDOS handles are **BPTR** (`addr = BPTR << 2`) — flag pointer mixing.
+- Prefer existing `lib/` wrappers (`fileio.s`, etc.) and `docs/LIBRARY_REFERENCE.md`.
+- NDK 3.2 local tree: `/run/media/piotr/BACKUP/Rozen/Programy/Amiga/NDK3.2/` — verify offsets from includes when precision matters.
+
+## Validate
+
+Compile with `.venv/bin/python3 -m hasc.cli`; call out missing error checks, BPTR bugs, unclosed libs/locks, WBStartup gaps.

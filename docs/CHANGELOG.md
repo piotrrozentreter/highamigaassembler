@@ -17,6 +17,38 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Fixed
 
+- **`dbra` / `d7` corruption across calls inside counter loops.** Call forms
+  (`CallStmt` / `Call`) now block the for-`dbra` fast path the same way `MacroCall`
+  already did. While `dbra_depth > 0`, call emission also saves/restores `d7`
+  around `jsr`, so a callee that runs its own `dbra` loop no longer hangs or
+  miscounts the outer loop.
+
+- **Data-section `.w` / `.l` arrays reserved wrong storage.** Uninitialized
+  word/long arrays now emit `ds.w` / `ds.l` with the declared element count
+  (element-sized reservation). Singleton, short braced, and string array
+  initializers emit `dc.*` and zero-pad remaining declared elements with
+  `dcb.*`; underfill is allowed, overflow remains a validation error.
+  Coverage: `tests/test_data_array_emission.py`.
+
+- **Struct pointer field access no longer guesses layouts.** Unknown pointee
+  type or unknown field is a hard codegen error. Access requires a typed
+  `T*` whose pointee is a known struct (no fallback x/y/active/dir offsets).
+
+- **`__reg(aN)` parameters now get prologue stack slots** like `__reg(dN)`.
+  `(*p).field` / `p->field` reload the pointer from the saved frame slot, so
+  stores remain correct after caller-saved `aN` is clobbered.
+
+- **Validator no longer mutates the AST during `validate()`.** Const-resolved
+  array dimensions and BSS sizes stay in side tables; `apply_resolutions()`
+  (invoked by the CLI after a successful validate) writes them onto the AST
+  for codegen. See `tests/test_validator_no_ast_mutation.py`.
+
+- **Musashi runtime coverage for the Critical/High codegen fixes.** Added
+  `dbra_call_d7_pass`, `areg_param_store_pass`, and `data_array_layout_pass`
+  under `examples/runtime_musashi/`, plus `scripts/flatten_asm_for_musashi.py`
+  so DATA/BSS programs assemble to a single flat `-Fbin` image (CODE first).
+  Verified on the virtual 68000 via `./scripts/test_runtime_musashi.sh`.
+
 - **Peephole optimizer could silently drop a real function call.** `_fold_immediate_to_memory`'s
   (and `_fold_clr_to_memory`'s) "one-gap" variant folds `move #N,dX` / `<gap>` / `move dX,MEM` into
   a single `move #N,MEM`, but `_is_branch` did not recognize `jsr`/`bsr` as a control-transfer

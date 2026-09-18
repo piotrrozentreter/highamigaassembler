@@ -133,9 +133,10 @@ code main:
 
 1. **cli.py:main()** reads the file
 2. **parser.parse()** converts text to AST
-3. **Validator().validate()** checks semantics
-4. **CodeGen().gen()** emits assembly
-5. Output written to `debug_output.s`
+3. **Validator().validate()** checks semantics (no AST mutation; side tables hold resolutions)
+4. **Validator().apply_resolutions()** writes resolved dims/sizes onto the AST for codegen
+5. **CodeGen().gen()** emits assembly
+6. Output written to `debug_output.s`
 
 **Exercise**: Add `print()` statements in each stage to observe execution:
 
@@ -195,7 +196,9 @@ print(f"DEBUG: Generating code for {len(self.module.items)} items")
 
 **Key Components**:
 - `CodeGen`: Main code generation class (2800+ lines)
-- `RegisterAllocator`: Manages d0-d7, a0-a6 allocation
+- `RegisterAllocator` (`hasc/register_allocator.py`): **unused by CodeGen today**;
+  fixed scratches (`d0`/`d1`/`d2`, occasionally `d3`) and ad-hoc `-(a7)` spills;
+  `d7` reserved for `dbra` (see `.github/repo-memory/codegen-quirks.md`)
 - Emitters: `_emit_proc()`, `_emit_stmt()`, `_emit_expr()`
 
 ### Stage 4: Output
@@ -434,7 +437,7 @@ def __init__(self, module: ast.Module, target: TargetSpec = DEFAULT_TARGET):
     self.constants = self._build_constants(module)          # Constant values
     self.globals = self._build_globals(module)              # Global symbols
     self.struct_info = self._build_struct_info(module)      # Struct layouts
-    self.reg_alloc = RegisterAllocator()                    # Register allocator
+    # Note: CodeGen does not instantiate RegisterAllocator; scratches are hardcoded.
 ```
 
 **Why These Tables?**
@@ -598,13 +601,20 @@ code.append(f"    move{suffix} {operand},{value_reg}")
 
 ## Understanding the Register Allocator
 
+> **Status (2026-09):** `RegisterAllocator` is **not wired into `CodeGen`**. Live
+> emission hardcodes scratch registers and ad-hoc stack spills; `d7` is reserved
+> for `dbra` via `dbra_depth` / call-site save-restore. The API below documents
+> the *intended* allocator in `hasc/register_allocator.py` and fixed conventions —
+> see `.github/repo-memory/codegen-quirks.md`. Do not assume `allocate_data()`
+> reserves a register against the rest of codegen.
+
 ### Why Register Allocation Matters
 
 **Problem**: 68000 has limited registers (8 data, 7 address usable)
 
-**Solution**: `RegisterAllocator` class manages allocation with **spilling** to stack
+**Intended solution**: `RegisterAllocator` would manage allocation with **spilling** to stack (not active in CodeGen today)
 
-### Register Allocation Strategy (codegen.py lines 6-170)
+### Register conventions (fixed scratches + intended allocator)
 
 #### Data Registers (d0-d7)
 

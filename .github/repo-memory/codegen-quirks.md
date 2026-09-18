@@ -12,23 +12,20 @@
   now removed, but codegen-side `_normalize_expr` remains a useful defensive layer for other
   parse tree shapes.
 
-## RegisterAllocator (hasc/register_allocator.py) is mostly decorative
-- `self.reg_alloc` (`RegisterAllocator` instance) is barely consulted by real codegen.
-  `_emit_expr`/`_emit_stmt` hardcode literal register names ("d0", "d1", "d2", occasionally
-  "d3") throughout instead of calling `reg_alloc.allocate_data()`. Don't assume allocating a
-  register via `RegisterAllocator` actually reserves it against the rest of codegen - it doesn't.
-- **d7 is the one truly-reserved register**: never used as a scratch register anywhere in
-  expression/statement codegen. It's compiler-wide reserved for `dbra` loop counters
-  (`RepeatLoop`, and the `ForLoop` DBcc fast path). Validator/docs also treat d7 as reserved
-  (can't `#pragma lockreg` it, etc.).
-- Nested loops that both want d7 (e.g. `for` inside `for`, or `repeat` inside `for`) must
-  save/restore d7 around the inner loop. See `CodeGen.dbra_depth` /
-  `_dbra_loop_enter`/`_dbra_loop_exit` in codegen.py - a shared nesting-depth counter used by
-  both `RepeatLoop` and the `ForLoop` dbra fast path so either can be "inner" or "outer".
-  Note: this does NOT protect against a *called procedure* internally using a dbra loop while
-  the caller is also mid-dbra-loop (d7 isn't saved across `jsr`/`rts`) - pre-existing gap,
-  not fixed (would need prologue/epilogue-level d7 preservation, out of scope for a
-  local codegen change).
+## RegisterAllocator (hasc/register_allocator.py) is unused by CodeGen
+- `CodeGen` does **not** import or instantiate `RegisterAllocator`. `_emit_expr`/`_emit_stmt`
+  hardcode literal register names ("d0", "d1", "d2", occasionally "d3") and ad-hoc `-(a7)`
+  spills. Calling `allocate_data()` does nothing to the rest of codegen.
+- `#pragma lockreg` currently only influences frame-register choice (a4 vs a6), not scratch
+  allocation. Do not claim lockreg reserves expression temps until an allocator is wired.
+- **d7 is the one truly-reserved register**: never used as a general scratch. It is
+  compiler-wide reserved for `dbra` loop counters (`RepeatLoop`, and the `ForLoop` DBcc fast
+  path), managed by `CodeGen.dbra_depth` / `_dbra_loop_enter`/`_dbra_loop_exit`.
+- Nested loops that both want d7 must save/restore d7 around the inner loop via that nesting
+  counter.
+- Cross-proc: while `dbra_depth > 0`, call emission must save/restore d7 around `jsr` (and
+  `CallStmt` must block the for-dbra fast path the same way `MacroCall` does). Leaving d7
+  live across an unprotected call hangs or miscounts the outer loop.
 
 ## Peephole optimizer already does immediate-load downsizing
 - `hasc/peepholeopt.py`'s `_optimize_immediate_ops` converts `move.l #n,dN` -> `moveq #n,dN`

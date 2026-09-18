@@ -18,7 +18,9 @@ from hasc import validator as has_validator
 
 def compile_src(src: str) -> str:
     mod = has_parser.parse(src)
-    has_validator.Validator(mod).validate()
+    val = has_validator.Validator(mod)
+    val.validate()
+    val.apply_resolutions()
     return has_codegen.CodeGen(mod).gen()
 
 
@@ -120,7 +122,10 @@ code main:
         assert re.search(r"add\.l\s+#1,8\(a6\)", body)
         assert re.search(r"sub\.l\s+#1,12\(a6\)", body)
 
-    def test_statement_areg_param_updates_register_directly(self):
+    def test_statement_areg_param_updates_saved_slot(self):
+        # Address-register params are spilled to the frame like data-reg params
+        # so (*p).field / p->field can reload after caller-saved clobbers.
+        # Statement ++/-- therefore update the saved slot, not live a0.
         src = """
 code main:
     proc areg_stmt(__reg(a0) p: ptr) -> int {
@@ -132,8 +137,10 @@ code main:
         asm = compile_src(src)
         body = proc_body(asm, "areg_stmt")
 
-        assert re.search(r"add\.l\s+#1,a0", body)
-        assert re.search(r"sub\.l\s+#1,a0", body)
+        assert re.search(r"move\.l\s+a0,-\d+\(a6\)\s*;\s*save p from a0", asm)
+        assert re.search(r"add\.l\s+#1,-\d+\(a[46]\)", body)
+        assert re.search(r"sub\.l\s+#1,-\d+\(a[46]\)", body)
+        assert not re.search(r"add\.l\s+#1,a0", body)
         assert not re.search(r"move\.l\s+a0,d0", body)
 
     def test_post_increment_expression_preserves_old_value(self):

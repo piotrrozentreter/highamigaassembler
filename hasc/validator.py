@@ -22,9 +22,19 @@ class Validator:
         self.proc_funcs = {}  # Local procedures: {name: [params]}
         self.macros = {}  # Macro definitions: {name: [params]}
         self.interrupts = {}  # interrupt slot index (0-15) -> ast.InterruptProc
+        # Side tables for const-resolved metadata (keyed by id(var)).
+        # Validation must not mutate AST nodes; call apply_resolutions() after
+        # a successful validate() to rewrite dimensions/sizes onto the AST for codegen.
+        self.resolved_dimensions = {}  # id(GlobalVarDecl) -> list[int]
+        self.resolved_sizes = {}  # id(GlobalVarDecl) -> str (byte/element count)
         
     def validate(self):
-        """Run all validation checks on the module."""
+        """Run all validation checks on the module.
+
+        Does not mutate AST nodes. Resolved array dimensions and BSS sizes are
+        stored in self.resolved_dimensions / self.resolved_sizes; call
+        apply_resolutions() after success so codegen sees integer dims/sizes.
+        """
         # First pass: process directives, collect constants, collect globals, collect externs
         for item in self.module.items:
             if isinstance(item, ast.WarningDirective):
@@ -57,28 +67,19 @@ class Validator:
                         else:
                             self.constants[var.name] = var.value
                     else:
-                        # Resolve array dimensions that reference constants
+                        # Resolve array dimensions into side table (no AST mutation)
+                        resolved_dims = None
                         if isinstance(var, ast.GlobalVarDecl) and var.dimensions:
-                            resolved_dims = []
-                            for dim in var.dimensions:
-                                if isinstance(dim, int):
-                                    resolved_dims.append(dim)
-                                else:
-                                    dim_str = str(dim)
-                                    if dim_str.isdigit():
-                                        resolved_dims.append(int(dim_str))
-                                    elif dim_str in self.constants:
-                                        resolved_dims.append(int(self.constants[dim_str]))
-                                    else:
-                                        self.errors.append(f"Array dimension constant '{dim_str}' not defined for '{var.name}'")
-                                        resolved_dims.append(0)
-                            var.dimensions = resolved_dims
+                            resolved_dims = self._resolve_dimensions(var)
                         
-                        # Validate array length matches initializer count
-                        if isinstance(var, ast.GlobalVarDecl) and var.is_array and var.dimensions and var.values:
-                            declared_length = var.dimensions[0] if len(var.dimensions) == 1 else None
-                            actual_length = len(var.values)
-                            if declared_length is not None and declared_length != actual_length:
+                        # Validate array length vs initializer count (underfill is
+                        # allowed — codegen pads remaining elements with zeros).
+                        if isinstance(var, ast.GlobalVarDecl) and var.is_array and resolved_dims and var.values:
+                            declared_length = resolved_dims[0] if len(resolved_dims) == 1 else None
+                            actual_length = sum(
+                                len(v) if isinstance(v, str) else 1 for v in var.values
+                            )
+                            if declared_length is not None and actual_length > declared_length:
                                 self.errors.append(
                                     f"Array '{var.name}' declared with length {declared_length} but has {actual_length} initializer values"
                                 )
@@ -100,37 +101,12 @@ class Validator:
                             self.constants[var.name] = var.value
                     else:
                         if isinstance(var, ast.GlobalVarDecl):
-                            # Resolve array dimensions that reference constants
+                            resolved_dims = None
                             if var.dimensions:
-                                resolved_dims = []
-                                for dim in var.dimensions:
-                                    if isinstance(dim, int):
-                                        resolved_dims.append(dim)
-                                    else:
-                                        dim_str = str(dim)
-                                        if dim_str.isdigit():
-                                            resolved_dims.append(int(dim_str))
-                                        elif dim_str in self.constants:
-                                            resolved_dims.append(int(self.constants[dim_str]))
-                                        else:
-                                            self.errors.append(f"Array dimension constant '{dim_str}' not defined for '{var.name}'")
-                                            resolved_dims.append(0)
-                                var.dimensions = resolved_dims
+                                resolved_dims = self._resolve_dimensions(var)
 
-                            # Resolve size specified via constant name (e.g., buf.l: SIZE_CONST)
-                            if var.size and isinstance(var.size, str) and not str(var.size).isdigit():
-                                if var.size in self.constants:
-                                    var.size = str(self.constants[var.size])
-                                else:
-                                    self.errors.append(f"Size constant '{var.size}' not defined for '{var.name}'")
-
-                            # If size still missing but dimensions are known, compute size
-                            if (not var.size) and var.dimensions:
-                                elem_size = 1 if (var.size_suffix == 'b') else (2 if var.size_suffix == 'w' else 4)
-                                total = 1
-                                for d in var.dimensions:
-                                    total *= d
-                                var.size = str(total * elem_size)
+                            # Resolve size via const name / computed dims into side table
+                            effective_size = self._resolve_bss_size(var, resolved_dims)
 
                             # A bss 'name.suffix: COUNT' declaration (no array_dims,
                             # i.e. var.is_array is False) reserves COUNT>1 units of raw
@@ -139,7 +115,12 @@ class Validator:
                             # codegen path used for genuine 'byte*'-style globals like a
                             # single 'ptr.l: 1'). Flag direct indexing so this can't
                             # compile to a garbage-address read/write with no diagnostic.
-                            if not var.is_array and var.size and str(var.size).isdigit() and int(var.size) > 1:
+                            if (
+                                not var.is_array
+                                and effective_size
+                                and str(effective_size).isdigit()
+                                and int(effective_size) > 1
+                            ):
                                 self.non_indexable_buffers.add(var.name)
 
                             self.globals.add(var.name)
@@ -205,6 +186,71 @@ class Validator:
             raise ValidationError(f"Validation failed:\n{error_msg}")
         
         return self.warnings
+
+    def apply_resolutions(self, module=None):
+        """Rewrite resolved dimensions/sizes onto the AST after successful validate().
+
+        This is the only intentional mutation of GlobalVarDecl.dimensions / .size
+        for constant resolution. Validation itself keeps results in side tables so
+        repeated validate() calls leave the AST unchanged until this is invoked.
+        """
+        module = module if module is not None else self.module
+        for item in module.items:
+            if not isinstance(item, (ast.DataSection, ast.BssSection)):
+                continue
+            for var in item.variables:
+                if not isinstance(var, ast.GlobalVarDecl):
+                    continue
+                vid = id(var)
+                if vid in self.resolved_dimensions:
+                    var.dimensions = list(self.resolved_dimensions[vid])
+                if vid in self.resolved_sizes:
+                    var.size = self.resolved_sizes[vid]
+
+    def _resolve_dimensions(self, var):
+        """Resolve named/digit dimensions into ints; store in side table; return list."""
+        resolved_dims = []
+        for dim in var.dimensions:
+            if isinstance(dim, int):
+                resolved_dims.append(dim)
+            else:
+                dim_str = str(dim)
+                if dim_str.isdigit():
+                    resolved_dims.append(int(dim_str))
+                elif dim_str in self.constants:
+                    resolved_dims.append(int(self.constants[dim_str]))
+                else:
+                    self.errors.append(
+                        f"Array dimension constant '{dim_str}' not defined for '{var.name}'"
+                    )
+                    resolved_dims.append(0)
+        self.resolved_dimensions[id(var)] = resolved_dims
+        return resolved_dims
+
+    def _resolve_bss_size(self, var, resolved_dims):
+        """Resolve BSS size from const name or computed dimensions into side table.
+
+        Returns the effective size string used for further validation checks.
+        Does not mutate var.size.
+        """
+        effective_size = var.size
+        if effective_size and isinstance(effective_size, str) and not str(effective_size).isdigit():
+            if effective_size in self.constants:
+                effective_size = str(self.constants[effective_size])
+                self.resolved_sizes[id(var)] = effective_size
+            else:
+                self.errors.append(f"Size constant '{var.size}' not defined for '{var.name}'")
+
+        dims = resolved_dims if resolved_dims is not None else var.dimensions
+        if (not effective_size) and dims:
+            elem_size = 1 if (var.size_suffix == 'b') else (2 if var.size_suffix == 'w' else 4)
+            total = 1
+            for d in dims:
+                total *= d
+            effective_size = str(total * elem_size)
+            self.resolved_sizes[id(var)] = effective_size
+
+        return effective_size
     
     def _validate_struct_fields(self, struct_var):
         """Reject unusable declared types in the "name: type" struct-field form."""
