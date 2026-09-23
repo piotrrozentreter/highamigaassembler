@@ -285,6 +285,98 @@ def test_user_code_blocks_survive_regeneration():
     assert "ID_BTN_QUIT" in second
 
 
+# ---------------------------------------------------------------------------
+# pythonami .py emission
+# ---------------------------------------------------------------------------
+
+
+def test_py_emits_load_library_and_layer1_calls():
+    from guicreator import py_export
+
+    text = py_export.render(make_form(), "gui_form")
+    assert "load_library(GUI_PLUGIN)" in text
+    assert "gui.add_editbox(" in text
+    assert "gui.add_button(" in text
+    assert "gui.wait_event()" in text
+    assert "ID_BTN_OK" in text
+    assert "# USER CODE BEGIN btn_ok.on_click" in text
+    assert 'if __name__ == "__main__":' in text
+    assert "begin_window(WIN_TITLE, WIN_X, WIN_Y, WIN_W, WIN_H, FORM_IDCMP, FORM_FLAGS)" in text
+    for line in text.splitlines():
+        assert not line.rstrip().endswith(","), f"wrapped call risk: {line!r}"
+
+
+def test_py_handler_if_suites_are_not_comment_only():
+    """pythonami rejects if-bodies that contain only comments (no pass/stmt)."""
+    from guicreator import py_export
+
+    text = py_export.render(make_form(), "gui_form")
+    start = text.index("def on_button")
+    chunk = text[start : text.index("def on_string")]
+    assert "if eid == ID_BTN_OK:\n        pass\n" in chunk
+
+
+def test_py_export_passes_pythonami_check():
+    """Generated forms must compile under pythonami --check (no execute)."""
+    from guicreator import py_export
+
+    pythonami = Path("/run/media/piotr/BACKUP/Rozen/Projects/pythonami/build/host/pythonami")
+    if not pythonami.is_file():
+        pytest.skip("pythonami host binary not built")
+    out = Path("/tmp/gui_form_check.py")
+    py_export.save(make_form(), out, meta_source="test", preserve_user_code=False)
+    result = subprocess.run(
+        [str(pythonami), "--check", str(out)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_py_user_code_blocks_survive_regeneration():
+    from guicreator import py_export
+
+    m = make_form()
+    first = py_export.render(m, "gui_form")
+    edited = first.replace(
+        '        # TODO: button "OK" clicked',
+        "        running = 0",
+    )
+    preserved = py_export.extract_user_code(edited)
+    m.add(ControlType.BUTTON, 12, 64, 60, 18, caption="Quit", name="btn_quit")
+    second = py_export.render(m, "gui_form", user_code=preserved)
+    assert "running = 0" in second
+    assert "ID_BTN_QUIT" in second
+
+
+def test_export_python_cli(tmp_path):
+    layout = ROOT / "guicreator" / "examples" / "login.hasmeta"
+    out = tmp_path / "login.py"
+    result = subprocess.run(
+        [sys.executable, "-m", "guicreator", "--export-python", str(layout), "-o", str(out)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = out.read_text(encoding="utf-8")
+    assert "gui.add_label(" in text and "gui.init()" in text
+
+
+def test_shipped_python_example_matches_regenerated_output():
+    from guicreator import py_export
+
+    layout = ROOT / "guicreator" / "examples" / "login.hasmeta"
+    shipped = (ROOT / "examples" / "gui_login_form.py").read_text(encoding="utf-8")
+    regenerated = py_export.render(
+        hasmeta.load(layout), "gui_login_form", "guicreator/examples/login.hasmeta"
+    )
+    drop_timestamp = lambda t: [
+        ln for ln in t.splitlines() if not ln.startswith("# Generated")
+    ]
+    assert drop_timestamp(shipped) == drop_timestamp(regenerated)
+
+
 def test_generated_source_has_no_bom_and_unix_newlines(tmp_path):
     path = tmp_path / "form.has"
     has_export.save(make_form(), path)

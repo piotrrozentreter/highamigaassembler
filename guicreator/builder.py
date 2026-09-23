@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
-from . import has_export, hasmeta
+from . import has_export, hasmeta, py_export
 from .model import (
     BITMAP_COLOR_DEPTHS,
     BORDER_TOP,
@@ -71,6 +71,9 @@ class GuiCreatorApp(tk.Tk):
         file_menu.add_command(label="Save .hasmeta As...", command=self.save_project_as)
         file_menu.add_separator()
         file_menu.add_command(label="Export .has skeleton...", accelerator="Ctrl+E", command=self.export_has)
+        file_menu.add_command(
+            label="Export Python skeleton...", accelerator="Ctrl+Shift+E", command=self.export_python
+        )
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         bar.add_cascade(label="File", menu=file_menu)
@@ -97,6 +100,7 @@ class GuiCreatorApp(tk.Tk):
         self.bind("<Control-o>", lambda e: self.open_project())
         self.bind("<Control-s>", lambda e: self.save_project())
         self.bind("<Control-e>", lambda e: self.export_has())
+        self.bind("<Control-E>", lambda e: self.export_python())
         self.bind("<Delete>", lambda e: self.delete_selected())
         for key, dx, dy in (("Left", -GRID, 0), ("Right", GRID, 0), ("Up", 0, -GRID), ("Down", 0, GRID)):
             self.bind(f"<{key}>", lambda e, dx=dx, dy=dy: self.nudge(dx, dy))
@@ -556,6 +560,31 @@ class GuiCreatorApp(tk.Tk):
             return
         self.status.set(f"Exported {path} (existing USER CODE blocks preserved).")
 
+    def export_python(self) -> None:
+        problems = self.manager.validate()
+        if problems:
+            if not messagebox.askyesno(
+                "Layout problems",
+                "The layout has %d problem(s):\n\n%s\n\nExport anyway?"
+                % (len(problems), "\n".join("- " + p for p in problems[:8])),
+            ):
+                return
+        path = filedialog.asksaveasfilename(
+            title="Export pythonami skeleton",
+            defaultextension=".py",
+            initialfile=(self.project_path.stem if self.project_path else "gui_form") + ".py",
+            filetypes=[("Python source", "*.py")],
+        )
+        if not path:
+            return
+        source = str(self.project_path) if self.project_path else "<unsaved layout>"
+        try:
+            py_export.save(self.manager, Path(path), meta_source=source)
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        self.status.set(f"Exported {path} (existing USER CODE blocks preserved).")
+
     def show_validation(self) -> None:
         problems = self.manager.validate()
         if problems:
@@ -566,9 +595,9 @@ class GuiCreatorApp(tk.Tk):
     def _about(self) -> None:
         messagebox.showinfo(
             "HAS GUI Creator",
-            "WYSIWYG designer that emits .hasmeta layout metadata and a\n"
-            "compilable .has skeleton targeting intuition.library.\n\n"
-            "Runtime contract: docs/GUI_INTUITION_RUNTIME_SPEC.md",
+            "WYSIWYG designer that emits .hasmeta layout metadata,\n"
+            "a .has Intuition skeleton, and a pythonami .py skeleton.\n"
+            "See docs/GUI_CREATOR.md and docs/GUI_PYTHONAMI_API.md.",
         )
 
     # ------------------------------------------------------------------

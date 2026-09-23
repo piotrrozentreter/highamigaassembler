@@ -2,17 +2,19 @@
 
 GUI Creator is the initial foundation for a broader Amiga GUI utility. Today it is a WYSIWYG
 designer for Amiga forms. It is **not** a standalone application and produces no executable of
-its own: it is an editor that emits structured metadata for the HAS/68000 pipeline.
+its own: it is an editor that emits structured metadata for the HAS/68000 pipeline and for
+pythonami (Python68K).
 
 - **Tool:** `guicreator/` (Python 3.8+, Tkinter, no extra dependencies)
 - **Layout output:** `.hasmeta` — structured pseudo-code, also the designer's project format
-- **Code output:** `.has` — a compilable, system-friendly `intuition.library` program skeleton
-- **Runtime contract:** [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md)
+- **Code output (HAS):** `.has` — compilable `intuition.library` program skeleton
+- **Code output (pythonami):** `.py` — Layer 1 `load_library` form skeleton
+- **HAS runtime contract:** [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md)
+- **pythonami API contract:** [GUI_PYTHONAMI_API.md](GUI_PYTHONAMI_API.md)
 
 ```
- designer canvas ──▶ MetadataManager ──▶ form.hasmeta ──▶ form.has ──▶ hasc ──▶ .s ──▶ vasm/vlink
-                                                             │
-                                                  lib/gui_intuition.s
+ designer canvas ──▶ MetadataManager ──▶ form.hasmeta ──┬──▶ form.has ──▶ hasc / gui_intuition.s
+                                                       └──▶ form.py  ──▶ pythonami / gui_intuition.py68k
 ```
 
 ---
@@ -28,6 +30,9 @@ python -m guicreator guicreator/examples/login.hasmeta
 
 # Headless: regenerate the HAS skeleton from a layout
 python -m guicreator --export-has guicreator/examples/login.hasmeta -o examples/gui_login_form.has
+
+# Headless: regenerate the pythonami skeleton
+python -m guicreator --export-python guicreator/examples/login.hasmeta -o examples/gui_login_form.py
 
 # Headless: check a layout without opening a window
 python -m guicreator --validate guicreator/examples/login.hasmeta

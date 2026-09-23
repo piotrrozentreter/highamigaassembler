@@ -5,9 +5,11 @@ designer for Amiga forms that emits **structured metadata**, not an application:
 
 - `.hasmeta` — layout pseudo-code for the HAS/68000 pipeline (also the project format)
 - `.has` — a compilable `intuition.library` program skeleton with empty event handlers
+- `.py` — a pythonami (Python68K) skeleton calling the Layer 1 `gui_intuition` plugin
 
 Full documentation: [docs/GUI_CREATOR.md](../docs/GUI_CREATOR.md)
-Runtime contract for the assembly side: [docs/GUI_INTUITION_RUNTIME_SPEC.md](../docs/GUI_INTUITION_RUNTIME_SPEC.md)
+HAS runtime: [docs/GUI_INTUITION_RUNTIME_SPEC.md](../docs/GUI_INTUITION_RUNTIME_SPEC.md)
+pythonami API: [docs/GUI_PYTHONAMI_API.md](../docs/GUI_PYTHONAMI_API.md)
 
 ## Quick start
 
@@ -16,11 +18,13 @@ python -m guicreator                                   # designer
 python -m guicreator guicreator/examples/login.hasmeta # designer, layout loaded
 python -m guicreator --validate guicreator/examples/login.hasmeta
 python -m guicreator --export-has guicreator/examples/login.hasmeta -o examples/gui_login_form.has
+python -m guicreator --export-python guicreator/examples/login.hasmeta -o examples/gui_login_form.py
 python -m hasc.cli examples/gui_login_form.has -o build/gui_login_form.s
 ```
 
 Requires Python 3.8+ and Tkinter (bundled with CPython on Windows and macOS; on Debian/Ubuntu
-`apt install python3-tk`). The headless `--validate` / `--export-has` paths do not import Tkinter.
+`apt install python3-tk`). The headless `--validate` / `--export-has` / `--export-python` paths
+do not import Tkinter.
 
 ## Modules
 
@@ -29,10 +33,11 @@ Requires Python 3.8+ and Tkinter (bundled with CPython on Windows and macOS; on 
 | `model.py` | `MetadataManager`, `WindowSpec`, `Control`, validation, ActionID counter | no |
 | `hasmeta.py` | `.hasmeta` writer + reader (exact round-trip) | no |
 | `has_export.py` | `.has` skeleton emitter, USER CODE preservation | no |
+| `py_export.py` | pythonami `.py` skeleton emitter, USER CODE preservation | no |
 | `builder.py` | WYSIWYG designer | yes |
 | `__main__.py` | CLI entry point | only for the UI path |
 
 ## Regeneration is safe
 
-Re-exporting over an existing `.has` keeps everything you wrote between
-`// USER CODE BEGIN <key>` and `// USER CODE END <key>`. Everything else is overwritten.
+Re-exporting over an existing `.has` or `.py` keeps everything you wrote between
+`USER CODE BEGIN <key>` and `USER CODE END <key>` markers. Everything else is overwritten.

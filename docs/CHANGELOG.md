@@ -6,6 +6,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **guicreator pythonami export:** `--export-python` / File menu emit regenerable
+  Python68K skeletons that call the Layer 1 `gui_intuition` plugin API. Contract:
+  [GUI_PYTHONAMI_API.md](GUI_PYTHONAMI_API.md). Example:
+  [examples/gui_login_form.py](../examples/gui_login_form.py).
+
 - **New `loop { ... }` statement**: an endless loop, exited only via `break;`. Functionally
   equivalent to `while(1){}`, but generates leaner code - no condition is ever evaluated or
   branched on, just the loop body followed by an unconditional `bra` back to the top (`while(1){}`

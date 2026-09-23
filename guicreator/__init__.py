@@ -1,4 +1,5 @@
-"""guicreator - WYSIWYG GUI designer that emits HAS metadata for the 68000 pipeline.
+"""guicreator - WYSIWYG GUI designer that emits HAS metadata for the 68000 pipeline
+and pythonami skeletons for Python68K.
 
 The package is deliberately split so the metadata layer can be used headlessly
 (CI, scripting) without importing Tkinter:
@@ -6,6 +7,7 @@ The package is deliberately split so the metadata layer can be used headlessly
     model      - MetadataManager, WindowSpec, Control  (no GUI dependency)
     hasmeta    - .hasmeta writer/reader                 (no GUI dependency)
     has_export - .has skeleton emitter                  (no GUI dependency)
+    py_export  - pythonami .py skeleton emitter         (no GUI dependency)
     builder    - Tkinter WYSIWYG editor
 """
 
@@ -24,4 +26,4 @@ __all__ = [
     "__version__",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
