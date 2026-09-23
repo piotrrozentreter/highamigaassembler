@@ -8,6 +8,7 @@ guicreator, under [pythonami](../../pythonami/) (Python68K) language semantics.
 
 - [GUI_CREATOR.md](GUI_CREATOR.md) — designer and `.hasmeta` format
 - [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md) — HAS `Gui*` assembly runtime (behavioral reference)
+- [GUI_GADGETS_GUIDE.md](GUI_GADGETS_GUIDE.md) — practical gadget usage with short examples
 - pythonami: `docs/amiga-extensions.md`, `ext/gui_intuition/`, `lib/gui_dialog.py`
 
 **Locked decisions**

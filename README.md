@@ -807,7 +807,7 @@ The `tools/` directory contains Python utilities for converting graphics and ass
   - Exports `.hasmeta` layout metadata *and* a compilable `intuition.library` `.has` skeleton
   - Re-export preserves handler code between `// USER CODE BEGIN/END` markers
   - Example: `python3 -m guicreator` or `python3 -m guicreator --export-has form.hasmeta -o form.has`
-  - Documentation: [GUI_CREATOR.md](docs/GUI_CREATOR.md), [GUI_INTUITION_RUNTIME_SPEC.md](docs/GUI_INTUITION_RUNTIME_SPEC.md)
+  - Documentation: [GUI_CREATOR.md](docs/GUI_CREATOR.md), [GUI_GADGETS_GUIDE.md](docs/GUI_GADGETS_GUIDE.md), [GUI_INTUITION_RUNTIME_SPEC.md](docs/GUI_INTUITION_RUNTIME_SPEC.md), [GUI_PYTHONAMI_API.md](docs/GUI_PYTHONAMI_API.md)
 
 ### Example Usage
 

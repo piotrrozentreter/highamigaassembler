@@ -11,6 +11,7 @@ pythonami (Python68K).
 - **Code output (pythonami):** `.py` — Layer 1 `load_library` form skeleton
 - **HAS runtime contract:** [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md)
 - **pythonami API contract:** [GUI_PYTHONAMI_API.md](GUI_PYTHONAMI_API.md)
+- **Gadget usage (HAS + pythonami):** [GUI_GADGETS_GUIDE.md](GUI_GADGETS_GUIDE.md)
 
 ```
  designer canvas ──▶ MetadataManager ──▶ form.hasmeta ──┬──▶ form.has ──▶ hasc / gui_intuition.s

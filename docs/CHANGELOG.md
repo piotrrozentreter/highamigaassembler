@@ -6,6 +6,11 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Guicreator gadgets developer guide:** practical HAS + pythonami usage for all
+  six widget types (Label, Button, EditBox, CheckBox, List, Bitmap), including
+  short read/write examples and the pythonami `gui_dialog` modal pattern.
+  [GUI_GADGETS_GUIDE.md](GUI_GADGETS_GUIDE.md).
+
 - **guicreator pythonami export:** `--export-python` / File menu emit regenerable
   Python68K skeletons that call the Layer 1 `gui_intuition` plugin API. Contract:
   [GUI_PYTHONAMI_API.md](GUI_PYTHONAMI_API.md). Example:

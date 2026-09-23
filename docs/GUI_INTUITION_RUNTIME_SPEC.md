@@ -12,6 +12,7 @@ No `$DFF0xx` access, no `TakeSystem()`. All rendering goes through the window's 
 **Companion documents**
 
 - [GUI_CREATOR.md](GUI_CREATOR.md) — the designer tool and the metadata → assembler mapping.
+- [GUI_GADGETS_GUIDE.md](GUI_GADGETS_GUIDE.md) — practical gadget usage (HAS + pythonami examples).
 - [DOS_LIBRARY.md](DOS_LIBRARY.md) — existing `lib/dos.s` style to mirror (own cached bases,
   `link a6,#0`, arguments at `8(a6)`, result in `d0`).
 - [GUI_LIBRARY.md](GUI_LIBRARY.md) — the *other*, unrelated bare-metal widget library
