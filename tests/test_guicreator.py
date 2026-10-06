@@ -132,12 +132,14 @@ def test_hasmeta_round_trips_checkbox_list_and_bitmap(tmp_path):
     original.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
     original.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy|Mode", "Hard"], selected=1)
     original.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset), bitmap_colors=16)
+    original.add(ControlType.PROGRESS, 12, 90, 200, 12, name="prg_copy", progress=40)
 
     reloaded = hasmeta.loads(hasmeta.render(original, "widgets"))
-    assert [(c.kind, c.checked, c.items, c.selected, c.asset_path, c.bitmap_colors) for c in reloaded] == [
-        (ControlType.CHECKBOX, True, [], 0, "", 2),
-        (ControlType.LIST, False, ["Easy|Mode", "Hard"], 1, "", 2),
-        (ControlType.BITMAP, False, [], 0, str(asset), 16),
+    assert [(c.kind, c.checked, c.items, c.selected, c.asset_path, c.bitmap_colors, c.progress) for c in reloaded] == [
+        (ControlType.CHECKBOX, True, [], 0, "", 2, 0),
+        (ControlType.LIST, False, ["Easy|Mode", "Hard"], 1, "", 2, 0),
+        (ControlType.BITMAP, False, [], 0, str(asset), 16, 0),
+        (ControlType.PROGRESS, False, [], 0, "", 2, 40),
     ]
 
 
@@ -234,9 +236,12 @@ def test_has_emits_new_widget_calls_events_and_bitmap_data(tmp_path):
     m.add(ControlType.CHECKBOX, 12, 22, caption="Remember", checked=True, name="chk_remember")
     m.add(ControlType.LIST, 12, 42, 100, 40, name="list_mode", items=["Easy", "Hard"], selected=1)
     m.add(ControlType.BITMAP, 130, 42, 16, 8, name="bmp_icon", asset_path=str(asset))
+    m.add(ControlType.PROGRESS, 12, 100, 200, 12, name="prg_copy", progress=25)
 
     text = has_export.render(m, "widgets")
     assert "GuiAddCheckBox" in text and "GuiAddList" in text and "GuiAddBitmap" in text
+    assert "GuiAddProgress" in text and "GuiSetProgress" in text
+    assert "call GuiAddProgress(ID_PRG_COPY, 12, 100, 200, 12, 25);" in text
     assert "GUI_EVT_CHECKBOX = 8" in text and "GUI_EVT_LIST     = 9" in text
     assert "dc.w 0,0,16,8" in text, "struct Image header"
     # DrawImage renders through the blitter, so pixel data must be in chip RAM.

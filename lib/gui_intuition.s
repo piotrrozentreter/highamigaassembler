@@ -36,6 +36,7 @@
 ;   GuiAddCheckBox(id,x,y,w,h,caption,checked) -> int
 ;   GuiAddList(id,x,y,w,h,labels,count,selected) -> int
 ;   GuiAddBitmap(id,x,y,w,h,image) -> int
+;   GuiAddProgress(id,x,y,w,h,percent) -> int
 ;   GuiShow() -> int                     ; Window*, 0 fail, -1 order violation
 ;   GuiCloseWindow() -> void
 ;   GuiWaitEvent() -> int                ; GUI_EVT_*, -1 if not shown
@@ -43,6 +44,7 @@
 ;   GuiGetEditText(id) -> int
 ;   GuiSetEditText(id,text) -> int
 ;   GuiSetLabelText(id,text) -> int
+;   GuiSetProgress(id,percent) -> int
 ;   GuiEnableWidget(id,enable) -> int
 ;   GuiActivateEdit(id) -> int
 ;   GuiRedraw() -> void
@@ -139,6 +141,8 @@ gui_list_count:
     ds.w GUI_MAX_GADGETS
 gui_list_selected:
     ds.w GUI_MAX_GADGETS
+gui_progress_pct:
+    ds.w GUI_MAX_GADGETS
 gui_chk_it:
     ds.b IT_SIZEOF
 gui_list_it:
@@ -160,6 +164,7 @@ gui_list_it:
     XDEF GuiAddCheckBox
     XDEF GuiAddList
     XDEF GuiAddBitmap
+    XDEF GuiAddProgress
     XDEF GuiShow
     XDEF GuiCloseWindow
     XDEF GuiWaitEvent
@@ -172,6 +177,7 @@ gui_list_it:
     XDEF GuiGetEditText
     XDEF GuiSetEditText
     XDEF GuiSetLabelText
+    XDEF GuiSetProgress
     XDEF GuiEnableWidget
     XDEF GuiActivateEdit
     XDEF GuiRedraw
@@ -908,6 +914,88 @@ GuiAddBitmap:
     rts
 
 ; -----------------------------------------------------------------------------
+; GuiAddProgress(id,x,y,w,h,percent) -> int
+; Bool gadget with a simple Border trough; fill is drawn by gui_redraw_progress.
+; percent is clamped to 0..100. Clicks produce no events (like BITMAP).
+; -----------------------------------------------------------------------------
+GuiAddProgress:
+    link a6,#0
+    movem.l d1-d7/a0-a6,-(sp)
+    move.l a6,a5
+    tst.w gui_building
+    beq .gap_fail
+    move.w gui_ngads,d7
+    cmp.w #GUI_MAX_GADGETS,d7
+    bge .gap_fail
+    bsr gui_slot_ptrs
+    clr.l GG_NEXTGADGET(a0)
+    move.l 12(a5),d0
+    move.w d0,GG_LEFTEDGE(a0)
+    move.l 16(a5),d0
+    move.w d0,GG_TOPEDGE(a0)
+    move.l 20(a5),d0
+    move.w d0,GG_WIDTH(a0)
+    move.l 24(a5),d0
+    move.w d0,GG_HEIGHT(a0)
+    move.w #GFLG_GADGHNONE,GG_FLAGS(a0)
+    move.w #GACT_RELVERIFY,GG_ACTIVATION(a0)
+    move.w #GTYP_BOOLGADGET,GG_GADGETTYPE(a0)
+    move.l a1,GG_GADGETRENDER(a0)
+    clr.l GG_SELECTRENDER(a0)
+    clr.w BD_LEFTEDGE(a1)
+    clr.w BD_TOPEDGE(a1)
+    move.b #1,BD_FRONTPEN(a1)
+    clr.b BD_BACKPEN(a1)
+    move.b #JAM1,BD_DRAWMODE(a1)
+    move.b #5,BD_COUNT(a1)
+    move.l a2,BD_XY(a1)
+    clr.l BD_NEXTBORDER(a1)
+    move.l 20(a5),d0
+    subq.w #1,d0
+    move.l 24(a5),d1
+    subq.w #1,d1
+    clr.w 0(a2)
+    clr.w 2(a2)
+    move.w d0,4(a2)
+    clr.w 6(a2)
+    move.w d0,8(a2)
+    move.w d1,10(a2)
+    clr.w 12(a2)
+    move.w d1,14(a2)
+    clr.w 16(a2)
+    clr.w 18(a2)
+    clr.l GG_GADGETTEXT(a0)
+    clr.l GG_SPECIALINFO(a0)
+    move.l 8(a5),d0
+    move.w d0,GG_GADGETID(a0)
+    clr.l GG_USERDATA(a0)
+    move.w d7,d0
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    move.w #GUI_WIDGET_PROGRESS,(a1,d0.w)
+    move.l 28(a5),d1                ; initial percent
+    bmi .gap_pct0
+    cmp.l #100,d1
+    ble .gap_store
+    moveq #100,d1
+    bra .gap_store
+.gap_pct0:
+    moveq #0,d1
+.gap_store:
+    lea gui_progress_pct,a1
+    move.w d1,(a1,d0.w)
+    bsr gui_link_gadget
+    addq.w #1,gui_ngads
+    moveq #0,d0
+    bra .gap_done
+.gap_fail:
+    moveq #-1,d0
+.gap_done:
+    movem.l (sp)+,d1-d7/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
 ; Function: GuiShow
 ; Input: none
 ; Output: d0=Window* on success, 0 if OpenWindow failed, -1 on order violation
@@ -971,6 +1059,7 @@ GuiShow:
 .gsh_labels:
     bsr gui_redraw_lists
     bsr gui_redraw_checkboxes
+    bsr gui_redraw_progress
     bsr gui_redraw_labels
 
     move.l gui_window,d0
@@ -1100,6 +1189,8 @@ GuiWaitEvent:
     beq .gwe_is_list
     cmp.w #GUI_WIDGET_BITMAP,d1
     beq .gwe_none
+    cmp.w #GUI_WIDGET_PROGRESS,d1
+    beq .gwe_none
     move.l d3,a0                     ; button released: pop it back up
     moveq #0,d1
     bsr gui_button_render
@@ -1167,6 +1258,7 @@ GuiWaitEvent:
 .gwer_labels:
     bsr gui_redraw_lists
     bsr gui_redraw_checkboxes
+    bsr gui_redraw_progress
     bsr gui_redraw_labels
     move.l gui_int_base,a6
     move.l gui_window,a0
@@ -1433,6 +1525,48 @@ GuiSetLabelText:
     rts
 
 ; -----------------------------------------------------------------------------
+; Function: GuiSetProgress
+; Input: 8(a6)=id, 12(a6)=percent (clamped 0..100)
+; Output: d0=0 success, d0=-1 if not a progress gadget
+; -----------------------------------------------------------------------------
+GuiSetProgress:
+    link a6,#0
+    movem.l d1-d7/a0-a6,-(sp)
+    move.l a6,a5
+    move.l 8(a5),d0
+    bsr gui_find_gadget
+    move.l a0,d0
+    beq .gsp_fail
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .gsp_fail
+    move.w d0,d7
+    add.w d0,d0
+    lea gui_widget_kind,a1
+    cmp.w #GUI_WIDGET_PROGRESS,(a1,d0.w)
+    bne .gsp_fail
+    move.l 12(a5),d1
+    bmi .gsp_pct0
+    cmp.l #100,d1
+    ble .gsp_store
+    moveq #100,d1
+    bra .gsp_store
+.gsp_pct0:
+    moveq #0,d1
+.gsp_store:
+    lea gui_progress_pct,a1
+    move.w d1,(a1,d0.w)
+    bsr gui_redraw_progress
+    moveq #0,d0
+    bra .gsp_done
+.gsp_fail:
+    moveq #-1,d0
+.gsp_done:
+    movem.l (sp)+,d1-d7/a0-a6
+    unlk a6
+    rts
+
+; -----------------------------------------------------------------------------
 ; Function: GuiEnableWidget
 ; Input: 8(a6)=id, 12(a6)=enable (0 = disable, non-zero = enable)
 ; Output: d0=0 success, d0=-1 if the gadget does not exist
@@ -1536,6 +1670,7 @@ GuiRedraw:
 .grd_labels:
     bsr gui_redraw_lists
     bsr gui_redraw_checkboxes
+    bsr gui_redraw_progress
     bsr gui_redraw_labels
 
 .grd_done:
@@ -1733,6 +1868,91 @@ gui_refresh_gadget:
     moveq #1,d0
     jsr _LVORefreshGList(a6)
 .grg_done:
+    rts
+
+; -----------------------------------------------------------------------------
+; gui_redraw_progress
+; Fills each progress gadget's interior: trough pen 0, bar pen 2.
+; Width of fill = (GG_WIDTH-4) * percent / 100 inset by 2 px.
+; -----------------------------------------------------------------------------
+gui_redraw_progress:
+    movem.l d0-d7/a0-a6,-(sp)
+    move.l gui_rport,d0
+    beq .grp_done
+    move.l gui_gfx_base,d0
+    beq .grp_done
+    move.w gui_ngads,d4
+    beq .grp_done
+    subq.w #1,d4
+    lea gui_gadgets,a3
+.grp_loop:
+    move.l a3,a0
+    bsr gui_get_slot_index
+    tst.w d0
+    bmi .grp_next
+    move.w d0,d5
+    add.w d0,d0
+    lea gui_widget_kind,a0
+    cmp.w #GUI_WIDGET_PROGRESS,(a0,d0.w)
+    bne .grp_next
+    lea gui_progress_pct,a0
+    move.w (a0,d0.w),d6             ; d6 = percent 0..100
+    ; trough: full inset rect pen 0
+    move.l gui_gfx_base,a6
+    move.l gui_rport,a1
+    moveq #0,d0
+    jsr _LVOSetAPen(a6)
+    move.w GG_LEFTEDGE(a3),d0
+    addq.w #2,d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    addq.w #2,d1
+    ext.l d1
+    move.w GG_LEFTEDGE(a3),d2
+    add.w GG_WIDTH(a3),d2
+    subq.w #3,d2
+    ext.l d2
+    move.w GG_TOPEDGE(a3),d3
+    add.w GG_HEIGHT(a3),d3
+    subq.w #3,d3
+    ext.l d3
+    move.l gui_rport,a1
+    jsr _LVORectFill(a6)
+    tst.w d6
+    beq .grp_next
+    ; fill width = (w-4)*pct/100
+    move.w GG_WIDTH(a3),d7
+    subq.w #4,d7
+    mulu.w d6,d7
+    divu.w #100,d7
+    and.l #$ffff,d7
+    beq .grp_next
+    move.l gui_gfx_base,a6
+    move.l gui_rport,a1
+    moveq #2,d0
+    jsr _LVOSetAPen(a6)
+    move.w GG_LEFTEDGE(a3),d0
+    addq.w #2,d0
+    ext.l d0
+    move.w GG_TOPEDGE(a3),d1
+    addq.w #2,d1
+    ext.l d1
+    move.w GG_LEFTEDGE(a3),d2
+    addq.w #2,d2
+    add.w d7,d2
+    subq.w #1,d2
+    ext.l d2
+    move.w GG_TOPEDGE(a3),d3
+    add.w GG_HEIGHT(a3),d3
+    subq.w #3,d3
+    ext.l d3
+    move.l gui_rport,a1
+    jsr _LVORectFill(a6)
+.grp_next:
+    lea GG_SIZEOF(a3),a3
+    dbra d4,.grp_loop
+.grp_done:
+    movem.l (sp)+,d0-d7/a0-a6
     rts
 
 ; -----------------------------------------------------------------------------

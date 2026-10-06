@@ -51,6 +51,7 @@ class HasEmitter:
         self.checkboxes = manager.by_kind(ControlType.CHECKBOX)
         self.lists = manager.by_kind(ControlType.LIST)
         self.bitmaps = manager.by_kind(ControlType.BITMAP)
+        self.progresses = manager.by_kind(ControlType.PROGRESS)
 
     # -- public ------------------------------------------------------------
     def render(self) -> str:
@@ -167,6 +168,10 @@ class HasEmitter:
         if self.bitmaps:
             lines.append("    extern func GuiAddBitmap(id: int, x: int, y: int, w: int, h: int,")
             lines.append("                             image: int) -> int;")
+        if self.progresses:
+            lines.append("    extern func GuiAddProgress(id: int, x: int, y: int, w: int, h: int,")
+            lines.append("                               percent: int) -> int;")
+            lines.append("    extern func GuiSetProgress(id: int, percent: int) -> int;")
         for c in self.lists:
             lines.append(f"    extern var {c.name}_items: int;")
         for c in self.bitmaps:
@@ -195,6 +200,7 @@ class HasEmitter:
             "// extern func GuiGetEventY() -> int;",
             "// extern func GuiSetEditText(id: int, text: int) -> int;",
             "// extern func GuiSetLabelText(id: int, text: int) -> int;",
+            "// extern func GuiSetProgress(id: int, percent: int) -> int;",
             "// extern func GuiEnableWidget(id: int, enable: int) -> int;",
             "// extern func GuiActivateEdit(id: int) -> int;",
             "// extern func GuiRedraw() -> void;",
@@ -300,6 +306,11 @@ class HasEmitter:
             return (
                 f"call GuiAddList({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
                 f"&{c.name}_items, {len(c.items)}, {c.selected});"
+            )
+        if c.kind is ControlType.PROGRESS:
+            return (
+                f"call GuiAddProgress({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
+                f"{c.progress});"
             )
         return f"call GuiAddBitmap({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, &{c.image_symbol});"
 

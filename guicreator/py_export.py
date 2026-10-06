@@ -49,6 +49,7 @@ class PyEmitter:
         self.checkboxes = manager.by_kind(ControlType.CHECKBOX)
         self.lists = manager.by_kind(ControlType.LIST)
         self.bitmaps = manager.by_kind(ControlType.BITMAP)
+        self.progresses = manager.by_kind(ControlType.PROGRESS)
 
     def render(self) -> str:
         out: List[str] = []
@@ -219,6 +220,11 @@ class PyEmitter:
             return (
                 f"gui.add_list({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
                 f"{c.name}_ITEMS, {c.selected})"
+            )
+        if c.kind is ControlType.PROGRESS:
+            return (
+                f"gui.add_progress({c.id_const}, {c.x}, {c.y}, {c.w}, {c.h}, "
+                f"{c.progress})"
             )
         path = _py_str(c.asset_path)
         return (

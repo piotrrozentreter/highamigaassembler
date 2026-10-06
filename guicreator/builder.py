@@ -143,6 +143,7 @@ class GuiCreatorApp(tk.Tk):
             (ControlType.CHECKBOX, "Add CheckBox"),
             (ControlType.LIST, "Add List"),
             (ControlType.BITMAP, "Add Bitmap"),
+            (ControlType.PROGRESS, "Add Progress"),
         ):
             ttk.Button(box, text=label, command=lambda k=kind: self.add_control(k)).pack(
                 fill="x", pady=2
@@ -214,7 +215,7 @@ class GuiCreatorApp(tk.Tk):
             k: tk.StringVar()
             for k in (
                 "name", "caption", "x", "y", "w", "h", "maxlen",
-                "items", "selected", "asset", "bitmap_colors",
+                "items", "selected", "asset", "bitmap_colors", "progress",
             )
         }
         self.prop_rows = {}
@@ -231,6 +232,7 @@ class GuiCreatorApp(tk.Tk):
                 ("selected", "Selected row"),
                 ("asset", "PNG/BMP asset"),
                 ("bitmap_colors", "Bitmap colors"),
+                ("progress", "Progress %"),
             ]
         ):
             lbl = ttk.Label(self.prop_box, text=label)
@@ -373,6 +375,11 @@ class GuiCreatorApp(tk.Tk):
         elif ctl.kind is ControlType.BITMAP:
             c.create_rectangle(x0, y0, x1, y1, fill=PEN_WHITE, outline=PEN_BLACK)
             c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text="BMP", fill=PEN_BLACK, font=self._font())
+        elif ctl.kind is ControlType.PROGRESS:
+            c.create_rectangle(x0, y0, x1, y1, fill=PEN_WHITE, outline=PEN_BLACK)
+            fill_w = max(0, int((x1 - x0 - 2) * max(0, min(100, ctl.progress)) / 100))
+            if fill_w > 0:
+                c.create_rectangle(x0 + 1, y0 + 1, x0 + 1 + fill_w, y1 - 1, fill=PEN_BLUE, outline="")
         else:
             c.create_text(
                 x0, (y0 + y1) // 2, text=ctl.caption, anchor="w",
@@ -654,6 +661,7 @@ class GuiCreatorApp(tk.Tk):
             self.prop_vars["selected"].set(str(s.selected))
             self.prop_vars["asset"].set(s.asset_path)
             self.prop_vars["bitmap_colors"].set(str(s.bitmap_colors))
+            self.prop_vars["progress"].set(str(s.progress))
             self.info.set(
                 f"{s.kind.value}  ActionID={s.action_id}\n"
                 f"const {s.id_const} = {s.action_id};\n"
@@ -671,6 +679,7 @@ class GuiCreatorApp(tk.Tk):
             ("selected", ControlType.LIST),
             ("asset", ControlType.BITMAP),
             ("bitmap_colors", ControlType.BITMAP),
+            ("progress", ControlType.PROGRESS),
         ):
             enabled = s is not None and s.kind is allowed
             label, widget = self.prop_rows[key]
@@ -701,6 +710,7 @@ class GuiCreatorApp(tk.Tk):
         bitmap_colors = _int_or(self.prop_vars["bitmap_colors"].get(), s.bitmap_colors)
         if bitmap_colors in BITMAP_COLOR_DEPTHS:
             s.bitmap_colors = bitmap_colors
+        s.progress = max(0, min(100, _int_or(self.prop_vars["progress"].get(), s.progress)))
         self._refresh_all()
 
     def _sync_list(self) -> None:

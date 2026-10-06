@@ -48,6 +48,7 @@ Snake_case mirror of the HAS `Gui*` surface. Numeric event codes and ActionIDs m
 | `add_checkbox` | `id, x, y, w, h, caption: str, checked` | `int` | Nonzero `checked` selects initially. |
 | `add_list` | `id, x, y, w, h, items: list, selected` | `int` | `items` is a list of `str`. Single-select, no scroll. |
 | `add_bitmap` | `id, x, y, w, h, path: str` | `int` | Optional; may return -1 if unsupported in an early build. |
+| `add_progress` | `id, x, y, w, h, percent` | `int` | Filled bar 0..100; no events. |
 | `show` | none | `int` | Window pointer as int, or 0 / -1 on failure. |
 | `close_window` | none | `None` | Idempotent. |
 
@@ -68,10 +69,11 @@ Snake_case mirror of the HAS `Gui*` surface. Numeric event codes and ActionIDs m
 | `set_edit_text` | `int` | `text: str`; 0 = OK, -1 = fail. |
 | `get_checkbox` | `int` | 1 selected, 0 clear/missing. |
 | `get_list_selected` | `int` | Zero-based row, or -1. |
-| `set_label_text` | `int` | Optional; may be stubbed until needed. |
-| `enable_widget` | `int` | Optional. |
+| `set_label_text` | `int` | Update label caption and repaint. |
+| `set_progress` | `int` | `percent` clamped 0..100; 0 = OK, -1 = fail. |
+| `enable_widget` | `int` | Enable/disable gadget; 0 = OK. |
 | `activate_edit` | `int` | Optional. |
-| `redraw` | `None` | Optional. |
+| `redraw` | `None` | Full client repaint including progress bars. |
 
 ### Event constants (must match HAS)
 

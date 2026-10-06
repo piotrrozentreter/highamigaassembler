@@ -148,6 +148,7 @@ def render(manager: MetadataManager, source_name: str = "form") -> str:
     w("    CONTROL_TYPE_CHECKBOX EQU 3")
     w("    CONTROL_TYPE_LIST     EQU 4")
     w("    CONTROL_TYPE_BITMAP   EQU 5")
+    w("    CONTROL_TYPE_PROGRESS EQU 6")
     w(f"    CONTROL_COUNT         EQU {len(manager.controls)}")
     w("")
     for c in manager.controls:
@@ -183,6 +184,8 @@ def _control_line(c: Control) -> str:
         payload = base64.b64encode("\0".join(c.items).encode("utf-8")).decode("ascii")
         parts.append(f'ITEMS64="{payload}"')
         parts.append(f"SELECTED={c.selected}")
+    elif c.kind is ControlType.PROGRESS:
+        parts.append(f"PERCENT={c.progress}")
     else:
         parts.append(f'ASSET="{_esc(c.asset_path)}"')
         parts.append(f"COLORS={c.bitmap_colors}")
@@ -272,6 +275,7 @@ def _apply_control(manager: MetadataManager, attrs: Dict[str, str]) -> None:
         selected=_as_int(attrs.get("SELECTED", ""), 0),
         asset_path=attrs.get("ASSET", ""),
         bitmap_colors=_as_int(attrs.get("COLORS", ""), 2),
+        progress=_as_int(attrs.get("PERCENT", ""), 0),
         action_id=_as_int(attrs.get("ID", ""), 0) or None,
     )
 

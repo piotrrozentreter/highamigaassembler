@@ -53,16 +53,25 @@ class ControlType(Enum):
     CHECKBOX = "CHECKBOX"
     LIST = "LIST"
     BITMAP = "BITMAP"
+    PROGRESS = "PROGRESS"
 
     @property
     def numeric(self) -> int:
         """Value emitted as CONTROL_TYPE_* in the .hasmeta constants block."""
-        return {"LABEL": 0, "BUTTON": 1, "EDITBOX": 2, "CHECKBOX": 3, "LIST": 4, "BITMAP": 5}[self.value]
+        return {
+            "LABEL": 0,
+            "BUTTON": 1,
+            "EDITBOX": 2,
+            "CHECKBOX": 3,
+            "LIST": 4,
+            "BITMAP": 5,
+            "PROGRESS": 6,
+        }[self.value]
 
     @property
     def interactive(self) -> bool:
         """True when the control produces IDCMP events and needs a handler."""
-        return self not in {ControlType.LABEL, ControlType.BITMAP}
+        return self not in {ControlType.LABEL, ControlType.BITMAP, ControlType.PROGRESS}
 
     @property
     def uses_gadget(self) -> bool:
@@ -98,6 +107,7 @@ class Control:
     selected: int = 0
     asset_path: str = ""
     bitmap_colors: int = DEFAULT_BITMAP_COLORS
+    progress: int = 0  # PROGRESS only; initial fill 0..100
 
     @property
     def right(self) -> int:
@@ -118,7 +128,15 @@ class Control:
     # -- derived assembler symbol names -----------------------------------
     @property
     def id_const(self) -> str:
-        stem = {"LABEL": "LBL", "BUTTON": "BTN", "EDITBOX": "EDIT", "CHECKBOX": "CHK", "LIST": "LIST", "BITMAP": "BMP"}[self.kind.value]
+        stem = {
+            "LABEL": "LBL",
+            "BUTTON": "BTN",
+            "EDITBOX": "EDIT",
+            "CHECKBOX": "CHK",
+            "LIST": "LIST",
+            "BITMAP": "BMP",
+            "PROGRESS": "PRG",
+        }[self.kind.value]
         upper = self.name.upper()
         # Avoid ID_BTN_BTN_OK when the name already carries the widget prefix.
         if upper.startswith(stem + "_"):
@@ -250,6 +268,7 @@ class MetadataManager:
         selected: int = 0,
         asset_path: str = "",
         bitmap_colors: int = DEFAULT_BITMAP_COLORS,
+        progress: int = 0,
         action_id: Optional[int] = None,
     ) -> Control:
         """Place a control and allocate its ActionID.
@@ -280,6 +299,7 @@ class MetadataManager:
             selected=int(selected),
             asset_path=asset_path,
             bitmap_colors=int(bitmap_colors),
+            progress=max(0, min(100, int(progress))),
         )
         self.controls.append(control)
         return control
@@ -376,6 +396,11 @@ class MetadataManager:
                     problems.append(f"'{c.name}' asset path does not exist: {c.asset_path}")
                 if c.bitmap_colors not in BITMAP_COLOR_DEPTHS:
                     problems.append(f"'{c.name}' bitmap colors must be 2, 8, 16, or 32.")
+            if c.kind is ControlType.PROGRESS:
+                if not 0 <= c.progress <= 100:
+                    problems.append(f"'{c.name}' progress percent must be 0..100.")
+                if c.w < 16 or c.h < 8:
+                    problems.append(f"'{c.name}' progress bar is too small.")
 
         for i, a in enumerate(self.controls):
             for b in self.controls[i + 1 :]:
@@ -396,6 +421,7 @@ class MetadataManager:
             ControlType.CHECKBOX: f"Check {n}",
             ControlType.LIST: "",
             ControlType.BITMAP: "",
+            ControlType.PROGRESS: "",
         }[kind]
 
     @staticmethod
@@ -412,10 +438,20 @@ class MetadataManager:
             return (w or 160, h or 44)
         if kind is ControlType.BITMAP:
             return (w or 32, h or 32)
+        if kind is ControlType.PROGRESS:
+            return (w or 200, h or 12)
         return (w or 160, h or 14)
 
     def _unique_name(self, kind: ControlType) -> str:
-        stem = {"LABEL": "lbl", "BUTTON": "btn", "EDITBOX": "edit", "CHECKBOX": "chk", "LIST": "list", "BITMAP": "bmp"}[kind.value]
+        stem = {
+            "LABEL": "lbl",
+            "BUTTON": "btn",
+            "EDITBOX": "edit",
+            "CHECKBOX": "chk",
+            "LIST": "list",
+            "BITMAP": "bmp",
+            "PROGRESS": "prg",
+        }[kind.value]
         taken = {c.name for c in self.controls}
         i = 1
         while f"{stem}_{i}" in taken:
