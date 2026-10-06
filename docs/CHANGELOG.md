@@ -6,6 +6,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Guicreator Progress control + live status APIs:** `PROGRESS` gadget
+  (`GuiAddProgress` / `GuiSetProgress`, pythonami `add_progress` / `set_progress`)
+  and documented use of `set_label_text` / `enable_widget` / `redraw` for
+  installer-style forms. See [GUI_PYTHONAMI_API.md](GUI_PYTHONAMI_API.md),
+  [GUI_GADGETS_GUIDE.md](GUI_GADGETS_GUIDE.md).
+
 - **Guicreator gadgets developer guide:** practical HAS + pythonami usage for all
   six widget types (Label, Button, EditBox, CheckBox, List, Bitmap), including
   short read/write examples and the pythonami `gui_dialog` modal pattern.

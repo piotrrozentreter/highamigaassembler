@@ -322,6 +322,7 @@ GUI_WIDGET_BUTTON   EQU 0
 GUI_WIDGET_CHECKBOX EQU 1
 GUI_WIDGET_LIST     EQU 2
 GUI_WIDGET_BITMAP   EQU 3
+GUI_WIDGET_PROGRESS EQU 4
 
 ; -----------------------------------------------------------------------------
 ; Static pool sizes (section 4.4)

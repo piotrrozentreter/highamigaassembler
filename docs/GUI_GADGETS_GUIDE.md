@@ -62,11 +62,12 @@ Gadget **ActionID** (`gg_GadgetID`) ≥ 1 → `get_event_id()` / `GuiGetEventID(
 
 | Type | Events | Read | Write / update |
 | --- | --- | --- | --- |
-| **Label** | none | — | HAS: `GuiSetLabelText`; pythonami: not exported today |
+| **Label** | none | — | `set_label_text` / `GuiSetLabelText` |
 | **Button** | `BUTTON` | — (click is the signal) | HAS: `GuiEnableWidget` |
 | **EditBox** | `STRING` | get text | set text; HAS: `GuiActivateEdit` |
 | **CheckBox** | `CHECKBOX` | get 0/1 | no setter (user toggles) |
 | **List** | `LIST` | selected row index | items fixed at `add_*` — **no runtime add/remove** |
+| **Progress** | none | percent | `set_progress` / `GuiSetProgress` (0..100) |
 | **Bitmap** | none | — | display-only |
 
 There is **no** slider, combo box, or modal MessageBox gadget in guicreator. For a
