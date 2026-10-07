@@ -10,7 +10,9 @@ Libraries with dedicated documentation are listed first; libraries documented he
 
 | Library file      | Purpose                                   | Documentation                                        |
 |-------------------|-------------------------------------------|------------------------------------------------------|
-| `graphics.s`      | Screen modes, drawing, text, colour       | [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md) |
+| `graphics.s`      | Bare-metal screen modes, drawing, colour  | [GRAPHICS_LIBRARY_INTERFACE.md](GRAPHICS_LIBRARY_INTERFACE.md) |
+| `amiga_gfx.s`     | OS Intuition custom screens (OpenScreen)  | [AMIGA_OS_GFX_API.md](AMIGA_OS_GFX_API.md)           |
+| `gui_intuition.s` | Workbench Intuition dialogs               | [GUI_INTUITION_RUNTIME_SPEC.md](GUI_INTUITION_RUNTIME_SPEC.md) |
 | `gui.s`           | Rectangles, boxes, buttons, gadgets       | [GUI_LIBRARY.md](GUI_LIBRARY.md)                     |
 | `debug.s`         | Buffered debug logging for takeover games | [DEBUG_LIBRARY.md](DEBUG_LIBRARY.md)                 |
 | `heap.s`          | Dynamic memory allocator                  | `lib/HEAP_README.md` + `lib/HEAP_QUICKSTART.md`      |

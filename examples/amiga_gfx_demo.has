@@ -1,0 +1,96 @@
+// =============================================================================
+// amiga_gfx_demo.has - OS custom-screen drawing smoke (Intuition OpenScreen)
+//
+// Build:
+//   .venv/bin/python3 -m hasc.cli examples/amiga_gfx_demo.has -o build/amiga_gfx_demo.s
+//   vasmm68k_mot -Fhunk -I lib/ -o build/amiga_gfx_demo.o build/amiga_gfx_demo.s
+//   vasmm68k_mot -Fhunk -I lib/ -o build/amiga_gfx.o lib/amiga_gfx.s
+//   vasmm68k_mot -Fhunk -I lib/ -o build/wbstartup.o lib/wbstartup.s
+//   vlink -bamigahunk build/amiga_gfx_demo.o build/amiga_gfx.o build/wbstartup.o \
+//       -o build/amiga_gfx_demo.exe
+//
+// Quit: close gadget / ESC / q. Requires AmigaOS Intuition (not Musashi).
+// =============================================================================
+
+const GFX_MODE_SPRITES = $4000;
+const GFX_EVT_CLOSE = 1;
+
+code amiga_gfx_demo:
+
+    extern func WBStartup() -> void;
+    extern func WBExit() -> void;
+
+    extern func GfxInit() -> int;
+    extern func GfxShutdown() -> void;
+    extern func GfxOpenScreen(x: int, y: int, w: int, h: int, depth: int, mode: int) -> int;
+    extern func GfxCloseScreen() -> void;
+    extern func GfxWaitTOF() -> void;
+    extern func GfxInk(pen: int) -> void;
+    extern func GfxColor(index: int, r: int, g: int, b: int) -> void;
+    extern func GfxPlot(x: int, y: int) -> void;
+    extern func GfxLine(x0: int, y0: int, x1: int, y1: int) -> void;
+    extern func GfxRect(x: int, y: int, w: int, h: int, filled: int) -> void;
+    extern func GfxCircle(cx: int, cy: int, r: int, filled: int) -> void;
+    extern func GfxFill(x: int, y: int) -> void;
+    extern func GfxText(x: int, y: int, text: int) -> void;
+    extern func GfxWaitEvent() -> int;
+
+    public main;
+
+    asm {
+        jsr WBStartup
+        jsr main
+        jsr WBExit
+        rts
+    }
+
+    proc main() -> int {
+        var scr: int;
+        var ev: int;
+
+        if (GfxInit() != 0) {
+            return -1;
+        }
+
+        scr = GfxOpenScreen(0, 0, 320, 200, 3, GFX_MODE_SPRITES);
+        if (scr == 0) {
+            GfxShutdown();
+            return -1;
+        }
+
+        GfxColor(0, 0, 0, 2);
+        GfxColor(1, 15, 15, 15);
+        GfxColor(2, 15, 0, 0);
+        GfxColor(3, 0, 15, 0);
+        GfxColor(4, 0, 0, 15);
+
+        GfxInk(1);
+        GfxText(20, 20, &title_msg);
+
+        GfxInk(2);
+        GfxPlot(40, 40);
+        GfxLine(50, 50, 200, 80);
+
+        GfxInk(3);
+        GfxRect(60, 100, 80, 40, 1);
+
+        GfxInk(4);
+        GfxCircle(220, 120, 30, 0);
+
+        GfxInk(1);
+        GfxRect(100, 60, 50, 50, 0);
+        GfxFill(110, 70);
+
+        ev = GfxWaitEvent();
+        while (ev != GFX_EVT_CLOSE) {
+            GfxWaitTOF();
+            ev = GfxWaitEvent();
+        }
+
+        GfxCloseScreen();
+        GfxShutdown();
+        return 0;
+    }
+
+data amiga_gfx_demo_strings:
+    title_msg.b = "HAS OS Gfx", 0
