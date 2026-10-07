@@ -6,6 +6,12 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **OS custom-screen graphics library (`lib/amiga_gfx.s`):** Intuition
+  `OpenScreen` / RastPort draw / AllocRaster blit / SimpleSprites — separate
+  from bare-metal `graphics.s` and Workbench `gui_intuition.s`. Contract:
+  [AMIGA_OS_GFX_API.md](AMIGA_OS_GFX_API.md). Example:
+  [examples/amiga_gfx_demo.has](../examples/amiga_gfx_demo.has).
+
 - **Guicreator Progress control + live status APIs:** `PROGRESS` gadget
   (`GuiAddProgress` / `GuiSetProgress`, pythonami `add_progress` / `set_progress`)
   and documented use of `set_label_text` / `enable_widget` / `redraw` for
