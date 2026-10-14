@@ -15,6 +15,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **68020 emitted-code efficiency:** under `--cpu 68020`, arbitrary struct/
+  array strides use `mulu.l` (no 16-bit truncation), PC-relative branches
+  that exceed the word range lower to `BRA.L`/`Bcc.L`, and `long`/`ptr` data
+  labels prefer 4-byte alignment via `cnop 0,4`. Both CPUs now select `.s`
+  branches when the displacement fits. Bitfield ISA lowering and CACR /
+  loop I-cache padding remain out of scope (see
+  [CPU_68020_IMPLEMENTATION_PLAN.md](CPU_68020_IMPLEMENTATION_PLAN.md)
+  Phase 6).
 - **Live-induction `for` + `dbra`:** constant-bound `for i = start to end [by step]`
   loops that **read** `i` (but do not assign to it, take `&i`, call out, or name `i`
   in asm) now emit `dbra` on `d7` with the induction value kept in a high Dn,

@@ -25,12 +25,20 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
   (without `ext.l` sign normalization) on `--cpu 68000`, with an unsigned
   `0..65535` operand-range check. Mixed signed/unsigned operands keep the
   signed lowering.
+- Phase 6 efficiency follow-ups are implemented: long-branch size selection
+  (`supports_long_branches`), arbitrary-stride `mulu.l`, and long/ptr data
+  alignment (`prefers_long_alignment`). See Phase 6 below.
 - Memory-indirect modes are deferred.
 
 ## Non-Goals (for now)
 
 - Broad "replace everything with 68020 instructions" passes.
 - Rare or privileged/system-oriented instructions without clear language/runtime need (for example: `CALLM`, `RTM`, `MOVEC`, `CAS2`).
+- Enabling the 68020 instruction/data caches via `MOVEC`/CACR: supervisor /
+  AmigaOS-owned; belongs in startup `asm`, not the compiler.
+- Loop-head I-cache `cnop` padding (see Phase 5.4 cut rationale).
+- Blind shift+mask → bitfield peephole without a language bitfield surface
+  (see Phase 5.3).
 - `PACK`/`UNPK` BCD: a digit lookup table beats them for score display.
 - 68881/68882 FPU: requires a coprocessor that plain 68020 A1200s lack;
   runtime Q16.16 (Phase 5.2) covers the same need without the dependency.
@@ -270,59 +278,46 @@ input range; no change to any program that does not use the new type.
 
 ### 5.3 Bitfield instructions (`bfextu`/`bfexts`/`bfins`/`bfffo`/`bfset`/`bfclr`/`bftst`)
 
+Status: **blocked on language surface** (not a silent peephole).
+
 Problem: packed-bit access currently lowers to shift/mask sequences on both
 targets. The 68020 does this in one instruction against a memory operand.
 
-High-value HAS patterns: HAM6 control-bit extraction, packed entity flags in
-`struct Entity`, sprite attach/collision masks, and `bfffo` as a
-single-instruction free-slot search over an entity-allocation bitmap.
-
-Tasks:
+Corpus evidence against a speculative rewriter: entity structs use one whole
+byte per flag (`move.b`/`tst.b` is already optimal; `bfextu` would be slower);
+HAM6 control bits are decoded offline in the Python importer; a repo-wide grep
+for mask patterns finds almost nothing that would fire. Do **not** ship
+shift+mask → BF* recognition until HAS gains an explicit packed-bit surface
+(struct bitfield syntax such as `flags:3`, or extract/insert builtins). Then:
 
 1. Add `TargetSpec.supports_bitfield_ops`.
-2. Identify the existing shift+mask emission sites (bitwise extract/insert on
-   `struct` fields and on `&`/`|`/shift combinations with constant masks) and
-   substitute the bitfield form only when offset and width are compile-time
-   constants and the operand is a legal bitfield destination.
-3. Leave every non-constant-mask case on the current path.
+2. Lower constant offset/width to `bfextu`/`bfexts`/`bfins`/`bfset`/`bfclr`/
+   `bftst` on 68020; keep shift/mask on 68000.
+3. Keep `bfffo` out until there is a real bitmap-allocator API.
 
-Primary files: `hasc/target.py`, `hasc/codegen.py`.
-
-Tests/examples: constant-mask extract/insert on both targets producing equal
-runtime values; a negative test asserting no bitfield instruction appears in
-`--cpu 68000` output.
-
-Exit criteria: measurable instruction-count reduction on the targeted patterns;
-identical program behavior on both targets.
+Until that language work exists, optional CPU-neutral polish is `bset`/`bclr`
+for `x |= 1<<n` / `x &= ~(1<<n)` with constant `n` (both targets).
 
 ### 5.4 Instruction-cache-aware alignment
 
-Problem: the 68020's 256-byte instruction cache and 32-bit bus reward 4-byte
-alignment of loop tops, branch targets, and `long` data. HAS emits no alignment
-directives today.
+Status: **partial — data only (see Phase 6.3)**; loop-head I-cache padding cut.
 
-Tasks:
-
-1. Add `TargetSpec.prefers_long_alignment` (true only for 68020).
-2. Emit `cnop 0,4` before generated loop-head and branch-target labels when the
-   flag is set.
-3. Align `long`-typed entries in emitted data sections to 4 bytes.
-
-Primary files: `hasc/target.py`, `hasc/codegen.py`.
-
-Note: this is the first change that alters *label placement* rather than
-instruction selection, so verify that no peephole rule in `hasc/peepholeopt.py`
-matches across a newly inserted directive line.
-
-Exit criteria: `--cpu 68000` output contains no new directives; `--cpu 68020`
-output assembles cleanly under `-m68020` and program behavior is unchanged.
+Section `cnop 0,4` after every `SECTION` already exists. Aligning `long`/`ptr`
+data labels to 4 bytes under `prefers_long_alignment` is implemented in Phase
+6.3. Emitting `cnop 0,4` before generated loop-head / branch-target labels is
+**cut**: compiler-generated loop bodies (~450+ bytes) overflow the 256-byte
+I-cache every iteration regardless of head alignment; the save is noise versus
+peephole regression risk. Hand-written `asm` blocks that would benefit already
+emit verbatim. Enabling CACR belongs in startup `asm`, not codegen.
 
 ### Phase 5 dependency order
 
 ```
 5.1 (done)
 5.2 step 1 ──> 5.2 step 2   (strictly sequential; step 2 deferred, see below)
-5.3, 5.4 ──> deferred indefinitely
+5.3 ──> blocked on bitfield language surface
+5.4 loop I-cache ──> cut; data align shipped as Phase 6.3
+Phase 6 (done) ──> long branches, stride mulu.l, long data align
 ```
 
 ### Post-5.1 reprioritisation (evidence from the game/demo corpus)
@@ -344,21 +339,51 @@ would be 68020-only in practice - a poor shape for the one item that changes
 the language surface. Do step 1 (the `Dh:Dl` capability) because it is reusable
 and capability-gated; revisit step 2 only when a demo needs rotation or scaling.
 
-**5.3 is cut.** All four justifications fail against the corpus. Entity structs
-(`bullet.has`, `player.has`, `launchers.has`) use one whole byte per flag, so
-`move.b`/`tst.b` is already optimal and `bfextu` would be slower. HAM6 control
-bits are decoded offline in the Python importer, not at runtime. A repo-wide
-grep for mask patterns finds exactly one hit, in a documentation demo. And the
-free-slot searches scan a byte field inside a strided struct array, which
-`bfffo` cannot address without redesigning entity storage. The lowering would
-never trigger on any code in this repository.
+**5.3 is language-gated (not silently cut forever).** Corpus still has no
+packed-bit patterns that would fire a rewriter; revisit only after bitfield
+syntax or builtins exist. See §5.3 status above.
 
-**5.4 is cut.** Compiler-generated loop bodies are ~110 instructions / 450+
-bytes and overflow the 256-byte ICache every iteration regardless of head
-alignment; aligning saves at most one prefetch on loop entry. The loops that
-would benefit are hand-written `asm` blocks, which HAS emits verbatim and where
-`cnop` insertion does not apply. Not worth taking regression risk in the
-line-adjacent peephole matcher for a benefit in the noise floor.
+**5.4 loop I-cache padding remains cut.** Data-side long alignment shipped as
+Phase 6.3. CACR / cache-enable stays a non-goal for the compiler.
+
+## Phase 6: Emitted-code efficiency (implemented)
+
+Goal: ship the remaining high-ROI 68020 codegen wins that do not require new
+language surface, while keeping `--cpu 68000` stable aside from intentional
+CPU-neutral branch-size selection (prefer `.s` when the displacement fits).
+
+### 6.1 Long branches (`supports_long_branches`) — done
+
+68020 adds `BRA.L` / `Bcc.L`. A late peephole pass in `hasc/peepholeopt.py`
+(`_select_branch_sizes`) estimates PC-relative distances after other peephole
+passes and selects:
+
+- `.s` when |disp| ≤ 126 (both CPUs)
+- `.w` when |disp| fits a word displacement
+- `.l` when |disp| exceeds the word range **and** `supports_long_branches`
+
+Primary files: `hasc/target.py`, `hasc/peepholeopt.py`.
+
+### 6.2 Arbitrary-stride `mulu.l` — done
+
+Non-`{1,2,4,8}` strides that fit in 16-bit immediates previously always used
+`mulu.w`, truncating large indices. On 68020 they now use `mulu.l #stride,Dn`
+gated by existing `supports_32bit_muldiv`. Real game structs (10–29 bytes)
+hit this path.
+
+Primary file: `hasc/indexed_address.py`.
+
+### 6.3 Long/ptr data alignment (`prefers_long_alignment`) — done
+
+When the flag is set, data/BSS labels for `long`/`ptr` (and structs containing
+a long field) emit `cnop 0,4` if the running section offset is not 4-byte
+aligned. Word-only labels still use `even` on both CPUs. No loop-head I-cache
+padding.
+
+Primary files: `hasc/target.py`, `hasc/codegen.py`.
+
+Tests: `tests/test_codegen_68020_efficiency.py`, plus updated indexing /
+`test_cpu_target` coverage.
 
 ### Higher-value work found during the 5.1 review (target-independent)
 

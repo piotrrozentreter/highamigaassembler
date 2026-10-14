@@ -6,16 +6,16 @@ from .target import DEFAULT_TARGET, TargetSpec
 def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
     """Multi-pass peephole optimizer with explicit CPU target plumbing.
 
-    Target-specific rewrites remain disabled until indexed-address lowering is
-    centralized and independently validated.
-    
+    Most rewrites are target-neutral. Branch size selection runs once at the
+    end so it sees the final line layout: prefer ``.s`` when the displacement
+    fits, ``.w`` when a word displacement fits, ``.l`` on targets with
+    ``supports_long_branches``, and a 68000-safe inverse-condition/trampoline
+    (or ``jmp``/``jsr``) when a conditional/unconditional target is farther.
+
     Args:
         lines: List of assembly instruction strings.
-        target: TargetSpec with CPU capabilities (currently unused but preserved for Phase 4+).
+        target: TargetSpec with CPU capabilities.
     """
-    # NOTE: target parameter is preserved for Phase 4+ when target-specific rewrites
-    # (e.g., avoiding certain shifts for 68020 scaled-operand forms) are implemented.
-    # Currently all optimizations are target-neutral.
     optimized = lines
     changed = True
     passes = 0
@@ -24,7 +24,7 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
     while changed and passes < max_passes:
         changed = False
         prev_len = len(optimized)
-        
+
         # Apply optimization passes in sequence
         optimized = _eliminate_move_self(optimized)
         optimized = _eliminate_redundant_moves(optimized)
@@ -43,12 +43,263 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
         optimized = _eliminate_tst_after_andi_neg(optimized)
         optimized = _eliminate_redundant_flag_test(optimized)
         optimized = _optimize_cmp_zero_to_tst(optimized)
-        
+
         if len(optimized) < prev_len:
             changed = True
         passes += 1
-    
+
+    # Size selection depends on final layout; run after all shrinking passes.
+    optimized = _select_branch_sizes(optimized, target)
     return optimized
+
+
+# PC-relative conditional/unconditional branches (not DBcc / dbra).
+_BRANCH_MNEMONICS = frozenset({
+    "bra", "bsr",
+    "beq", "bne",
+    "blt", "ble", "bgt", "bge",
+    "blo", "bls", "bhi", "bhs",
+    "bcc", "bcs", "bmi", "bpl", "bvs", "bvc",
+})
+_BRANCH_INVERT = {
+    "beq": "bne", "bne": "beq",
+    "blt": "bge", "bge": "blt",
+    "bgt": "ble", "ble": "bgt",
+    "blo": "bhs", "bhs": "blo",
+    "bls": "bhi", "bhi": "bls",
+    "bcc": "bcs", "bcs": "bcc",
+    "bmi": "bpl", "bpl": "bmi",
+    "bvs": "bvc", "bvc": "bvs",
+}
+_BRANCH_RE = re.compile(
+    r"^(\s*)(b[a-z]+)(\.[swl])?\s+([._$A-Za-z][\w.]*)(\s*(?:;.*)?)?$",
+    re.IGNORECASE,
+)
+_LABEL_RE = re.compile(r"^([._$A-Za-z][\w.]*):")
+_SKIP_SIZE_DIRS = re.compile(
+    r"^\s*(section|xref|xdef|include|cnop|even|equ|opt|macro|endm|if+|else|endif|"
+    r"dc\.|ds\.|dcb\.|dcb\b)",
+    re.IGNORECASE,
+)
+# Register-only / quick forms that are encoding-size 2 on 68000.
+_REG_TOKEN = r"[da]\d+(?:\.[bwl])?"
+_REG_ONLY_OPERANDS = re.compile(
+    rf"^{_REG_TOKEN}(?:\s*,\s*{_REG_TOKEN})?$",
+    re.IGNORECASE,
+)
+_QUICK_IMM_REG = re.compile(
+    rf"^(?:moveq|addq|subq)(?:\.[bwl])?\s+#-?\d+\s*,\s*{_REG_TOKEN}$",
+    re.IGNORECASE,
+)
+_SIMPLE_REG_OP = re.compile(
+    rf"^(?:move|tst|clr|neg|not|ext|swap|cmp|add|sub|and|or|eor)"
+    rf"(?:\.[bwl])?\s+",
+    re.IGNORECASE,
+)
+
+
+def _estimate_insn_bytes(line: str) -> int:
+    """Conservative byte-size estimate for branch-distance selection.
+
+    Prefer over-estimates: choosing ``.w``/trampoline when ``.s`` would still
+    fit is safe, but choosing ``.s`` when the real displacement overflows is not.
+    Absolute symbol operands and ``jsr``/``jmp`` are treated as 6+ bytes.
+    """
+    base = line.split(";", 1)[0].rstrip()
+    stripped = base.strip()
+    if not stripped or stripped.endswith(":"):
+        return 0
+    if _SKIP_SIZE_DIRS.match(stripped):
+        return 0
+    m = _BRANCH_RE.match(base)
+    if m:
+        mnemonic = m.group(2).lower()
+        if mnemonic in ("jmp", "jsr"):
+            return 6
+        suffix = (m.group(3) or ".w").lower()
+        if suffix == ".s":
+            return 2
+        if suffix == ".l":
+            return 6
+        return 4
+
+    low = stripped.lower()
+    if low.startswith(("jsr ", "jmp ", "lea ")):
+        return 6
+    if low in ("rts", "rte", "nop", "illegal") or low.startswith(("rts", "rte", "nop")):
+        return 2
+
+    # Scc Dn / DBcc Dn,label are 2 bytes (DBcc displacement is separate encoding;
+    # estimating 2 under-sizes slightly vs 4 — still safer than treating as .s span).
+    if re.match(r"^s[a-z]{2}(?:\.[bwl])?\s+[da]\d+$", low):
+        return 2
+    if re.match(r"^db[a-z]+(?:\.[bwl])?\s+", low):
+        return 4
+
+    if _QUICK_IMM_REG.match(stripped):
+        return 2
+
+    parts = stripped.split(None, 1)
+    if len(parts) == 2 and _SIMPLE_REG_OP.match(stripped):
+        operands = parts[1]
+        if _REG_ONLY_OPERANDS.match(operands):
+            return 2
+
+    # Absolute / label operands (globals, XREF symbols) are typically 6 bytes.
+    if len(parts) == 2:
+        operands = parts[1]
+        # Strip register tokens and immediates; leftover identifier => absolute.
+        cleaned = re.sub(rf"{_REG_TOKEN}|#-?[0-9A-Fa-fxX]+|\(\s*[da]\d+\s*\)|[(),.\s]+", " ", operands)
+        if re.search(r"[A-Za-z_]", cleaned):
+            return 6
+
+    if "#" in stripped:
+        return 6
+
+    # Default: assume a 6-byte form so short-branch selection stays safe.
+    return 6
+
+
+def _branch_comment(line: str) -> str:
+    if ";" not in line:
+        return ""
+    return ";" + line.split(";", 1)[1]
+
+
+def _select_branch_sizes(lines, target: TargetSpec = DEFAULT_TARGET):
+    """Choose ``.s`` / ``.w`` / ``.l`` / trampoline for PC-relative branches.
+
+    Uses a conservative byte estimate and fixed-point iterations so that
+    changing a branch's own size (or inserting a trampoline) cannot leave an
+    out-of-range encoding. Displacement is measured from the byte offset after
+    the branch instruction.
+
+    Special cases:
+    - Displacement 0 (branch to the next instruction): drop the branch (or
+      leave a ``nop``) so assemblers do not warn about short-branch-to-next.
+    - Beyond word range on 68000: ``bra``/``bsr`` become ``jmp``/``jsr``;
+      conditionals become inverse short branch + ``jmp`` trampoline.
+    """
+    if not lines:
+        return lines
+
+    current = list(lines)
+    trampoline_serial = 0
+    for _ in range(8):
+        offsets = []
+        pos = 0
+        for line in current:
+            offsets.append(pos)
+            pos += _estimate_insn_bytes(line)
+
+        labels = {}
+        for i, line in enumerate(current):
+            base = line.split(";", 1)[0].rstrip().strip()
+            m = _LABEL_RE.match(base)
+            if m:
+                labels[m.group(1)] = offsets[i]
+
+        next_lines = []
+        changed = False
+        for i, line in enumerate(current):
+            base = line.split(";", 1)[0].rstrip()
+            m = _BRANCH_RE.match(base)
+            if not m:
+                next_lines.append(line)
+                continue
+
+            indent, mnemonic, old_suffix_raw, label, _trailing = m.groups()
+            mnemonic_l = mnemonic.lower()
+            if mnemonic_l not in _BRANCH_MNEMONICS or label not in labels:
+                next_lines.append(line)
+                continue
+
+            # Size as if this were a word branch so borderline short decisions
+            # are not optimistic about a 2-byte encoding that may not fit.
+            probe_size = 4
+            pc = offsets[i] + probe_size
+            abs_disp = abs(labels[label] - pc)
+            comment = _branch_comment(line)
+
+            # Branch to the immediately following instruction is a no-op.
+            # Drop it when only comments/labels intervene (avoids vasm's
+            # "short-branch to following instruction turned into a nop").
+            only_zero = True
+            for j in range(i + 1, len(current)):
+                jb = current[j].split(";", 1)[0].rstrip().strip()
+                lm = _LABEL_RE.match(jb)
+                if lm and lm.group(1) == label:
+                    break
+                if _estimate_insn_bytes(current[j]) > 0:
+                    only_zero = False
+                    break
+            else:
+                only_zero = False
+            if only_zero:
+                changed = True
+                continue
+
+            if abs_disp <= 124:
+                # Margin under the true ±127 short limit; paired with
+                # conservative size estimates this avoids vasm out-of-range.
+                new_suffix = ".s"
+                new_line = f"{indent}{mnemonic_l}{new_suffix} {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+
+            if abs_disp <= 32766:
+                new_suffix = ".w"
+                new_line = f"{indent}{mnemonic_l}{new_suffix} {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+
+            if target.supports_long_branches:
+                new_suffix = ".l"
+                new_line = f"{indent}{mnemonic_l}{new_suffix} {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+
+            # 68000: beyond word PC-relative range — trampoline / absolute.
+            if mnemonic_l == "bra":
+                new_line = f"{indent}jmp {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+            if mnemonic_l == "bsr":
+                new_line = f"{indent}jsr {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+
+            inv = _BRANCH_INVERT.get(mnemonic_l)
+            if inv is None:
+                # Unknown conditional — keep word form (may still fail later).
+                new_line = f"{indent}{mnemonic_l}.w {label}{comment}"
+                if new_line != line:
+                    changed = True
+                next_lines.append(new_line)
+                continue
+
+            skip = f".has_br_skip_{trampoline_serial}"
+            trampoline_serial += 1
+            next_lines.append(f"{indent}{inv}.s {skip}{comment}")
+            next_lines.append(f"{indent}jmp {label}")
+            next_lines.append(f"{skip}:")
+            changed = True
+
+        current = next_lines
+        if not changed:
+            break
+
+    return current
 
 
 def _eliminate_move_self(lines):

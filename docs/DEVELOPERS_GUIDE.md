@@ -1713,9 +1713,10 @@ With `--annotate`:
 
 HAS defaults to Motorola 68000 output. The opt-in 68020 target enables advanced
 instruction-selection optimizations for indexed addressing, arithmetic operations,
-and sign extension. It does not change HAS syntax, data layout, ABI, calling
-convention, alignment, or pointer size. All code compiles identically on both
-targets; only the generated instructions differ.
+sign extension, and emitted-code efficiency. It does not change HAS syntax,
+calling convention, ABI, or pointer size. Generated instructions and some
+data-label padding can differ by target; some arithmetic operands accepted by
+the 68020 target are restricted on the 68000 target.
 
 ```bash
 # Default: 68000 baseline (100% compatible with original 68000/68010 hardware)
@@ -1862,13 +1863,38 @@ code signed_ops:
 The same signed-byte code compiles successfully on both targets; only the
 instruction count differs.
 
+##### Emitted-Code Efficiency (Phase 6)
+
+The compiler also applies these size, indexing, and alignment improvements:
+
+- **Branch sizing:** a final peephole pass chooses `.s` branches when the
+  displacement fits, on both targets, and `.w` branches when a word displacement
+  fits. For branches beyond the word range, `--cpu 68020` emits `BRA.L` or
+  `Bcc.L`; the 68000 target cannot encode those long branches.
+- **Arbitrary element strides:** for a non-`{1,2,4,8}` struct or array stride
+  that fits a 16-bit immediate, `--cpu 68020` uses `mulu.l` to calculate the
+  index offset. This avoids the 16-bit index truncation of `mulu.w` for large
+  indexes. The 68000 path is unchanged.
+- **Long and pointer data alignment:** on `--cpu 68020`, data and BSS labels
+  for `long`/`ptr` values and structs containing a long field are aligned to a
+  4-byte boundary when needed, using `cnop 0,4`. Word-only labels continue to
+  use `even`. This may add padding between labels, but does not change struct
+  field offsets or pointer size.
+
+The 68000 target keeps its existing long-branch and arbitrary-stride lowering;
+the `.s` branch-size selection is the CPU-neutral exception. These codegen
+changes do not require source changes. See the
+[68020 implementation plan](CPU_68020_IMPLEMENTATION_PLAN.md) for the phase
+status and validation details.
+
 #### Important Notes
 
 - Do **not** assemble 68020 output with `-m68000`; scaled instructions are not valid
   for 68000/68010 hardware
-- Memory-indirect addressing and additional 68020 optimizations remain deferred
-- All 68020 optimizations are strictly transparent: the generated program produces
-  identical results on both targets
+- Memory-indirect addressing remains deferred
+- For programs within the 68000 target's supported operand ranges, these
+  optimizations preserve program behavior; 68020-only instructions require a
+  68020-or-newer CPU
 
 ### Output
 The compiler generates Motorola assembly compatible with `vasm`. Select the

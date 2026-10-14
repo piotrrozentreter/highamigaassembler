@@ -45,7 +45,16 @@ def test_scaled_index_can_include_a_displacement():
     ) == ([], "(a0,d1.l*8)")
 
 
-BRIEF_ONLY_68020 = TargetSpec(CpuTarget.M68020, True, False, False, True, True)
+BRIEF_ONLY_68020 = TargetSpec(
+    CpuTarget.M68020,
+    True,   # supports_scaled_index
+    False,  # supports_full_index_extension
+    False,  # supports_memory_indirect
+    True,   # supports_32bit_muldiv
+    True,   # supports_extb_l
+    True,   # supports_long_branches
+    True,   # prefers_long_alignment
+)
 
 
 def test_scaled_displacement_requires_brief_index_range_without_full_extension():
@@ -92,6 +101,14 @@ def test_arbitrary_stride_uses_existing_68000_fallbacks():
     for stride in (3, 6, 10, 12):
         prelude, operand = lower_indexed_address(BASELINE, "a0", "d1", stride)
         assert prelude == [f"    mulu.w #{stride},d1"]
+        assert operand == "(a0,d1.l)"
+
+
+def test_arbitrary_stride_uses_mulu_l_on_68020():
+    """68020 uses mulu.l for non-{1,2,4,8} strides to avoid 16-bit truncation."""
+    for stride in (3, 6, 10, 12):
+        prelude, operand = lower_indexed_address(TARGET_68020, "a0", "d1", stride)
+        assert prelude == [f"    mulu.l #{stride},d1"]
         assert operand == "(a0,d1.l)"
 
 
@@ -659,7 +676,7 @@ def test_lower_indexed_address_word_safe_ignored_without_true_scale():
     prelude, operand = lower_indexed_address(
         TARGET_68020, "a0", "d1", 12, enable_scaled=True, index_word_safe=True
     )
-    assert prelude == ["    mulu.w #12,d1"]
+    assert prelude == ["    mulu.l #12,d1"]
     assert operand == "(a0,d1.l)"
 
     # Same for a stride large enough to hit the full-width shift/add fallback.
@@ -674,7 +691,7 @@ def test_emit_struct_array_read_stride_outside_scaled_set_stays_long():
     """Regression: struct size 12 (outside {2,4,8}) with a constant index that
     fits `.w` alone (3000) must NOT emit a `.w`-sized indexed operand, because
     index * stride = 36000 overflows signed 16-bit and index_reg is overwritten
-    with the multiplied value via `mulu.w`."""
+    with the multiplied value via `mulu.l`."""
     from hasc import codegen_indexed_address
     from hasc import ast as hast
 
@@ -683,7 +700,7 @@ def test_emit_struct_array_read_stride_outside_scaled_set_stays_long():
         _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "a6",
         stride=12, field_offset=0, field_suffix=".l",
     )
-    assert any("mulu.w #12,d1" in line for line in code)
+    assert any("mulu.l #12,d1" in line for line in code)
     assert any("(a0,d1.l)" in line for line in code)
     assert not any(".w*" in line for line in code)
     assert not any("(a0,d1.w)" in line for line in code)
@@ -698,7 +715,7 @@ def test_emit_struct_array_store_stride_outside_scaled_set_stays_long():
         _StubCodeGen(TARGET_68020), "items", index_expr, [], [], "d0", "d1",
         "a6", stride=12, field_offset=0, field_suffix=".l",
     )
-    assert any("mulu.w #12,d1" in line for line in code)
+    assert any("mulu.l #12,d1" in line for line in code)
     assert any("(a0,d1.l)" in line for line in code)
     assert not any(".w*" in line for line in code)
     assert not any("(a0,d1.w)" in line for line in code)
