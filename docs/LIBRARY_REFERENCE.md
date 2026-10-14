@@ -19,6 +19,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `math.s`          | Q16.16 fixed-point arithmetic             | [Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) + this file |
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
 | `bob.s`           | Blitter Objects (software sprites)        | this file                                            |
+| `tilemap.s`       | Opaque tile blit for `#import` tilesets/maps | this file + [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps) |
 | `helpers.s`       | VBlank sync, AMOS-compatible RNG          | this file                                            |
 | `timer.s`         | Millisecond delay (CIA-A hardware timer)  | this file                                            |
 | `cpu.s`           | Exec `AttnFlags` CPU detection            | this file                                            |
@@ -766,6 +767,72 @@ while (1) {
     call GetBobBackground(bob, px, py);  // save new background
     call PasteBob(bob, px, py, 1);       // draw
 }
+```
+
+---
+
+## tilemap.s — Tiled map blit
+
+Opaque blitter copy of `#import tileset` planar tiles into a mode **0** (320×256)
+interleaved playfield. Mode **1** (640×256) is BOB-only — these routines return `-1`
+if `gfx_current_mode != 0`. Requires `a5 = CUSTOM` (after `TakeSystem()`).
+Auto-linked when any of the symbols below are declared `extern`.
+
+Import / layout guide: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps).
+
+### Constraints
+
+| Rule | Detail |
+|------|--------|
+| Screen mode | Mode 0 only (`SetGraphicsMode(0)`) |
+| Tile width for blit | **16 or 32** (`tile_w=8` imports but cannot use these blitters) |
+| X origin | Multiple of **16** |
+| Index size | Word indices (`index_size=w`, default). Byte maps are not read by this lib |
+| Dest stride | `dest_bpr` = bytes per plane row (**40** in mode 0) |
+| Planes | Match the tileset import (`1..5`) |
+
+### Map layouts
+
+**Single-layer** (`layer=` / default): `DC.W w,h` + **0-based** indices → `DrawTilemapGrid`.
+
+**Multi-layer** (`layers=all` / `layers=A,B`): directory + `__lN` layers with
+`DC.W firstgid` + **1-based** indices (0 = skip) → `DrawTilemap` / `DrawTilemapLayer` /
+`DrawTilemapMulti`.
+
+### `BlitTile(tileset, index0, tile_w, tile_h, planes, dest, dest_bpr, x, y) -> int`
+
+Opaque copy of one 0-based tile. Returns `0` or `-1`.
+
+### `DrawTilemapGrid(grid, tileset, tile_w, tile_h, planes, dest, dest_bpr, origin_x, origin_y) -> int`
+
+Draw a single-layer 0-based grid. Index **0 is a real tile** (not empty).
+
+### `DrawTilemapLayer(layer, tileset, tile_w, tile_h, planes, dest, dest_bpr, origin_x, origin_y, map_w, map_h) -> int`
+
+Draw one multi-layer layer pointer (`label__lN`). Index **0 skips** (no overwrite).
+
+### `DrawTilemap(map, tileset, planes, dest, dest_bpr, origin_x, origin_y) -> int`
+
+Walk the multi-layer directory bottom→top with **one** shared tileset.
+Prefer `DrawTilemapMulti` when layers use different sheets.
+
+### `DrawTilemapMulti(map, tileset_table, planes, dest, dest_bpr, origin_x, origin_y) -> int`
+
+Same as `DrawTilemap`, but `tileset_table` is an array of long pointers
+(`DC.L` / `long[]`), one tileset per layer in bottom→top order.
+
+```has
+extern func DrawTilemapMulti(map: int, tileset_table: int, planes: int,
+                             dest: int, dest_bpr: int,
+                             origin_x: int, origin_y: int) -> int;
+extern var gfx_current_screen_ptr: int;
+
+data:
+    level_tilesets: long[2] = {&ground_tiles, &object_tiles};
+
+// After SetGraphicsMode(0) and LoadPalette(...):
+call DrawTilemapMulti(&level_map, &level_tilesets, 5,
+                      gfx_current_screen_ptr, 40, 0, 0);
 ```
 
 ---

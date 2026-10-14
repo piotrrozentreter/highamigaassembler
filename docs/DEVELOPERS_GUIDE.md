@@ -1110,8 +1110,11 @@ Working regression: [import_sprite_load_test.has](../examples/tests/compiler/imp
 ##### Example: tileset + tilemap
 
 Tileset graphics go in chip (`DATA_C`); the map is a fast-RAM (`DATA`) index
-grid (`DC.W width,height` then row-major indices). Share a palette by importing
-it first and passing `match_palette=`.
+grid. Share a palette by importing it first and passing `match_palette=`.
+Tile size options: `tile_w` / `tile_h` in **8, 16, or 32**.
+
+**Single layer** (default / `layer=Name`) — layout `DC.W width,height` then
+**0-based** row-major indices (empty GID → 0; first tileset tile is also 0):
 
 ```has
 #import palette "assets/tiles.png" as level_pal colors=16 dither=none;
@@ -1120,18 +1123,79 @@ it first and passing `match_palette=`.
 
 code main:
     extern func LoadPalette(palette_ptr: int, num_colors: int) -> int;
+    extern func DrawTilemapGrid(grid: int, tileset: int, tile_w: int, tile_h: int,
+                                planes: int, dest: int, dest_bpr: int,
+                                origin_x: int, origin_y: int) -> int;
+    extern var gfx_current_screen_ptr: int;
 
-    proc init() -> int {
-        var tiles: int = &level_tiles;
-        var map: int = &level_map;
+    proc draw_level() -> int {
         call LoadPalette(&level_pal, 16);
-        // tiles → planar chip data for your tile blitter
-        // map  → word width/height + indices (see tiled_map_importer)
-        return 0;
+        // Mode 0 only; origin_x must be a multiple of 16; tile_w 16 or 32 for blit.
+        return DrawTilemapGrid(&level_map, &level_tiles, 16, 16, 4,
+                               gfx_current_screen_ptr, 40, 0, 0);
     }
 ```
 
 Working regression: [import_tiles_load_test.has](../examples/tests/compiler/import_tiles_load_test.has).
+
+##### Guide: multi-layer Tiled maps
+
+Tiled exports tile layers **bottom → top**. Opt in with `layers=all` or
+`layers=Ground,Objects` (do not combine with `layer=`). Each layer must use a
+**single** tileset (mixed GIDs in one layer → import error). Indices are
+**1-based** (0 = empty / skip when drawing overlays).
+
+Emitted layout (`DATA`):
+
+```text
+<label>:
+    DC.W width, height
+    DC.W layer_count
+    DC.W tilewidth, tileheight
+    DC.L <label>__l0          ; bottom
+    DC.L <label>__l1          ; …
+<label>__l0:
+    DC.W firstgid
+    DC.W indices…             ; 1-based local tile index
+```
+
+```has
+#import palette "assets/tiles.png" as level_pal colors=32 dither=none;
+#import tileset "assets/tiles.png" as ground_tiles tile_w=32 tile_h=32 planes=5 match_palette=level_pal;
+#import tileset "assets/objects.png" as object_tiles tile_w=32 tile_h=32 planes=5 match_palette=level_pal;
+#import tilemap "assets/level.tmx" as level_map layers=all;
+
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func LoadPalette(palette_ptr: int, num_colors: int) -> int;
+    extern func DrawTilemap(map: int, tileset: int, planes: int, dest: int,
+                            dest_bpr: int, origin_x: int, origin_y: int) -> int;
+    extern func DrawTilemapMulti(map: int, tileset_table: int, planes: int,
+                                 dest: int, dest_bpr: int,
+                                 origin_x: int, origin_y: int) -> int;
+    extern var gfx_current_screen_ptr: int;
+
+    data:
+        // One long pointer per layer, same order as the map directory (bottom→top).
+        level_tilesets: long[2] = {&ground_tiles, &object_tiles};
+
+    proc draw_level() -> int {
+        call SetGraphicsMode(0);   // 320x256x32 — tile blit is mode 0 only
+        call LoadPalette(&level_pal, 32);
+        // Shared sheet for every layer:
+        // return DrawTilemap(&level_map, &ground_tiles, 5,
+        //                    gfx_current_screen_ptr, 40, 0, 0);
+        // Different sheet per layer:
+        return DrawTilemapMulti(&level_map, &level_tilesets, 5,
+                                gfx_current_screen_ptr, 40, 0, 0);
+    }
+```
+
+Runtime API details: [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
+Mode **1** (640×256×16) stays **BOB-only** — do not call these tile blitters in hires.
+Layer symbols (`level_map__l0`, …) are registered for `&…` when using `layers=`.
+
+Working regression: [import_tilemap_layers_test.has](../examples/tests/compiler/import_tilemap_layers_test.has).
 Also: [import_atlas_load_test.has](../examples/tests/compiler/import_atlas_load_test.has),
 [import_bob_sprite_load_test.has](../examples/tests/compiler/import_bob_sprite_load_test.has).
 

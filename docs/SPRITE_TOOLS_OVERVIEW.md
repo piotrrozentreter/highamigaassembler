@@ -82,13 +82,14 @@ python3 tools/texturepacker_atlas_importer.py walk.xml --outdir build/gen --dedu
 ### tile_importer.py
 **Purpose**: Convert PNG tile grids/strips to chip planar tile graphics  
 **Location**: `tools/tile_importer.py`  
-**In-language**: `#import tileset "tiles.png" as tiles tile_w=16 …;`
+**In-language**: `#import tileset "tiles.png" as tiles tile_w=16 …;` (`tile_w`/`tile_h`: 8, 16, or 32)
 
-**Use case**: Tile-based backgrounds; optional `match_palette=` via `#import`
+**Use case**: Tile-based backgrounds; optional `match_palette=` via `#import`. Draw with
+`lib/tilemap.s` (`BlitTile` / `DrawTilemap*`) in graphics mode 0 (blit needs tile width 16 or 32).
 
 **Example**:
 ```bash
-python3 tools/tile_importer.py tileset.png --tile-width 16 --tile-height 16 --outdir build/gen
+python3 tools/tile_importer.py tileset.png --tile-width 32 --tile-height 32 --outdir build/gen
 ```
 
 ---
@@ -96,14 +97,18 @@ python3 tools/tile_importer.py tileset.png --tile-width 16 --tile-height 16 --ou
 ### tiled_map_importer.py
 **Purpose**: Convert Tiled orthogonal `.tmx` / `.json` maps to index grids  
 **Location**: `tools/tiled_map_importer.py`  
-**In-language**: `#import tilemap "level.tmx" as map layer=Ground;`
+**In-language**: `#import tilemap "level.tmx" as map layer=Ground;` or `layers=all`
 
-**Use case**: Level layout in fast RAM (`DATA`); pair with a tileset import for graphics
+**Use case**: Level layout in fast RAM (`DATA`); pair with a tileset import for graphics.
+Single layer → 0-based indices; `layers=` → directory + `__lN` (1-based, bottom→top).
 
 **Example**:
 ```bash
 python3 tools/tiled_map_importer.py level.tmx --layer Ground --outdir build/gen
+python3 tools/tiled_map_importer.py level.tmx --layers all --outdir build/gen
 ```
+
+How-to: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps).
 
 ---
 
@@ -114,7 +119,7 @@ python3 tools/tiled_map_importer.py level.tmx --layer Ground --outdir build/gen
 | Input | Single PNG | Strip PNG | Single PNG | Strip PNG | XML + atlas PNG | Tile grid PNG | Tiled `.tmx`/`.json` |
 | Output | 1 .s file | Multiple .s files | 1 .s file | Multiple .s files | Named BOB files | 1 .s (planar tiles) | 1 .s (index grid) |
 | Type | Hardware sprite | Hardware sprite | BOB (software) | BOB (software) | BOB (software) | Chip tile graphics | Fast-RAM map indices |
-| Width | 16px fixed | 16px fixed | Any width | Any width | Any width | Tile 8/16 | Map cells |
+| Width | 16px fixed | 16px fixed | Any width | Any width | Any width | Tile 8/16/32 | Map cells |
 | Colors | 4 | 4 | Up to 32 | Up to 32 | Up to 32, shared palette | Up to 32 | N/A (indices) |
 | Use Case | Static HW sprites | HW sprite animations | Static BOBs | BOB animations | Packed named animations | Tile backgrounds | Level layout |
 
@@ -155,6 +160,7 @@ python3 tools/tiled_map_importer.py level.tmx --layer Ground --outdir build/gen
 ### Use `tiled_map_importer.py` / `#import tilemap` when:
 - ✅ You author levels in Tiled (orthogonal `.tmx` / `.json`)
 - ✅ You need a fast-RAM width/height + index grid (not chip graphics)
+- ✅ You need one layer (`layer=`) or stacked layers (`layers=all` / named list)
 
 ## Common Workflow
 

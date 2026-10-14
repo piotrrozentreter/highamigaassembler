@@ -60,11 +60,12 @@ python3 tools/sprite_strip_importer.py explosion.png 32 --label-prefix expl --ou
 // → walk_palette, walk_<frame_stem>, master INCLUDE walk_atlas.s
 #import tileset "tiles.png" as level_tiles tile_w=16 tile_h=16 planes=5 match_palette=walk_palette;
 #import tilemap "level.tmx" as level_map layer=Ground;
+#import tilemap "level.tmx" as level_map layers=all;   // multi-layer (not with layer=)
 ```
 
 Compile with `hasc` (Pillow required for image kinds; tilemap alone does not).
 Generated files land in `build/gen` (`--asset-outdir` / `--force-assets`).
-Use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / tile blitters.
+Use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`).
 Import the palette source **before** a tileset that uses `match_palette=`.
 
 | Kind | Constraints |
@@ -73,8 +74,8 @@ Import the palette source **before** a tileset that uses `match_palette=`.
 | `palette` | `colors=2..32` (typical 16/32) or `planes=`; `dither=none\|fs\|ordered` |
 | `sprite` | PNG width **must be 16**; fixed 2 planes / 4 colours |
 | `atlas` | TexturePacker XML; `kind=bob` only; `shared_palette` (default), `dedupe`, `sprites=a,b`, `atlas_png=` |
-| `tileset` | PNG; `tile_w=8\|16`, `tile_h`, `planes`, `dither=none\|fs`, `match_palette=<label>`, `strict_palette` |
-| `tilemap` | Tiled `.tmx`/`.json`; `layer=`, `allow_flip`, `index_size=b\|w`, `firstgid=`, optional `tileset=` |
+| `tileset` | PNG; `tile_w`/`tile_h` **8\|16\|32**, `planes`, `dither=none\|fs`, `match_palette=<label>`, `strict_palette` |
+| `tilemap` | Tiled `.tmx`/`.json`; `layer=` **or** `layers=all\|A,B` (mutually exclusive); `allow_flip`, `index_size=b\|w`, `firstgid=`, optional `tileset=` |
 
 ### Usage examples
 
@@ -102,26 +103,35 @@ code main:
     }
 ```
 
-**Tiles** — shared palette + chip tileset + fast-RAM map:
+**Tiles** — shared palette + chip tileset + fast-RAM map (single or multi-layer):
 
 ```has
 #import palette "tiles.png" as level_pal colors=16;
 #import tileset "tiles.png" as level_tiles tile_w=16 tile_h=16 planes=4 match_palette=level_pal;
 #import tilemap "level.tmx" as level_map layer=Ground;
+// Or: #import tilemap "level.tmx" as level_map layers=all;
 
 code main:
     extern func LoadPalette(palette_ptr: int, num_colors: int) -> int;
+    extern func DrawTilemapGrid(grid: int, tileset: int, tile_w: int, tile_h: int,
+                                planes: int, dest: int, dest_bpr: int,
+                                ox: int, oy: int) -> int;
+    extern var gfx_current_screen_ptr: int;
     proc init() -> int {
         call LoadPalette(&level_pal, 16);
-        var tiles: int = &level_tiles;  // DATA_C planar tiles
-        var map: int = &level_map;      // DATA: width, height, indices
-        return 0;
+        // Mode 0; DrawTilemap / DrawTilemapMulti for layers= maps — see LIBRARY_REFERENCE
+        return DrawTilemapGrid(&level_map, &level_tiles, 16, 16, 4,
+                               gfx_current_screen_ptr, 40, 0, 0);
     }
 ```
 
+Full how-to: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps).
+API: [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
+
 Regression sources under `examples/tests/compiler/`:
 `import_bob_load_test.has`, `import_sprite_load_test.has`,
-`import_tiles_load_test.has`, `import_atlas_load_test.has`.
+`import_tiles_load_test.has`, `import_tilemap_layers_test.has`,
+`import_atlas_load_test.has`.
 
 CLI tools below remain available for Makefile batch jobs.
 

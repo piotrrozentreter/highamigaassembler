@@ -15,6 +15,16 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Multi-layer Tiled `#import tilemap` + `lib/tilemap.s`:** `layers=all` or
+  `layers=Name1,Name2` (mutually exclusive with `layer=`) emits a bottom→top
+  directory and `__lN` layers with 1-based indices (0 = empty). Single-layer
+  import ABI unchanged (0-based). Tileset `tile_w`/`tile_h` allow **8|16|32**.
+  Runtime (mode 0 only): `BlitTile`, `DrawTilemapGrid`, `DrawTilemapLayer`,
+  `DrawTilemap`, `DrawTilemapMulti`. Mode 1 remains BOB-only for map art.
+  Guide: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps);
+  API: [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
+  Example: [import_tilemap_layers_test.has](../examples/tests/compiler/import_tilemap_layers_test.has).
+
 - **68020 emitted-code efficiency:** under `--cpu 68020`, arbitrary struct/
   array strides use `mulu.l` (no 16-bit truncation), PC-relative branches
   that exceed the word range lower to `BRA.L`/`Bcc.L`, and `long`/`ptr` data

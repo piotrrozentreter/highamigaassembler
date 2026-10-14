@@ -49,7 +49,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Macro System**: Define reusable code patterns
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
-- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap …;` converts PNGs / TexturePacker XML / Tiled maps at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / tile blitters
+- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap …;` converts PNGs / TexturePacker XML / Tiled maps at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`)
 - **Constants**: Compile-time constant evaluation
 - **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values; `#if IDENT OP EXPR` for comparison-based gating (`==`/`=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`)
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
@@ -734,6 +734,8 @@ The `tools/` directory contains Python utilities for converting graphics and ass
 #import atlas "assets/walk.xml" as walk planes=5 add_word shared_palette;
 #import tileset "assets/tiles.png" as level_tiles tile_w=16 tile_h=16 planes=5 match_palette=walk_palette;
 #import tilemap "assets/level.tmx" as level_map layer=Ground;
+// Multi-layer (bottom→top): layers=all  or  layers=Ground,Objects
+// #import tilemap "assets/level.tmx" as level_map layers=all;
 
 code main:
     proc init() -> int {
@@ -754,13 +756,14 @@ code main:
 - **sprite:** fixed 2 bitplanes / 4 colours; PNG width must be exactly 16px (no silent resize).
 - **palette:** `colors=2..32` (typical `16`/`32`) or `planes=`; optional `dither=none|fs|ordered`.
 - **atlas:** TexturePacker XML → shared-palette BOBs (`kind=bob` only); registers `<as>_palette` plus every frame label; options `planes`, `add_word`, `shared_palette`, `dedupe`, `sprites=a,b`, `atlas_png=…`.
-- **tileset:** PNG grid → chip (`DATA_C`) row-interleaved tiles; `tile_w=8|16`, `tile_h`, `planes`, optional `match_palette=<label>` (import that palette/atlas first; omits a private palette copy).
-- **tilemap:** Tiled `.tmx` / `.json` → fast RAM (`DATA`) width/height + row-major indices; options `layer=`, `allow_flip`, `index_size=b|w`, `firstgid=`, optional `tileset=` (documentation only).
+- **tileset:** PNG grid → chip (`DATA_C`) row-interleaved tiles; `tile_w`/`tile_h` in **8|16|32**, `planes`, optional `match_palette=<label>` (import that palette/atlas first; omits a private palette copy).
+- **tilemap:** Tiled `.tmx` / `.json` → fast RAM (`DATA`) index grid; `layer=` (single, 0-based indices) or `layers=all` / `layers=A,B` (multi-layer directory, 1-based indices, bottom→top); also `allow_flip`, `index_size=b|w`, `firstgid=`, optional `tileset=` (documentation only). Draw with `lib/tilemap.s` (`DrawTilemapGrid` / `DrawTilemap` / `DrawTilemapMulti`) in **mode 0 only**.
 
-Worked examples (bob / sprite / tiles): see
-[docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md) (Asset `#import`) and
-`examples/tests/compiler/import_bob_load_test.has`,
-`import_sprite_load_test.has`, `import_tiles_load_test.has`.
+How-to (import + draw): [docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps),
+API: [docs/LIBRARY_REFERENCE.md](docs/LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
+Worked examples: `examples/tests/compiler/import_bob_load_test.has`,
+`import_sprite_load_test.has`, `import_tiles_load_test.has`,
+`import_tilemap_layers_test.has`.
 
 ### Graphics & Sprite Tools
 
@@ -807,16 +810,16 @@ Worked examples (bob / sprite / tiles): see
   - Documentation: [TEXTUREPACKER_ATLAS_IMPORTER.md](docs/TEXTUREPACKER_ATLAS_IMPORTER.md)
 
 - **`tile_importer.py`** - Convert PNG tile strips or grids to tilemap graphics
-  - Supports row-interleaved 5-plane format for tile-based rendering
+  - Supports row-interleaved planar tiles; tile size **8 / 16 / 32**
   - Extracts individual tiles from tile strips
   - Applies color quantization and supports dithering
   - Prefer `#import tileset …;` when possible; CLI for Makefile batch jobs
-  - Example: `python3 tools/tile_importer.py tileset.png --tile-width 16 --tile-height 16 --outdir build/gen`
+  - Example: `python3 tools/tile_importer.py tileset.png --tile-width 32 --tile-height 32 --outdir build/gen`
 
 - **`tiled_map_importer.py`** - Convert Tiled orthogonal TMX/JSON maps to index grids
-  - Emits `DC.W width,height` plus row-major 0-based tile indices (`DATA`, not chip)
+  - Single layer: `DC.W width,height` + 0-based indices; multi: `--layers all` directory + `__lN`
   - Prefer `#import tilemap …;` when possible
-  - Example: `python3 tools/tiled_map_importer.py level.tmx --layer Ground --outdir build/gen`
+  - Example: `python3 tools/tiled_map_importer.py level.tmx --layers all --outdir build/gen`
 
 - **`iff_importer.py`** - Import IFF/ILBM format images
   - Reads Amiga IFF ILBM (InterLeaved BitMap) files
