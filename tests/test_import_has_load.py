@@ -19,6 +19,7 @@ SPRITE_HAS = COMPILER_TESTS / "import_sprite_load_test.has"
 BOTH_HAS = COMPILER_TESTS / "import_bob_sprite_load_test.has"
 ATLAS_HAS = COMPILER_TESTS / "import_atlas_load_test.has"
 TILES_HAS = COMPILER_TESTS / "import_tiles_load_test.has"
+TILES_LAYERS_HAS = COMPILER_TESTS / "import_tilemap_layers_test.has"
 
 
 def _compile_has(src_path: Path, out_dir: Path, cpu: str) -> str:
@@ -124,4 +125,20 @@ def test_import_tileset_tilemap_load_has(tmp_path: Path, cpu: str):
     assert "level_tiles_palette:" not in tiles
     mmap = (gen / "level_map.s").read_text(encoding="utf-8")
     assert "SECTION tilemap,DATA" in mmap.replace("\t", " ")
+    assert "DATA_C" not in mmap
+
+
+@pytest.mark.parametrize("cpu", [CpuTarget.M68000.value, CpuTarget.M68020.value])
+def test_import_tilemap_layers_load_has(tmp_path: Path, cpu: str):
+    assert (ASSETS / "mini_map_layers.tmx").is_file()
+    asm = _compile_has(TILES_LAYERS_HAS, tmp_path / "layers", cpu)
+
+    assert "lea level_map" in asm
+    assert "lea level_map__l0" in asm
+    assert "lea level_map__l1" in asm
+    gen = tmp_path / "layers" / "gen"
+    mmap = (gen / "level_map.s").read_text(encoding="utf-8")
+    assert "level_map__l0:" in mmap
+    assert "level_map__l1:" in mmap
+    assert "DC.L" in mmap
     assert "DATA_C" not in mmap

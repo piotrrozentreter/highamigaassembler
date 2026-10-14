@@ -1,0 +1,40 @@
+// Compile/load regression: multi-layer #import tilemap layers=all.
+// Emits directory + per-layer 1-based index grids (DATA); tileset remains DATA_C.
+
+#import palette "assets/mini_tiles.png" as level_pal colors=16 dither=none;
+#import tileset "assets/mini_tiles.png" as level_tiles tile_w=16 tile_h=16 planes=4 match_palette=level_pal;
+#import tilemap "assets/mini_map_layers.tmx" as level_map layers=all;
+
+code main:
+    extern func LoadPalette(palette_ptr: int, num_colors: int) -> int;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        var rc: int;
+        var tiles_ptr: int = &level_tiles;
+        var map_ptr: int = &level_map;
+        var layer0: int = &level_map__l0;
+        var layer1: int = &level_map__l1;
+
+        rc = LoadPalette(&level_pal, 16);
+        if (rc == -1) {
+            return -1;
+        }
+        if (tiles_ptr == 0) {
+            return -10;
+        }
+        if (map_ptr == 0) {
+            return -20;
+        }
+        if (layer0 == 0) {
+            return -30;
+        }
+        if (layer1 == 0) {
+            return -40;
+        }
+        return 0;
+    }

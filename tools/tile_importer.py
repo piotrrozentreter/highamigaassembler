@@ -185,8 +185,8 @@ def export_tileset_asm(
     Parameters:
         png_path: Path to source PNG image
         out_label: Label for assembly output
-        tile_width: Width of each tile in pixels (must be 8 or 16)
-        tile_height: Height of each tile in pixels
+        tile_width: Width of each tile in pixels (must be 8, 16, or 32)
+        tile_height: Height of each tile in pixels (must be 8, 16, or 32)
         planes: Number of bitplanes (default 5 for 32 colors)
         use_dither: Enable dithering during quantization
     
@@ -196,8 +196,10 @@ def export_tileset_asm(
     if Image is None:
         raise RuntimeError('Pillow is required for tile importing (pip install pillow)')
     
-    if tile_width not in [8, 16]:
-        raise ValueError(f"tile_width must be 8 or 16, got {tile_width}")
+    if tile_width not in (8, 16, 32):
+        raise ValueError(f"tile_width must be 8, 16, or 32, got {tile_width}")
+    if tile_height not in (8, 16, 32):
+        raise ValueError(f"tile_height must be 8, 16, or 32, got {tile_height}")
     
     # Quantize the entire image
     quant = quantize_image(png_path, planes=planes, use_dither=use_dither)
@@ -276,30 +278,28 @@ def export_tileset_asm(
 
                 # Convert to planar format (interleaved by plane for this row)
                 for plane_idx in range(planes):
-                    # Pack bits for this plane
+                    # Pack bits for this plane (8 → DC.B, 16 → DC.W, 32 → DC.L)
+                    bit_count = tile_width
+                    packed = 0
+                    for bit_pos in range(bit_count):
+                        if bit_pos < len(row_indices):
+                            idx = row_indices[bit_pos]
+                            bit = (idx >> plane_idx) & 1
+                            packed = (packed << 1) | bit
+                        else:
+                            packed = packed << 1
                     if tile_width == 8:
-                        # Single byte per plane
-                        byte_val = 0
-                        for bit_pos in range(8):
-                            if bit_pos < len(row_indices):
-                                idx = row_indices[bit_pos]
-                                bit = (idx >> plane_idx) & 1
-                                byte_val = (byte_val << 1) | bit
-                            else:
-                                byte_val = byte_val << 1
-                        lines.append(f"\tDC.B\t${byte_val:02X}\t; tile={tile_idx} y={row} plane={plane_idx}")
-                    else:  # tile_width == 16
-                        # Two bytes per plane (high byte, low byte)
-                        word_val = 0
-                        for bit_pos in range(16):
-                            if bit_pos < len(row_indices):
-                                idx = row_indices[bit_pos]
-                                bit = (idx >> plane_idx) & 1
-                                word_val = (word_val << 1) | bit
-                            else:
-                                word_val = word_val << 1
-                        # Store as word (Motorola big-endian: high byte first)
-                        lines.append(f"\tDC.W\t${word_val:04X}\t; tile={tile_idx} y={row} plane={plane_idx}")
+                        lines.append(
+                            f"\tDC.B\t${packed:02X}\t; tile={tile_idx} y={row} plane={plane_idx}"
+                        )
+                    elif tile_width == 16:
+                        lines.append(
+                            f"\tDC.W\t${packed:04X}\t; tile={tile_idx} y={row} plane={plane_idx}"
+                        )
+                    else:  # tile_width == 32
+                        lines.append(
+                            f"\tDC.L\t${packed:08X}\t; tile={tile_idx} y={row} plane={plane_idx}"
+                        )
     
     # Palette: omit when remapped onto an external BOB/atlas palette (LoadPalette
     # should use that shared block). Otherwise emit a private palette copy.
@@ -349,8 +349,8 @@ def import_tileset_to_include(
     Parameters:
         png_path: Path to source PNG
         label_prefix: Prefix for generated labels
-        tile_width: Width of each tile (8 or 16)
-        tile_height: Height of each tile
+        tile_width: Width of each tile (8, 16, or 32)
+        tile_height: Height of each tile (8, 16, or 32)
         planes: Number of bitplanes
         force: Force regeneration even if up-to-date
         use_dither: Enable dithering
@@ -444,8 +444,8 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Import PNG tileset into interleaved format')
     parser.add_argument('png', help='PNG tileset image to convert')
-    parser.add_argument('--tile-width', type=int, default=8, help='Width of each tile (8 or 16)')
-    parser.add_argument('--tile-height', type=int, default=8, help='Height of each tile')
+    parser.add_argument('--tile-width', type=int, default=8, help='Width of each tile (8, 16, or 32)')
+    parser.add_argument('--tile-height', type=int, default=8, help='Height of each tile (8, 16, or 32)')
     parser.add_argument('--planes', type=int, default=5, help='Number of bitplanes')
     parser.add_argument('--label-prefix', type=str, default='tileset', help='Label prefix for generated symbols')
     parser.add_argument('--dither', action='store_true', help='Enable Floyd–Steinberg dithering')

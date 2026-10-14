@@ -315,7 +315,7 @@ class TestImportTilesetTilemap:
         with pytest.raises(SyntaxError, match="Tiled"):
             parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
 
-    def test_tileset_tile_w_must_be_8_or_16(self, tmp_path: Path):
+    def test_tileset_tile_w_must_be_8_16_or_32(self, tmp_path: Path):
         png = make_png(tmp_path / "t.png", 24, 8)
         src = (
             f'#import tileset "{png.name}" as t tile_w=24 tile_h=8 planes=2;\n'
@@ -323,6 +323,76 @@ class TestImportTilesetTilemap:
             "    proc main() -> int { return 0; }\n"
         )
         with pytest.raises(SyntaxError, match="tile_w"):
+            parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
+
+    def test_tileset_tile_w_32_accepted(self, tmp_path: Path):
+        png = make_png(tmp_path / "t32.png", 64, 32)
+        src = (
+            f'#import palette "{png.name}" as pal colors=4 dither=none;\n'
+            f'#import tileset "{png.name}" as tiles '
+            "tile_w=32 tile_h=32 planes=2 match_palette=pal;\n"
+            "code main:\n"
+            "    proc main() -> int { return &tiles; }\n"
+        )
+        mod, asm, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        tiles_asm = (gen_dir / "tiles.s").read_text(encoding="utf-8")
+        assert "tile size=32x32" in tiles_asm
+        assert "SECTION tileset,DATA_C" in tiles_asm.replace("\t", " ")
+        assert "lea tiles" in asm
+
+    def test_tilemap_layers_all(self, tmp_path: Path):
+        png = make_png(tmp_path / "tiles.png", 32, 16)
+        (tmp_path / "map.tmx").write_text(
+            '<?xml version="1.0"?>\n'
+            '<map orientation="orthogonal" width="2" height="2" '
+            'tilewidth="16" tileheight="16">\n'
+            ' <tileset firstgid="1" name="t" tilewidth="16" tileheight="16" '
+            'tilecount="2"/>\n'
+            ' <layer name="Ground" width="2" height="2">\n'
+            "  <data encoding=\"csv\">1,2,2,1</data>\n"
+            " </layer>\n"
+            ' <layer name="Objects" width="2" height="2">\n'
+            "  <data encoding=\"csv\">0,1,0,0</data>\n"
+            " </layer>\n"
+            "</map>\n",
+            encoding="utf-8",
+        )
+        src = (
+            f'#import palette "{png.name}" as level_pal colors=16 dither=none;\n'
+            f'#import tileset "{png.name}" as level_tiles '
+            "tile_w=16 tile_h=16 planes=4 match_palette=level_pal;\n"
+            '#import tilemap "map.tmx" as level_map layers=all;\n'
+            "code main:\n"
+            "    proc main() -> int {\n"
+            "        var m: int = &level_map;\n"
+            "        return m;\n"
+            "    }\n"
+        )
+        mod, asm, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        map_asm = (gen_dir / "level_map.s").read_text(encoding="utf-8")
+        assert "multi-layer" in map_asm or "level_map__l0:" in map_asm
+        assert "level_map__l0:" in map_asm
+        assert "level_map__l1:" in map_asm
+        assert "lea level_map" in asm
+
+    def test_tilemap_layer_and_layers_conflict(self, tmp_path: Path):
+        (tmp_path / "map.tmx").write_text(
+            '<?xml version="1.0"?>\n'
+            '<map orientation="orthogonal" width="1" height="1" '
+            'tilewidth="16" tileheight="16">\n'
+            ' <tileset firstgid="1" name="t" tilewidth="16" tileheight="16"/>\n'
+            ' <layer name="Ground" width="1" height="1">\n'
+            "  <data encoding=\"csv\">1</data>\n"
+            " </layer>\n"
+            "</map>\n",
+            encoding="utf-8",
+        )
+        src = (
+            '#import tilemap "map.tmx" as m layer=Ground layers=all;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        with pytest.raises(SyntaxError, match="mutually exclusive"):
             parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
 
 

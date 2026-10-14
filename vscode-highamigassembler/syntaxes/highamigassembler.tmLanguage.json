@@ -147,7 +147,7 @@
             },
             {
               "name": "support.variable.import-option.highamigassembler",
-              "match": "\\b(?:planes|colors|dither|add_word|shared_palette|dedupe|sprites|atlas_png|tile_w|tile_h|tile_width|tile_height|match_palette|strict_palette|layer|allow_flip|index_size|firstgid|tileset|kind|vstart|vstop|index0|requantize|restore_original_size)\\b"
+              "match": "\\b(?:planes|colors|dither|add_word|shared_palette|dedupe|sprites|atlas_png|tile_w|tile_h|tile_width|tile_height|match_palette|strict_palette|layer|layers|allow_flip|index_size|firstgid|tileset|kind|vstart|vstop|index0|requantize|restore_original_size)\\b"
             },
             {
               "name": "entity.name.label.import.highamigassembler",
