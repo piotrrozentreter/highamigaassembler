@@ -1479,9 +1479,15 @@
 
 ## 68020 Phase 6: efficiency follow-ups (feat/68020-efficiency)
 - `TargetSpec.supports_long_branches` / `prefers_long_alignment` (68020 only).
-- Late peephole `_select_branch_sizes`: prefer `.s`, use `.l` only when word
-  range overflows on 68020. Runs after other peephole passes so layout is final.
-  Tests that match unsuffixed `beq`/`bra` must allow an optional `(\.[swl])?`.
+- Late peephole `_select_branch_sizes`: prefer `.s`, then `.w`, then `.l` only when
+  word range overflows **and** `supports_long_branches`. On 68000 past word range:
+  `bra`/`bsr` → `jmp`/`jsr`; conditionals → inverse `.s` + `jmp` trampoline
+  (never emit `Bcc.L` for 68000). Runs after other peephole passes so layout is final.
+  Size estimates must **over**-approx (absolute symbols / `jsr` = 6); optimistic
+  4-byte defaults wrongly kept `.s` and broke jetpac (`beq.s endif329`,
+  `bra.s endif676`). Branches to the next insn (empty then / comments only) are
+  deleted to avoid vasm's short-branch→NOP warning. Tests that match unsuffixed
+  `beq`/`bra` must allow an optional `(\.[swl])?`.
 - Arbitrary strides (not in {1,2,4,8,16,32}) use `mulu.l` on 68020
   (`supports_32bit_muldiv`) and `mulu.w` on 68000 — do not assert `mulu.w` for
   both targets.

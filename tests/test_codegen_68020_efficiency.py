@@ -36,18 +36,18 @@ code main:
 
 
 def test_select_branch_sizes_emits_bra_l_only_on_68020():
-    """Synthetic span past word range -> .l on 68020, .w on 68000."""
-    # 4 bytes/insn estimate: >32766 bytes needs >8192 insn lines between
-    # the branch and the label (plus the branch's own size).
-    nops = [f"    nop  ; pad {i}" for i in range(9000)]
+    """Synthetic span past word range -> .l on 68020, jmp on 68000."""
+    # Conservative estimate uses 2 bytes/nop; >32766 needs >16384 nops.
+    nops = [f"    nop  ; pad {i}" for i in range(20000)]
     lines = ["    bra far_target"] + nops + ["far_target:", "    rts"]
 
     out_20 = _select_branch_sizes(lines, TARGET_68020)
     out_00 = _select_branch_sizes(lines, BASELINE)
 
     assert any(line.strip().startswith("bra.l far_target") for line in out_20)
-    assert any(line.strip().startswith("bra.w far_target") for line in out_00)
+    assert any(line.strip().startswith("jmp far_target") for line in out_00)
     assert not any(".l far_target" in line for line in out_00)
+    assert not any(line.strip().startswith("bra.w far_target") for line in out_00)
 
 
 def test_select_branch_sizes_shrinks_word_to_short():
