@@ -4127,6 +4127,11 @@ class CodeGen:
         _, offsets = self._struct_size_and_offsets(struct_var)
         return any(getattr(field, 'size_suffix', None) in ('w', 'l') for field, _off in offsets)
 
+    def _struct_needs_long_align(self, struct_var: ast.StructVarDecl) -> bool:
+        """True if the struct contains any long field (68020 long-alignment)."""
+        _, offsets = self._struct_size_and_offsets(struct_var)
+        return any(getattr(field, 'size_suffix', None) == 'l' for field, _off in offsets)
+
     def _data_var_needs_even_align(self, var) -> bool:
         """Return True if a data-section variable's label must start at an even
         address on the 68000 (word/long data). Byte-only data has no alignment
@@ -4143,6 +4148,41 @@ class CodeGen:
         if isinstance(var, ast.StructVarDecl):
             return self._struct_needs_even_align(var)
         return (var.size_suffix or 'l') in ('w', 'l')
+
+    def _data_var_needs_long_align(self, var) -> bool:
+        """True when a data label should start on a 4-byte boundary (68020)."""
+        if isinstance(var, ast.StructVarDecl):
+            return self._struct_needs_long_align(var)
+        size = var.size or 'l'
+        # Pointers are stored as longs; typed pointer decls use size 'l' or '*'.
+        if getattr(var, 'ptr_type', None) or (isinstance(size, str) and size.endswith('*')):
+            return True
+        return size == 'l'
+
+    def _bss_var_needs_long_align(self, var) -> bool:
+        """True when a BSS label should start on a 4-byte boundary (68020)."""
+        if isinstance(var, ast.StructVarDecl):
+            return self._struct_needs_long_align(var)
+        suffix = var.size_suffix or 'l'
+        if getattr(var, 'ptr_type', None):
+            return True
+        return suffix == 'l'
+
+    def _align_data_offset(self, offset: int, var, indent: str, *, bss: bool = False) -> int:
+        """Emit alignment directives before a variable label; return new offset."""
+        needs_long = (
+            self._bss_var_needs_long_align(var) if bss else self._data_var_needs_long_align(var)
+        )
+        needs_even = (
+            self._bss_var_needs_even_align(var) if bss else self._data_var_needs_even_align(var)
+        )
+        if self.target.prefers_long_alignment and needs_long and (offset % 4):
+            self.emit(indent + "cnop 0,4")
+            return offset + (4 - (offset % 4))
+        if needs_even and (offset % 2):
+            self.emit(indent + "even")
+            return offset + 1
+        return offset
 
     def _fold_constant(self, expr):
         """Attempt to fold a constant expression at compile time.
@@ -4316,13 +4356,9 @@ class CodeGen:
                 for var in ds.variables:
                     if isinstance(var, ast.ConstDecl):
                         continue  # Constants don't generate assembly
-                    # Word/long data requires an even address on the 68000; byte-only
-                    # data has no alignment requirement. Only emit "even" when this
-                    # variable actually needs it AND the running offset is currently odd
-                    # (avoids emitting a redundant "even" before every single variable).
-                    if self._data_var_needs_even_align(var) and (data_offset % 2):
-                        self.emit(indent + "even")
-                        data_offset += 1
+                    # Word/long data requires an even address on the 68000; on 68020
+                    # long/ptr labels also prefer 4-byte alignment for the wider bus.
+                    data_offset = self._align_data_offset(data_offset, var, indent, bss=False)
                     self.emit(f"{var.name}:")
                     if isinstance(var, ast.StructVarDecl):
                         struct_size, offsets = self._struct_size_and_offsets(var)
@@ -4451,11 +4487,8 @@ class CodeGen:
                     if isinstance(var, ast.ConstDecl):
                         continue  # Constants don't generate assembly
                     # Word/long reservations require an even address on the 68000;
-                    # byte-only reservations have no alignment requirement. Only
-                    # emit "even" when needed AND the running offset is odd.
-                    if self._bss_var_needs_even_align(var) and (bss_offset % 2):
-                        self.emit(indent + "even")
-                        bss_offset += 1
+                    # on 68020 long/ptr labels also prefer 4-byte alignment.
+                    bss_offset = self._align_data_offset(bss_offset, var, indent, bss=True)
                     if isinstance(var, ast.StructVarDecl):
                         struct_size, offsets = self._struct_size_and_offsets(var)
                         count = 1

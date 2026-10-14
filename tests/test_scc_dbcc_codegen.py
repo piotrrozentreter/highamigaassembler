@@ -386,7 +386,7 @@ code test:
 """
         asm = proc_body(compile_src(src), "for_assign_i")
         assert "dbra" not in asm
-        assert re.search(r"\bbgt\s+endfor\d+\b", asm)
+        assert re.search(r"\bbgt(?:\.[swl])?\s+endfor\d+\b", asm)
 
     def test_live_descending_step_uses_dbra(self):
         src = """
@@ -422,7 +422,7 @@ code test:
 """
         asm = proc_body(compile_src(src), "for_live_cont")
         assert count_instruction(asm, "dbra") == 1
-        assert re.search(r"\bbra\s+forcont\d+\b", asm)
+        assert re.search(r"\bbra(?:\.[swl])?\s+forcont\d+\b", asm)
 
     def test_custom_step_and_nonzero_start(self):
         """for i = 10 to 0 by -2 (unused): 6 iterations (10,8,6,4,2,0) -> counter=5."""
@@ -474,10 +474,10 @@ code test:
         asm = proc_body(compile_src(src), "for_dynamic_step")
         assert "dbra" not in asm
         assert "tst.l d2" in asm
-        assert re.search(r"\bbeq\s+endfor\d+\b", asm)
-        assert re.search(r"\bblt\s+endfor\d+_desc\b", asm)
-        assert re.search(r"\bbgt\s+endfor\d+\b", asm)
-        assert re.search(r"\bblt\s+endfor\d+\b", asm)
+        assert re.search(r"\bbeq(?:\.[swl])?\s+endfor\d+\b", asm)
+        assert re.search(r"\bblt(?:\.[swl])?\s+endfor\d+_desc\b", asm)
+        assert re.search(r"\bbgt(?:\.[swl])?\s+endfor\d+\b", asm)
+        assert re.search(r"\bblt(?:\.[swl])?\s+endfor\d+\b", asm)
 
     def test_dynamic_step_uses_d2_for_increment(self):
         src = """
@@ -1026,8 +1026,8 @@ code test:
 """
         asm = proc_body(compile_src(src), "cd_bc")
         # Optimized cmp+branch may land directly on cont/end labels (beq, not bra)
-        assert re.search(r"\b(bra|beq)\s+countdowncont\d+\b", asm)
-        assert re.search(r"\b(bra|beq)\s+endcountdown\d+\b", asm)
+        assert re.search(r"\b(bra|beq)(?:\.[swl])?\s+countdowncont\d+\b", asm)
+        assert re.search(r"\b(bra|beq)(?:\.[swl])?\s+endcountdown\d+\b", asm)
         assert count_instruction(asm, "dbeq") == 1
 
     def test_non_comparison_until_rejected_by_validator(self):

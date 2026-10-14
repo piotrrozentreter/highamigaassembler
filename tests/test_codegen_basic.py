@@ -513,7 +513,7 @@ code main:
         asm = compile_src(src)
         body = proc_body(asm, "condition_forms")
 
-        assert_contains(body, r"move\.l 8\(a6\),d0\s+beq endif")
+        assert_contains(body, r"move\.l 8\(a6\),d0\s+beq(?:\.[swl])? endif")
         assert_contains(body, r"move\.l 8\(a6\),d0\s+seq d0\s+andi\.l #\$FF,d0\s+neg\.b d0")
         assert "not.l d0" not in body
 
@@ -562,8 +562,8 @@ code main:
         for cpu in CpuTarget:
             body = proc_body(compile_src(src, TargetSpec.for_cpu(cpu)), "test")
             assert_internal_branch_targets_defined(body)
-            assert_contains(body, r"beq\.w \.and_false_\d+")
-            assert_contains(body, r"bne\.w \.or_true_\d+")
+            assert_contains(body, r"beq(?:\.[swl])? \.and_false_\d+")
+            assert_contains(body, r"bne(?:\.[swl])? \.or_true_\d+")
 
     def test_do_while_nested_boolean_defines_all_branch_targets(self):
         src = """

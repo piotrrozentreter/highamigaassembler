@@ -195,10 +195,11 @@ def test_struct_pointee_strides_by_struct_size(target, proc, struct_size):
 @pytest.mark.parametrize("target", TARGETS, ids=("68000", "68020"))
 @pytest.mark.parametrize("proc", ["rd_ent_ptr", "wr_ent_ptr"])
 def test_six_byte_struct_stride_uses_an_explicit_multiply(target, proc):
-    """6 is not a legal scale factor on either target, so the stride must stay
-    an explicit ``mulu.w #6``."""
+    """6 is not a legal scale factor on either target, so the stride stays an
+    explicit multiply: ``mulu.w`` on 68000, ``mulu.l`` on 68020."""
     body = _bodies(STRUCT_SOURCE, STRUCT_ORDER, target)[proc]
-    assert _explicit_scale_ops(body) == ["mulu.w #6,d1"], body
+    expected = "mulu.l #6,d1" if target.supports_32bit_muldiv else "mulu.w #6,d1"
+    assert _explicit_scale_ops(body) == [expected], body
     assert _operand_scale(body) == 1, body
 
 

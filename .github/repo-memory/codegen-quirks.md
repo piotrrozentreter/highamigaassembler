@@ -1475,6 +1475,17 @@
   not `grep_search` - see the tooling-flakiness note in the previous entry - showing
   `move.l #124,-(a7)` / `move.l #131,-(a7)` at the `Scroll()` call sites), vasm clean both
   targets, full manual link produced `build/dual_playfield_demo.exe`, `pytest tests -q`
-  unchanged (711 passed/1 skipped).</newString>
-</invoke>
+  unchanged (711 passed/1 skipped).
+
+## 68020 Phase 6: efficiency follow-ups (feat/68020-efficiency)
+- `TargetSpec.supports_long_branches` / `prefers_long_alignment` (68020 only).
+- Late peephole `_select_branch_sizes`: prefer `.s`, use `.l` only when word
+  range overflows on 68020. Runs after other peephole passes so layout is final.
+  Tests that match unsuffixed `beq`/`bra` must allow an optional `(\.[swl])?`.
+- Arbitrary strides (not in {1,2,4,8,16,32}) use `mulu.l` on 68020
+  (`supports_32bit_muldiv`) and `mulu.w` on 68000 — do not assert `mulu.w` for
+  both targets.
+- Long/ptr data+BSS labels get `cnop 0,4` when offset % 4 != 0 on 68020; word
+  labels still use `even`. No loop-head I-cache cnop; no CACR.
+- BF* still language-gated — see docs/CPU_68020_IMPLEMENTATION_PLAN.md Phase 6.
 

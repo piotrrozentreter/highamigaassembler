@@ -6,16 +6,15 @@ from .target import DEFAULT_TARGET, TargetSpec
 def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
     """Multi-pass peephole optimizer with explicit CPU target plumbing.
 
-    Target-specific rewrites remain disabled until indexed-address lowering is
-    centralized and independently validated.
-    
+    Most rewrites are target-neutral. Branch size selection runs once at the
+    end so it sees the final line layout: prefer ``.s`` when the displacement
+    fits, and use ``.l`` on targets with ``supports_long_branches`` when a
+    word displacement would overflow.
+
     Args:
         lines: List of assembly instruction strings.
-        target: TargetSpec with CPU capabilities (currently unused but preserved for Phase 4+).
+        target: TargetSpec with CPU capabilities.
     """
-    # NOTE: target parameter is preserved for Phase 4+ when target-specific rewrites
-    # (e.g., avoiding certain shifts for 68020 scaled-operand forms) are implemented.
-    # Currently all optimizations are target-neutral.
     optimized = lines
     changed = True
     passes = 0
@@ -24,7 +23,7 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
     while changed and passes < max_passes:
         changed = False
         prev_len = len(optimized)
-        
+
         # Apply optimization passes in sequence
         optimized = _eliminate_move_self(optimized)
         optimized = _eliminate_redundant_moves(optimized)
@@ -43,12 +42,132 @@ def peephole_optimize(lines, target: TargetSpec = DEFAULT_TARGET):
         optimized = _eliminate_tst_after_andi_neg(optimized)
         optimized = _eliminate_redundant_flag_test(optimized)
         optimized = _optimize_cmp_zero_to_tst(optimized)
-        
+
         if len(optimized) < prev_len:
             changed = True
         passes += 1
-    
+
+    # Size selection depends on final layout; run after all shrinking passes.
+    optimized = _select_branch_sizes(optimized, target)
     return optimized
+
+
+# PC-relative conditional/unconditional branches (not DBcc / dbra).
+_BRANCH_MNEMONICS = frozenset({
+    "bra", "bsr",
+    "beq", "bne",
+    "blt", "ble", "bgt", "bge",
+    "blo", "bls", "bhi", "bhs",
+    "bcc", "bcs", "bmi", "bpl", "bvs", "bvc",
+})
+_BRANCH_RE = re.compile(
+    r"^(\s*)(b[a-z]+)(\.[swl])?\s+([._$A-Za-z][\w.]*)(\s*(?:;.*)?)?$",
+    re.IGNORECASE,
+)
+_LABEL_RE = re.compile(r"^([._$A-Za-z][\w.]*):")
+_SKIP_SIZE_DIRS = re.compile(
+    r"^\s*(section|xref|xdef|include|cnop|even|equ|opt|macro|endm|if+|else|endif|"
+    r"dc\.|ds\.|dcb\.|dcb\b)",
+    re.IGNORECASE,
+)
+
+
+def _estimate_insn_bytes(line: str) -> int:
+    """Conservative byte-size estimate for branch-distance selection."""
+    base = line.split(";", 1)[0].rstrip()
+    stripped = base.strip()
+    if not stripped or stripped.endswith(":"):
+        return 0
+    if _SKIP_SIZE_DIRS.match(stripped):
+        return 0
+    m = _BRANCH_RE.match(base)
+    if m:
+        suffix = (m.group(3) or ".w").lower()
+        if suffix == ".s":
+            return 2
+        if suffix == ".l":
+            return 6
+        return 4
+    # Long immediates / absolute addresses tend to be larger.
+    if re.search(r"#\$?[0-9A-Fa-f]{5,}|move\.l\s+#", stripped):
+        return 6
+    if re.search(r"\.(l)\b", stripped) and "#" in stripped:
+        return 6
+    return 4
+
+
+def _select_branch_sizes(lines, target: TargetSpec = DEFAULT_TARGET):
+    """Choose ``.s`` / ``.w`` / ``.l`` for PC-relative branches by distance.
+
+    Uses a conservative byte estimate and a few fixed-point iterations so that
+    changing a branch's own size cannot invalidate the choice. Displacement is
+    measured from the byte offset after the branch instruction.
+    """
+    if not lines:
+        return lines
+
+    current = list(lines)
+    for _ in range(3):
+        offsets = []
+        pos = 0
+        for line in current:
+            offsets.append(pos)
+            pos += _estimate_insn_bytes(line)
+
+        labels = {}
+        for i, line in enumerate(current):
+            base = line.split(";", 1)[0].rstrip().strip()
+            m = _LABEL_RE.match(base)
+            if m:
+                labels[m.group(1)] = offsets[i]
+
+        next_lines = []
+        changed = False
+        for i, line in enumerate(current):
+            base = line.split(";", 1)[0].rstrip()
+            m = _BRANCH_RE.match(base)
+            if not m:
+                next_lines.append(line)
+                continue
+
+            indent, mnemonic, old_suffix_raw, label, _trailing = m.groups()
+            mnemonic_l = mnemonic.lower()
+            if mnemonic_l not in _BRANCH_MNEMONICS or label not in labels:
+                next_lines.append(line)
+                continue
+
+            old_suffix = (old_suffix_raw or ".w").lower()
+            branch_size = {".s": 2, ".w": 4, ".l": 6}.get(old_suffix, 4)
+            pc = offsets[i] + branch_size
+            abs_disp = abs(labels[label] - pc)
+
+            if abs_disp <= 126:
+                new_suffix = ".s"
+            elif abs_disp <= 32766:
+                new_suffix = ".w"
+            elif target.supports_long_branches:
+                new_suffix = ".l"
+            else:
+                # 68000 cannot encode >word PC-relative branches.
+                new_suffix = ".w"
+
+            if old_suffix_raw and old_suffix == new_suffix:
+                next_lines.append(line)
+                continue
+
+            comment = ""
+            if ";" in line:
+                comment = ";" + line.split(";", 1)[1]
+            new_line = f"{indent}{mnemonic_l}{new_suffix} {label}{comment}"
+            if new_line != line:
+                changed = True
+            next_lines.append(new_line)
+
+        current = next_lines
+        if not changed:
+            break
+
+    return current
 
 
 def _eliminate_move_self(lines):

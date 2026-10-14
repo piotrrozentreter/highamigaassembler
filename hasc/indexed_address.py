@@ -80,9 +80,10 @@ def lower_indexed_address(
 
     Indexes are long-sized by default. Scales 1, 2, 4, and 8 use 68020
     syntax only when the selected target supports it. Smaller arbitrary
-    strides preserve the existing 68000 ``mulu.w`` behavior; larger strides
-    use full-width shift/add arithmetic instead of truncating through
-    ``mulu.w``.
+    strides use ``mulu.l`` on targets with ``supports_32bit_muldiv`` (68020)
+    so large indices are not truncated, and ``mulu.w`` on 68000; larger
+    strides use full-width shift/add arithmetic instead of truncating
+    through ``mulu.w``.
 
     ``index_word_safe`` lets a caller assert (via `index_fits_word_range()`)
     that the index register provably holds a value within the signed 16-bit
@@ -123,7 +124,10 @@ def lower_indexed_address(
         shift = {16: 4, 32: 5}[stride]
         prelude.append(f"    lsl.l #{shift},{index_reg}")
     elif stride <= 32767:
-        prelude.append(f"    mulu.w #{stride},{index_reg}")
+        if target.supports_32bit_muldiv:
+            prelude.append(f"    mulu.l #{stride},{index_reg}")
+        else:
+            prelude.append(f"    mulu.w #{stride},{index_reg}")
     else:
         prelude.extend(_full_width_stride_fallback(index_reg, stride, scratch_reg))
 
