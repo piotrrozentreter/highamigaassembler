@@ -15,7 +15,7 @@ try:
 except Exception:
     Image = None
 
-# Import quantization helper from bob_importer
+# Import quantization helpers from bob_importer / amiga_palette
 import sys
 import importlib.util
 spec = importlib.util.spec_from_file_location("bob_importer", Path(__file__).parent / "bob_importer.py")
@@ -23,6 +23,14 @@ bob_importer = importlib.util.module_from_spec(spec)
 sys.modules["bob_importer"] = bob_importer
 spec.loader.exec_module(bob_importer)
 quantize_image = bob_importer.quantize_image
+
+_spec_pal = importlib.util.spec_from_file_location(
+    "amiga_palette", Path(__file__).parent / "amiga_palette.py"
+)
+amiga_palette = importlib.util.module_from_spec(_spec_pal)
+sys.modules["amiga_palette"] = amiga_palette
+_spec_pal.loader.exec_module(amiga_palette)
+convert_image = amiga_palette.convert_image
 
 
 def _ensure_dir(p: Path):
@@ -88,16 +96,27 @@ def _parse_first_palette_from_asm(asm_path: str, palette_label: Optional[str] = 
     return values
 
 
-def _build_palette_index_remap(src_rgb4_words, dst_rgb4_words, strict_exact_match: bool = False, used_src_indices=None):
+def _build_palette_index_remap(
+    src_rgb4_words,
+    dst_rgb4_words,
+    strict_exact_match: bool = False,
+    used_src_indices=None,
+    reserve_transparent_index0: bool = True,
+):
     """
     Build index remap table from source palette indices to destination palette indices.
 
-        Strategy:
-        - Prefer exact RGB4 word matches.
-        - For missing colors, either:
-            - strict mode: raise ValueError (used source indices only), or
-            - non-strict mode: fall back to nearest RGB4 color (Manhattan distance in 4-bit RGB).
-        - Keep source color 0 mapped to destination color 0 when both are zero if possible.
+    Strategy:
+    - Source index 0 always maps to destination index 0 (cookie-key / transparent).
+    - Prefer exact RGB4 word matches for other source indices.
+    - When reserve_transparent_index0 (default, used by match_palette=), never map a
+      non-zero source index onto dest index 0: exact matches skip slot 0, and
+      nearest-colour search runs over dest indices 1..n-1 only (same policy as
+      texturepacker_atlas_importer.quantize_sprite_with_palette). This stops
+      near-black opaque pixels becoming transparent under cookie-cut blits.
+    - For missing colors, either:
+        - strict mode: raise ValueError (used source indices only), or
+        - non-strict mode: fall back to nearest RGB4 color (Manhattan distance in 4-bit RGB).
     """
     if not dst_rgb4_words:
         raise ValueError("Destination palette is empty")
@@ -110,13 +129,22 @@ def _build_palette_index_remap(src_rgb4_words, dst_rgb4_words, strict_exact_matc
     missing_exact = []
     used_set = set(used_src_indices) if used_src_indices is not None else None
     for src_idx, src_word in enumerate(src_rgb4_words):
+        # Cookie-key / transparent source index stays transparent.
+        if src_idx == 0:
+            remap.append(0)
+            continue
+
         exact_candidates = dst_by_word.get(src_word)
         if exact_candidates:
-            if src_idx == 0 and src_word == 0 and 0 in exact_candidates:
-                remap.append(0)
+            if reserve_transparent_index0:
+                usable = [i for i in exact_candidates if i != 0]
             else:
-                remap.append(exact_candidates[0])
-            continue
+                usable = exact_candidates
+            if usable:
+                remap.append(usable[0])
+                continue
+            # Colour exists only as dest[0]; do not punch opaque pixels to transparent.
+            # Fall through to strict / nearest among non-reserved slots.
 
         if strict_exact_match and (used_set is None or src_idx in used_set):
             missing_exact.append((src_idx, src_word))
@@ -124,9 +152,11 @@ def _build_palette_index_remap(src_rgb4_words, dst_rgb4_words, strict_exact_matc
             continue
 
         sr, sg, sb = _rgb4_word_to_tuple(src_word)
-        best_idx = 0
+        start = 1 if reserve_transparent_index0 and len(dst_rgb4_words) > 1 else 0
+        best_idx = start
         best_dist = 1_000_000
-        for dst_idx, dst_word in enumerate(dst_rgb4_words):
+        for dst_idx in range(start, len(dst_rgb4_words)):
+            dst_word = dst_rgb4_words[dst_idx]
             dr, dg, db = _rgb4_word_to_tuple(dst_word)
             dist = abs(sr - dr) + abs(sg - dg) + abs(sb - db)
             if dist < best_dist:
@@ -200,44 +230,68 @@ def export_tileset_asm(
         raise ValueError(f"tile_width must be 8, 16, or 32, got {tile_width}")
     if tile_height not in (8, 16, 32):
         raise ValueError(f"tile_height must be 8, 16, or 32, got {tile_height}")
-    
-    # Quantize the entire image
-    quant = quantize_image(png_path, planes=planes, use_dither=use_dither)
-    img_w, img_h = quant['width'], quant['height']
-    indices_by_row = quant['indices_by_row']
-    final_palette = quant['final_palette']
-    max_colors = quant.get('max_colors', 2 ** planes)
 
     if strict_palette_match and not match_bob_palette_from_asm:
         raise ValueError("--strict-palette-match requires --match-bob-palette")
 
+    max_colors = 2 ** planes
+    dither_name = 'fs' if use_dither else 'none'
+
     if match_bob_palette_from_asm:
-        # Convert generated palette to RGB4 words.
-        src_rgb4_words = []
-        palette_entry_count = min(max_colors, len(final_palette) // 3)
-        for i in range(palette_entry_count):
-            r = int(round(final_palette[i * 3] / 17.0))
-            g = int(round(final_palette[i * 3 + 1] / 17.0))
-            b = int(round(final_palette[i * 3 + 2] / 17.0))
-            src_rgb4_words.append((r << 8) | (g << 4) | b)
-
-        used_src_indices = set()
-        for row in indices_by_row:
-            for idx in row:
-                if idx >= 0:
-                    used_src_indices.add(idx)
-
+        # Map straight onto the shared Amiga palette. Mode-P sheets without tRNS
+        # treat index 0 as cookie (see amiga_palette.convert_image); RGBA with
+        # alpha uses transparent; opaque RGB/RGBA ground sheets use backdrop.
         dst_rgb4_words = _parse_first_palette_from_asm(
             match_bob_palette_from_asm,
             palette_label=match_bob_palette_label,
         )
-        remap = _build_palette_index_remap(
-            src_rgb4_words,
-            dst_rgb4_words,
-            strict_exact_match=strict_palette_match,
-            used_src_indices=used_src_indices,
+        src_img = Image.open(png_path)
+        src_mode = (getattr(src_img, 'mode', '') or '').upper()
+        rgba_probe = src_img.convert('RGBA')
+        has_alpha = any(a < 128 for (_, _, _, a) in bob_importer.flatten_image_pixels(rgba_probe))
+        if src_mode == 'P' or has_alpha:
+            index0_mode = 'transparent'
+        else:
+            index0_mode = 'backdrop'
+
+        conv = convert_image(
+            src_img,
+            colors=max_colors,
+            dither=dither_name,
+            index0=index0_mode,
+            match_palette_words=dst_rgb4_words,
         )
-        indices_by_row = _remap_indices_by_row(indices_by_row, remap)
+        img_w, img_h = conv['width'], conv['height']
+        indices_by_row = conv['indices_by_row']
+        final_palette = conv['palette_rgb8']
+
+        if strict_palette_match:
+            # convert_image nearest-maps; strict mode still validates that every
+            # colour produced by a plane-budget quantize exists exactly in dest.
+            quant = quantize_image(png_path, planes=planes, use_dither=use_dither)
+            fp = quant['final_palette']
+            src_words_check = []
+            for i in range(min(max_colors, len(fp) // 3)):
+                r = int(round(fp[i * 3] / 17.0))
+                g = int(round(fp[i * 3 + 1] / 17.0))
+                b = int(round(fp[i * 3 + 2] / 17.0))
+                src_words_check.append((r << 8) | (g << 4) | b)
+            used_from_quant = {
+                idx for row in quant['indices_by_row'] for idx in row if idx >= 0
+            }
+            _build_palette_index_remap(
+                src_words_check,
+                dst_rgb4_words,
+                strict_exact_match=True,
+                used_src_indices=used_from_quant,
+            )
+    else:
+        # Quantize the entire image (private tileset palette)
+        quant = quantize_image(png_path, planes=planes, use_dither=use_dither)
+        img_w, img_h = quant['width'], quant['height']
+        indices_by_row = quant['indices_by_row']
+        final_palette = quant['final_palette']
+        max_colors = quant.get('max_colors', 2 ** planes)
     
     if img_w % tile_width != 0:
         raise ValueError(f"Image width {img_w} must be multiple of tile_width {tile_width}")

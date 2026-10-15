@@ -263,9 +263,11 @@ BOB helpers in `lib/bob.s` (`CreateBob`, `PasteBob`, `MirrorBobHorizontally`,
 by design, since HAM6 has no equivalent per-plane BOB layout. This is intentional, not a gap.
 
 #### Tilemaps (`lib/tilemap.s`)
-Opaque tile blit for `#import tileset` / `#import tilemap` data works in **mode 0
-only** (320×256). Mode 1 (640×256×16) should use BOBs for overlays, not these
-routines. Full API and import layouts:
+Tile blit for `#import tileset` / `#import tilemap` data works in **mode 0
+only** (320×256). Opaque (`BlitTile`, `DrawTilemapLayer`, …) and colour-index-0
+cookie-cut (`BlitTileTrans`, `DrawTilemapLayerTrans`) paths are available;
+`DrawTilemap` / `DrawTilemapMulti` remain opaque. Mode 1 (640×256×16) should use
+BOBs for overlays, not these routines. Full API and import layouts:
 [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit);
 how-to: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps).
 

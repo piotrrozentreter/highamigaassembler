@@ -1173,6 +1173,14 @@ code main:
     extern func DrawTilemapMulti(map: int, tileset_table: int, planes: int,
                                  dest: int, dest_bpr: int,
                                  origin_x: int, origin_y: int) -> int;
+    extern func DrawTilemapLayer(layer: int, tileset: int, tile_w: int, tile_h: int,
+                                 planes: int, dest: int, dest_bpr: int,
+                                 origin_x: int, origin_y: int,
+                                 map_w: int, map_h: int) -> int;
+    extern func DrawTilemapLayerTrans(layer: int, tileset: int, tile_w: int, tile_h: int,
+                                      planes: int, dest: int, dest_bpr: int,
+                                      origin_x: int, origin_y: int,
+                                      map_w: int, map_h: int) -> int;
     extern var gfx_current_screen_ptr: int;
 
     data:
@@ -1182,14 +1190,20 @@ code main:
     proc draw_level() -> int {
         call SetGraphicsMode(0);   // 320x256x32 — tile blit is mode 0 only
         call LoadPalette(&level_pal, 32);
-        // Shared sheet for every layer:
-        // return DrawTilemap(&level_map, &ground_tiles, 5,
-        //                    gfx_current_screen_ptr, 40, 0, 0);
-        // Different sheet per layer:
-        return DrawTilemapMulti(&level_map, &level_tilesets, 5,
-                                gfx_current_screen_ptr, 40, 0, 0);
+        // Opaque all layers (per-layer sheets):
+        // return DrawTilemapMulti(&level_map, &level_tilesets, 5,
+        //                         gfx_current_screen_ptr, 40, 0, 0);
+        // Ground opaque + objects colour-0 transparent:
+        call DrawTilemapLayer(&level_map__l0, &ground_tiles, 32, 32, 5,
+                              gfx_current_screen_ptr, 40, 0, 0, 20, 16);
+        return DrawTilemapLayerTrans(&level_map__l1, &object_tiles, 32, 32, 5,
+                                     gfx_current_screen_ptr, 40, 0, 0, 20, 16);
     }
 ```
+
+`DrawTilemap` / `DrawTilemapMulti` are **opaque only**. For mixed transparency,
+call `DrawTilemapLayer` then `DrawTilemapLayerTrans` with the map width/height
+from your Tiled export (or read `DC.W` fields at `&level_map`).
 
 Runtime API details: [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
 Mode **1** (640×256×16) stays **BOB-only** — do not call these tile blitters in hires.

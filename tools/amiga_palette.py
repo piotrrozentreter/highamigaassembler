@@ -474,6 +474,26 @@ def convert_image(
         [rgba_data[y * w + x] for x in range(w)]
         for y in range(h)
     ]
+    # Mode-P sheets often use palette index 0 as the Amiga cookie key without a
+    # tRNS chunk. When index0='transparent', force those pixels to alpha=0 so
+    # they stay colour 0 instead of being nearest-mapped to near-black opaques.
+    if (
+        index0 == 'transparent'
+        and source_mode
+        and source_mode.upper() == 'P'
+        and 'transparency' not in (getattr(img, 'info', {}) or {})
+    ):
+        p_idx = flatten_image_pixels(img)
+        rgba_rows = []
+        for y in range(h):
+            row = []
+            for x in range(w):
+                r, g, b, a = rgba_data[y * w + x]
+                if p_idx[y * w + x] == 0:
+                    row.append((r, g, b, 0))
+                else:
+                    row.append((r, g, b, a))
+            rgba_rows.append(row)
     has_alpha = any(px[3] < ALPHA_THRESHOLD for row in rgba_rows for px in row)
     reserve_transparent = index0 == 'transparent'
     # When reserving transparency, always keep slot 0 even if the PNG is opaque,

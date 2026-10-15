@@ -6,6 +6,13 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Fixed
 
+- **Tileset `match_palette=` transparent index 0:**
+  `tools/tile_importer._build_palette_index_remap` no longer nearest-matches
+  non-zero source colours onto destination index 0. Source index 0 stays 0;
+  opaque indices search dest slots `1..n-1` only (same as atlas BOB
+  quantize). Stops near-black object pixels becoming cookie-cut holes when
+  remapping onto a shared palette.
+
 - **`amiga_gfx` / `amiga_gfx_demo` system crash:** two issues in
   `lib/amiga_gfx.s`: (1) `GfxInit`/`GfxOpenScreen`/etc. did `link a6` then
   overwrote `a6` with a library base and `unlk`’d it (stack corruption on
@@ -15,12 +22,22 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **Tilemap colour-index-0 cookie-cut (`lib/tilemap.s`):** `BlitTileTrans` and
+  `DrawTilemapLayerTrans` blit with mask = OR of all planes and minterm `$0FCA`
+  (A=mask, B=src, C=D=dest). Chip scratch holds one interleaved mask (max
+  32×32×5 = 640 bytes). Existing opaque APIs unchanged; `DrawTilemap` /
+  `DrawTilemapMulti` stay opaque — mix `DrawTilemapLayer` +
+  `DrawTilemapLayerTrans` for ground/objects. Docs:
+  [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
+  Example: [import_tilemap_layers_test.has](../examples/tests/compiler/import_tilemap_layers_test.has).
+
 - **Multi-layer Tiled `#import tilemap` + `lib/tilemap.s`:** `layers=all` or
   `layers=Name1,Name2` (mutually exclusive with `layer=`) emits a bottom→top
   directory and `__lN` layers with 1-based indices (0 = empty). Single-layer
   import ABI unchanged (0-based). Tileset `tile_w`/`tile_h` allow **8|16|32**.
-  Runtime (mode 0 only): `BlitTile`, `DrawTilemapGrid`, `DrawTilemapLayer`,
-  `DrawTilemap`, `DrawTilemapMulti`. Mode 1 remains BOB-only for map art.
+  Runtime (mode 0 only): `BlitTile`, `BlitTileTrans`, `DrawTilemapGrid`,
+  `DrawTilemapLayer`, `DrawTilemapLayerTrans`, `DrawTilemap`, `DrawTilemapMulti`.
+  Mode 1 remains BOB-only for map art.
   Guide: [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps);
   API: [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
   Example: [import_tilemap_layers_test.has](../examples/tests/compiler/import_tilemap_layers_test.has).

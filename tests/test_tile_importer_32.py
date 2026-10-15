@@ -58,3 +58,44 @@ def test_tile_width_rejects_24():
                     tile_height=8,
                     planes=2,
                 )
+
+
+def test_match_palette_remap_skips_transparent_index0():
+    """Near-black opaque src colours must not nearest-match onto dest index 0."""
+    # dest[0]=black key, dest[1]=near-black, dest[2]=red
+    dst = [0x000, 0x111, 0xF00]
+    # src[0]=key, src[1]=$010 (closer to $000 than $111 without skip-0)
+    src = [0x000, 0x010]
+    remap = tile._build_palette_index_remap(src, dst)
+    assert remap[0] == 0
+    assert remap[1] == 1
+
+
+def test_match_palette_remap_src0_always_zero():
+    src = [0xABC, 0xF00]
+    dst = [0x000, 0xF00, 0xABC]
+    remap = tile._build_palette_index_remap(src, dst)
+    assert remap[0] == 0
+    assert remap[1] == 1
+
+
+def test_match_palette_strict_errors_when_colour_only_at_index0():
+    src = [0x000, 0x000]
+    dst = [0x000, 0xF00]
+    with pytest.raises(ValueError, match="Strict palette match"):
+        tile._build_palette_index_remap(
+            src,
+            dst,
+            strict_exact_match=True,
+            used_src_indices={0, 1},
+        )
+
+
+def test_match_palette_reserve_off_can_map_opaque_to_zero():
+    src = [0x000, 0x010]
+    dst = [0x000, 0xF00]
+    remap = tile._build_palette_index_remap(
+        src, dst, reserve_transparent_index0=False
+    )
+    assert remap[0] == 0
+    assert remap[1] == 0

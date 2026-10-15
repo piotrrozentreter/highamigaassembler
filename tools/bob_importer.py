@@ -169,7 +169,14 @@ def export_bob_asm(png_path: str, out_label: str, planes: int = 5, use_dither: b
 
 
 def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False):
-    """Quantize an image (path or PIL Image) and return indices_by_row and palette info."""
+    """Quantize an image (path or PIL Image) and return indices_by_row and palette info.
+
+    Mode-P sources that already fit in ``2**planes`` colours keep their native
+    indices. Wider indexed sheets (common 256-colour PNGs) are re-quantized via
+    median-cut — never clamped with ``min(idx, 31)``, which destroys colour.
+    When re-quantizing a mode-P sheet without a tRNS chunk, palette index 0 is
+    treated as the cookie-key (transparent) so BOB/tile cookie-cut stays valid.
+    """
     if Image is None:
         raise RuntimeError('Pillow is required for bob importing (pip install pillow)')
 
@@ -183,10 +190,14 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
 
     # Maximum colors supported by bitplanes
     max_colors = 2 ** planes
+    ALPHA_THRESHOLD = 128
+
+    # Optional synthetic RGBA when mode-P must be re-quantized with a cookie key.
+    forced_rgba = None
+    forced_has_transparent = None
 
     # If the image is palette-indexed (mode 'P'), prefer using its palette
-    # directly rather than converting and re-quantizing. Respect a hard cap
-    # of 32 palette entries when present.
+    # directly when every used index already fits the plane budget.
     if getattr(img, 'mode', '').upper() == 'P':
         pal_raw = img.getpalette() or []
         palette_size = len(pal_raw) // 3
@@ -201,60 +212,117 @@ def quantize_image(png_path_or_image, planes: int = 5, use_dither: bool = False)
                 has_transparent = True
                 transparent_index = t
 
-        # Limit palette to at most 32 colors (and to max_colors available)
-        usable_colors = min(palette_size, max_colors - (1 if has_transparent else 0), 32)
-        if usable_colors < 1:
-            usable_colors = 1
-
-        palette_bytes = (pal_raw + [0] * (usable_colors * 3))[:usable_colors * 3]
-
-        # Build final_palette: reserve index 0 for transparency if needed
-        if has_transparent:
-            final_palette = [0, 0, 0] + palette_bytes + [0] * (256 * 3 - (3 + len(palette_bytes)))
-        else:
-            final_palette = palette_bytes + [0] * (256 * 3 - len(palette_bytes))
-
-        # Raw indices come from the palette image
         qdata = flatten_image_pixels(img)
+        used_indices = set(qdata)
+        max_used = max(used_indices) if used_indices else 0
+        opaque_budget = max_colors - (1 if has_transparent else 0)
+        if opaque_budget < 1:
+            opaque_budget = 1
 
-        indices_by_row = []
-        for y in range(h):
-            row_indices = []
-            for x in range(w):
-                idx = qdata[y * w + x]
-                if has_transparent and idx == transparent_index:
-                    row_indices.append(0)
-                else:
-                    # If we reserved 0 for transparent, shift by +1
-                    if has_transparent:
-                        base_idx = idx
-                        row_indices.append(min(base_idx + 1, usable_colors))
+        # Preserve native indices only when they already fit the bitplane budget.
+        # Clamping high indices to (max_colors-1) used to shred 256-colour sheets.
+        can_preserve = (
+            max_used < (max_colors if not has_transparent else opaque_budget)
+            and len(used_indices) <= (max_colors if not has_transparent else opaque_budget + 1)
+        )
+        # With an explicit tRNS index, preserved path remaps that index to 0 and
+        # shifts others; require the non-transparent indices to fit opaque_budget.
+        if has_transparent and transparent_index is not None:
+            opaque_used = [i for i in used_indices if i != transparent_index]
+            can_preserve = len(opaque_used) <= opaque_budget
+
+        if can_preserve:
+            usable_colors = min(palette_size, opaque_budget, 32)
+            if usable_colors < 1:
+                usable_colors = 1
+
+            palette_bytes = (pal_raw + [0] * (usable_colors * 3))[:usable_colors * 3]
+
+            # Build final_palette: reserve index 0 for transparency if needed
+            if has_transparent:
+                final_palette = [0, 0, 0] + palette_bytes + [0] * (256 * 3 - (3 + len(palette_bytes)))
+            else:
+                final_palette = palette_bytes + [0] * (256 * 3 - len(palette_bytes))
+
+            indices_by_row = []
+            for y in range(h):
+                row_indices = []
+                for x in range(w):
+                    idx = qdata[y * w + x]
+                    if has_transparent and idx == transparent_index:
+                        row_indices.append(0)
                     else:
-                        row_indices.append(min(idx, usable_colors - 1))
-            indices_by_row.append(row_indices)
+                        if has_transparent:
+                            # Remap: keep relative order but force cookie at 0.
+                            # Indices above the usable opaque range collapse to last slot.
+                            if transparent_index is not None and idx > transparent_index:
+                                base_idx = idx - 1
+                            else:
+                                base_idx = idx
+                            row_indices.append(min(base_idx + 1, usable_colors))
+                        else:
+                            row_indices.append(min(idx, usable_colors - 1))
+                indices_by_row.append(row_indices)
 
-        return {
-            'width': w,
-            'height': h,
-            'indices_by_row': indices_by_row,
-            'final_palette': final_palette,
-            'has_transparent': has_transparent,
-            'max_colors': max_colors,
-            'source_mode': source_mode,
-        }
+            return {
+                'width': w,
+                'height': h,
+                'indices_by_row': indices_by_row,
+                'final_palette': final_palette,
+                'has_transparent': has_transparent,
+                'max_colors': max_colors,
+                'source_mode': source_mode,
+            }
+
+        # Re-quantize: build RGBA, marking cookie pixels with alpha=0.
+        # Without tRNS, Amiga sheets conventionally use palette index 0 as cookie.
+        cookie = transparent_index if has_transparent else 0
+        forced_rgba = []
+        for idx in qdata:
+            if idx == cookie:
+                forced_rgba.append((0, 0, 0, 0))
+            else:
+                base = idx * 3
+                if base + 2 < len(pal_raw):
+                    forced_rgba.append((pal_raw[base], pal_raw[base + 1], pal_raw[base + 2], 255))
+                else:
+                    forced_rgba.append((0, 0, 0, 255))
+        forced_has_transparent = True
 
     # Fallback: non-paletted image flow — quantize RGB to palette_colors
-    rgba = flatten_image_pixels(img.convert('RGBA'))
+    if forced_rgba is not None:
+        rgba = forced_rgba
+        has_transparent = bool(forced_has_transparent)
+        rgb_img = Image.new('RGB', (w, h))
+        rgb_img.putdata([(r, g, b) for (r, g, b, a) in rgba])
+    else:
+        rgba = flatten_image_pixels(img.convert('RGBA'))
+        has_transparent = any(a < ALPHA_THRESHOLD for (_, _, _, a) in rgba)
+        rgb_img = img.convert('RGB')
 
-    ALPHA_THRESHOLD = 128
-    has_transparent = any(a < ALPHA_THRESHOLD for (_, _, _, a) in rgba)
     palette_colors = max_colors - 1 if has_transparent else max_colors
     if palette_colors < 1:
         palette_colors = 1
 
-    rgb_img = img.convert('RGB')
     dither_mode = Image.FLOYDSTEINBERG if use_dither else Image.NONE
-    pal_indexed = rgb_img.quantize(colors=palette_colors, method=Image.MEDIANCUT, dither=dither_mode)
+    # Quantize only opaque pixels' colours: build a temp image with cookie
+    # pixels replaced by the first opaque colour so they do not steal slots.
+    if has_transparent:
+        opaque_rgb = [(r, g, b) for (r, g, b, a) in rgba if a >= ALPHA_THRESHOLD]
+        fill = opaque_rgb[0] if opaque_rgb else (0, 0, 0)
+        quant_pixels = [
+            (r, g, b) if a >= ALPHA_THRESHOLD else fill
+            for (r, g, b, a) in rgba
+        ]
+        quant_img = Image.new('RGB', (w, h))
+        quant_img.putdata(quant_pixels)
+        pal_indexed = quant_img.quantize(
+            colors=palette_colors, method=Image.MEDIANCUT, dither=dither_mode
+        )
+    else:
+        pal_indexed = rgb_img.quantize(
+            colors=palette_colors, method=Image.MEDIANCUT, dither=dither_mode
+        )
 
     pal_raw = pal_indexed.getpalette() or []
     palette_bytes = (pal_raw + [0] * (palette_colors * 3))[:palette_colors * 3]

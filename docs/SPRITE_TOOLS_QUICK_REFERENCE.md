@@ -67,6 +67,7 @@ Compile with `hasc` (Pillow required for image kinds; tilemap alone does not).
 Generated files land in `build/gen` (`--asset-outdir` / `--force-assets`).
 Use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`).
 Import the palette source **before** a tileset that uses `match_palette=`.
+`match_palette=` treats dest index 0 as transparent (src 0→0; opaque colours remap to 1..n-1 only).
 
 | Kind | Constraints |
 |------|-------------|
