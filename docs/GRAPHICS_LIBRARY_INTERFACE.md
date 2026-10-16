@@ -322,6 +322,23 @@ call Text(0, 0, hud_msg_ptr, 31);
 call SetTextMode(0);
 ```
 
+#### Fast HUD text via BOB (`lib/textbob.s`)
+
+For static or infrequently changing labels (score, GAME OVER), bake once with `PrintToBob` and blit with `PasteBob` each frame. Works in mode 0 (5 planes) and mode 1 (4 planes); same mode gate as `CreateBob`. See [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#text-bobs-libtextbobs).
+
+```has
+extern func PrintToBob(str: int, color: int, flags: int) -> int;
+extern func PasteBob(handle: int, x: int, y: int, mode: int) -> void;
+extern func DestroyBob(handle: int) -> void;
+
+// flags 3 = mask | add_word
+hud = PrintToBob(&score_msg, 1, 3);
+call PasteBob(hud, 32, 16, 1);
+// when text changes:
+call DestroyBob(hud);
+hud = PrintToBob(&new_msg, 1, 3);
+```
+
 ### Color Functions
 
 #### SetColor(idx: int, value: int) -> int

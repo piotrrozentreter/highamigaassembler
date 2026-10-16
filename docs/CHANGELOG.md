@@ -22,6 +22,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`PrintToBob` text-as-BOB (`lib/textbob.s`):** bake a single-line 8×8
+  font string into a chip planar BOB (modes 0/1/3) and blit with `PasteBob`.
+  Flags: mask, add_word, opaque cell. Returns a normal `CreateBob` handle;
+  `DestroyBob` frees owned data/mask (same bit15 as mirror BOBs).
+  `CreateTextBob` / `DestroyTextBob` alias `CreateBob` / `DestroyBob` for
+  static `DATA_C` labels. Example rebake: [snake.has](../examples/snake.has);
+  regression: [print_to_bob_test.has](../examples/tests/compiler/print_to_bob_test.has).
+
 - **Tilemap colour-index-0 cookie-cut (`lib/tilemap.s`):** `BlitTileTrans` and
   `DrawTilemapLayerTrans` blit with mask = OR of all planes and minterm `$0FCA`
   (A=mask, B=src, C=D=dest). Chip scratch holds one interleaved mask (max

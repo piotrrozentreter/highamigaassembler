@@ -112,6 +112,7 @@ LIB_SOURCES=(
     "$LIB_DIR/math.s"
     "$LIB_DIR/bob.s"
     "$LIB_DIR/bob_animation.s"
+    "$LIB_DIR/textbob.s"
     "$LIB_DIR/ptplayer.s"
     "$LIB_DIR/timer.s"
     "$LIB_DIR/dos.s"
@@ -233,6 +234,11 @@ while [[ $changed -eq 1 ]]; do
                     if [[ -z "${WANT_LIB[$dep]:-}" ]]; then add_dep "$dep"; changed=1; fi
                 done
                 ;;
+            textbob.s)
+                for dep in "$LIB_DIR/bob.s" "$LIB_DIR/graphics.s" "$LIB_DIR/heap.s"; do
+                    if [[ -z "${WANT_LIB[$dep]:-}" ]]; then add_dep "$dep"; changed=1; fi
+                done
+                ;;
             ptplayer.s)
                 dep="$LIB_DIR/takeover.s"
                 if [[ -z "${WANT_LIB[$dep]:-}" ]]; then add_dep "$dep"; changed=1; fi
@@ -258,6 +264,7 @@ ORDERED_LIBS=(
     "$LIB_DIR/math.s"
     "$LIB_DIR/bob.s"
     "$LIB_DIR/bob_animation.s"
+    "$LIB_DIR/textbob.s"
     "$LIB_DIR/ptplayer.s"
     "$LIB_DIR/timer.s"
     "$LIB_DIR/dos.s"

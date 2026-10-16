@@ -1,0 +1,108 @@
+// Regression: PrintToBob bakes text into a CreateBob handle; DestroyBob frees
+// owned chip data/mask. Rebake path (score-style) must not leak.
+//
+// Expected (takeover / mode 0):
+// - PrintToBob returns a valid handle (not -1)
+// - GetBobWidth/Height match baked geometry
+// - DestroyBob + rebake succeeds
+// - CreateTextBob aliases CreateBob
+
+#pragma lockreg(a5);
+
+// flags: mask | add_word
+const TB_MASK_ADDWORD = 3;
+
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func SetFont(ptr: int) -> int;
+    extern func HeapInit() -> void;
+    extern func PrintToBob(str: int, color: int, flags: int) -> int;
+    extern func CreateTextBob(descriptor_ptr: int, save_background: int) -> int;
+    extern func DestroyBob(handle: int) -> void;
+    extern func DestroyTextBob(handle: int) -> void;
+    extern func GetBobWidth(handle: int) -> int;
+    extern func GetBobHeight(handle: int) -> int;
+    extern func PasteBob(handle: int, x: int, y: int, mode: int) -> void;
+    extern func ClearScreen() -> int;
+    extern func Show() -> void;
+    extern var fonts: int;
+    extern var label_score: int;
+    extern var label_score2: int;
+    extern var tiny_text_bob: int;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        var bob: int;
+        var bob2: int;
+        var w: int;
+        var h: int;
+        var static_bob: int;
+
+        if (SetGraphicsMode(0) == -1) {
+            return -1;
+        }
+        call HeapInit();
+        call SetFont(&fonts);
+
+        bob = PrintToBob(&label_score, 1, TB_MASK_ADDWORD);
+        if (bob == -1) {
+            return -10;
+        }
+
+        w = GetBobWidth(bob);
+        h = GetBobHeight(bob);
+        // "Score: 0" = 8 chars → 64 px, round 64, +16 add_word → 80
+        if (w != 80) {
+            call DestroyBob(bob);
+            return -20;
+        }
+        if (h != 8) {
+            call DestroyBob(bob);
+            return -21;
+        }
+
+        call ClearScreen();
+        call PasteBob(bob, 16, 16, 1);
+        call Show();
+
+        // Rebake (changing HUD)
+        call DestroyBob(bob);
+        bob2 = PrintToBob(&label_score2, 1, TB_MASK_ADDWORD);
+        if (bob2 == -1) {
+            return -30;
+        }
+        call DestroyBob(bob2);
+
+        // Static path alias (CreateTextBob → CreateBob)
+        static_bob = CreateTextBob(&tiny_text_bob, 0);
+        if (static_bob == -1) {
+            return -40;
+        }
+        call DestroyTextBob(static_bob);
+
+        return 0;
+    }
+
+    asm {
+label_score:
+        dc.b "Score: 0",0
+        even
+label_score2:
+        dc.b "Score: 10",0
+        even
+
+        ; Minimal 16x1 5-plane BOB for CreateTextBob smoke (not pasted).
+tiny_text_bob_data:
+        dc.w 16,1
+        dc.w $8000,$4000,$2000,$1000,$0800
+tiny_text_bob_mask:
+        dc.w 16,1
+        dc.w $F000,$F000,$F000,$F000,$F000
+tiny_text_bob:
+        dc.l tiny_text_bob_data, tiny_text_bob_mask, 0
+        dc.w 16,1,32
+    }

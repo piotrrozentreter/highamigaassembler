@@ -41,7 +41,10 @@ WAITBLIT:MACRO
 ;   +4:  dc.l mask_ptr
 ;   +8:  dc.l bg_ptr (or 0 if no background)
 ;   +12: dc.l palette_ptr
-;   +16: dc.w has_background_flag (0 or 1)
+;   +16: dc.w flags
+;          bit0  = has_background (HeapAlloc'd bg at +8)
+;          bit15 = owns data/mask (HeapAlloc'd planar buffers at +0/+4)
+;                  Set by MirrorBob* and PrintToBob; DestroyBob frees them.
 ;   +18: dc.w width
 ;   +20: dc.w height
 ;   +22: dc.w color_count

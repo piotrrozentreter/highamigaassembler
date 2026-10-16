@@ -19,6 +19,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `math.s`          | Q16.16 fixed-point arithmetic             | [Q16_AUTOMATIC_CONVERSION.md](Q16_AUTOMATIC_CONVERSION.md) + this file |
 | `sprite.s`        | Hardware DMA sprites (8 slots)            | [SPRITE_TOOLS_OVERVIEW.md](SPRITE_TOOLS_OVERVIEW.md) + this file |
 | `bob.s`           | Blitter Objects (software sprites)        | this file                                            |
+| `textbob.s`       | Bake font text into BOB handles           | this file (Text BOBs)                                |
 | `tilemap.s`       | Opaque + colour-0 cookie-cut tile blit for `#import` tilesets/maps | this file + [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps) |
 | `helpers.s`       | VBlank sync, AMOS-compatible RNG          | this file                                            |
 | `timer.s`         | Millisecond delay (CIA-A hardware timer)  | this file                                            |
@@ -677,12 +678,42 @@ var bob: int = CreateBob(enemy_desc, 1);
 
 Frees the background buffer (if any) and the runtime struct. Pass the handle returned by `CreateBob`.
 
-If the handle was created by a mirror API, `DestroyBob` also frees the mirrored owned data/mask buffers.
+If the handle was created by a mirror API or by `PrintToBob`, `DestroyBob` also frees the owned chip data/mask buffers (handle flags bit15).
 
 ```has
 extern func DestroyBob(handle: int) -> void;
 call DestroyBob(bob);
 ```
+
+### Text BOBs (`lib/textbob.s`)
+
+Bake 8×8 font strings into chip planar BOBs and blit with `PasteBob` instead of CPU `Text`/`Print` every frame.
+
+#### `PrintToBob(str: int, color: int, flags: int) -> int`
+
+Renders a single-line NUL-terminated string into a heap-allocated chip BOB matching the current graphics mode (0/1/3). Requires `SetGraphicsMode` and `SetFont` first. Returns a normal BOB handle, or `-1` on failure.
+
+Flags:
+- bit0 (`1`): build cookie-cut mask (use `PasteBob(..., mode=1)`)
+- bit1 (`2`): add-word (+16 px) for non-aligned `PasteBob` X
+- bit2 (`4`): opaque cell mask (full 8×8 per glyph)
+
+Recommended HUD flags: `3` (mask | add_word). Width is `((strlen*8+15)&~15)` then +16 if add_word; height is 8. Rebake when the string changes: `DestroyBob(old)` then `PrintToBob(new, ...)`.
+
+```has
+extern func PrintToBob(str: int, color: int, flags: int) -> int;
+var hud: int = PrintToBob(&msg, 1, 3);
+call PasteBob(hud, 32, 16, 1);
+call DestroyBob(hud);
+```
+
+#### `CreateTextBob(descriptor_ptr: int, save_background: int) -> int`
+
+Alias for `CreateBob` — use for static `DATA_C` text assets with a normal importer-style descriptor (no pixel heap).
+
+#### `DestroyTextBob(handle: int) -> void`
+
+Alias for `DestroyBob` (same ownership rules).
 
 ### `MirrorBobHorizontally(handle: int) -> int`
 

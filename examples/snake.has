@@ -65,7 +65,6 @@ extern func WaitVBlank()               -> void;
 extern func SetColor(id: int, col: int) -> int;
 extern func SetFont(ptr: int)          -> int;
 extern func Text(x: int, y: int, msg: int, color: int) -> int;
-extern func SetTextMode(mode: int)     -> int;
 extern func DrawBox(x: int, y: int, w: int, h: int, bg: int, border: int) -> int;
 extern func TakeSystem()               -> void;
 extern func ReleaseSystem()            -> void;
@@ -77,6 +76,9 @@ extern func HeapInit()                 -> void;
 extern func HeapFree(ptr: int)         -> void;
 extern func ItoaAlloc(value: int)      -> int;
 extern func StrConcatAlloc(a: int, b: int) -> int;
+extern func PrintToBob(str: int, color: int, flags: int) -> int;
+extern func PasteBob(handle: int, x: int, y: int, mode: int) -> void;
+extern func DestroyBob(handle: int)    -> void;
 
 extern var fonts: int;         // 8×8 font bitmap from lib/font8x8.s
 
@@ -103,8 +105,8 @@ bss game_bss:
     snake_len.l: 1            // number of live body segments
     food_x.l: 1               // food grid column (0-19)
     food_y.l: 1               // food grid row    (0-19)
-    score_str.l: 1            // cached heap pointer to "Score: NNN" label
-    score_cache.l: 1          // score value when score_str was last built
+    score_bob.l: 1            // cached PrintToBob handle for "Score: NNN"
+    score_cache.l: 1          // score value when score_bob was last baked
     struct snake_body[100] { x.l, y.l }   // ring buffer (grid coords)
 
 // -------------------------------------------------------------------------
@@ -206,12 +208,12 @@ code game_code:
         frame_timer = 0;
         running     = TRUE;
 
-        // Free any cached score string from a previous game
-        if (score_str != 0) {
-            call HeapFree(score_str);
-            score_str = 0;
+        // Free any cached score BOB from a previous game
+        if (score_bob != 0) {
+            call DestroyBob(score_bob);
+            score_bob = 0;
         }
-        score_cache = -1;   // force allocation on first DrawScore call
+        score_cache = -1;   // force rebake on first DrawScore call
 
         call PlaceFood();
     }
@@ -338,26 +340,31 @@ code game_code:
     }
 
     // ------------------------------------------------------------------
-    // DrawScore — render "Score: NNN" in the HUD area.
-    // The label string is built on the heap only when the score changes;
-    // between score changes the cached pointer is reused every frame.
+    // DrawScore — blit "Score: NNN" as a text BOB in the HUD area.
+    // Rebakes via PrintToBob only when the score changes; PasteBob each frame.
     // ------------------------------------------------------------------
     proc DrawScore() -> void {
         var numstr: int;
+        var label:  int;
 
         if (score != score_cache) {
-            // Free the old cached label (if any)
-            if (score_str != 0) {
-                call HeapFree(score_str);
+            if (score_bob != 0) {
+                call DestroyBob(score_bob);
+                score_bob = 0;
             }
-            // Build "Score: NNN" and cache it
-            numstr    = ItoaAlloc(score);
-            score_str = StrConcatAlloc(&score_lbl, numstr);
-            call HeapFree(numstr);   // numstr was only needed for concat
+            numstr = ItoaAlloc(score);
+            label  = StrConcatAlloc(&score_lbl, numstr);
+            call HeapFree(numstr);
+            // flags: mask | add_word — cookie-cut + shifted PasteBob padding
+            score_bob = PrintToBob(label, COL_BORDER, 3);
+            call HeapFree(label);
             score_cache = score;
         }
 
-        call Text(4, 4, score_str, COL_BORDER);
+        if (score_bob != -1 && score_bob != 0) {
+            // Former Text(4,4) cell → pixel (32, 32)
+            call PasteBob(score_bob, 32, 32, 1);
+        }
     }
 
     // ------------------------------------------------------------------

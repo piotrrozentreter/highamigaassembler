@@ -76,6 +76,7 @@ WAITBLIT:MACRO
     XDEF ScrollHorizontalScreen
     XDEF gfx_sprcop_dualpf
     XDEF gfx_active_playfield
+    XDEF gfx_font_ptr
 
 ; ---------- Graphics support wrappers ----------
 ; These minimal wrappers map the public names used by generated code
