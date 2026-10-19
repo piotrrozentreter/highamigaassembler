@@ -56,8 +56,7 @@ The 68000 does **not** have "16 user interrupts". It has:
   different, unrelated mechanism (synchronous software traps, not periodic
   hardware interrupts).
 - The 68000/68020 instruction to return from a real hardware/software
-  exception is **`RTE`** ("ReTurn from Exception") - not `RTI` (that mnemonic
-  is 6502/Z80 terminology, not 68k).
+  exception is **`RTE`** ("ReTurn from Exception").
 
 On the Amiga, periodic 50Hz/60Hz timing comes from a **single** hardware
 source: the **VERTB** (vertical blank) interrupt, one bit (bit 5) of the

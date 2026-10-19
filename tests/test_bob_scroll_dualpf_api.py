@@ -163,6 +163,19 @@ def test_mirror_bob_functions_reject_ham6_not_dualpf():
         assert "moveq #3,d0" in block, name
 
 
+def test_horizontal_mirror_reloads_source_handle_before_mask_copy():
+    bob_s = _read_norm(BOB_S)
+    block = _slice(bob_s, "MirrorBobHorizontally:", "MirrorBobVertically:")
+    mask_copy = block[block.index(".mbh_copy_mask:"):]
+
+    # The data loop advances a0 through the source payload. The mask phase
+    # must reload the runtime handle before reading its mask pointer.
+    assert re.search(
+        r"move\.l 8\(a6\),a0[^\n]*\n\s*move\.l 4\(a0\),a0",
+        mask_copy,
+    )
+
+
 def test_prepbob_drawbob_dispatch_to_new_dualpf_siblings_and_noop_on_ham6():
     bob_s = _read_norm(BOB_S)
 

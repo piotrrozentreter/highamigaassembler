@@ -49,7 +49,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Macro System**: Define reusable code patterns
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
-- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap …;` converts PNGs / TexturePacker XML / Tiled maps at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`)
+- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap …;` converts PNGs and exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and [Tiled](https://www.mapeditor.org/) at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`)
 - **Constants**: Compile-time constant evaluation
 - **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values; `#if IDENT OP EXPR` for comparison-based gating (`==`/`=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`)
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
@@ -727,6 +727,10 @@ The `tools/` directory contains Python utilities for converting graphics and ass
 
 ### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap)
 
+HAS can read exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and
+[Tiled](https://www.mapeditor.org/) directly at compile time. The implemented import
+features are:
+
 ```has
 #import bob "assets/player.png" as player_bob planes=5 add_word;
 #import palette "assets/sky.png" as sky_pal colors=32 dither=ordered;
@@ -755,9 +759,9 @@ code main:
 - **bob:** `planes=1..5`, optional `add_word` (extra 16px word for blitter X-shift / cookie-cut), optional `dither=none|fs`.
 - **sprite:** fixed 2 bitplanes / 4 colours; PNG width must be exactly 16px (no silent resize).
 - **palette:** `colors=2..32` (typical `16`/`32`) or `planes=`; optional `dither=none|fs|ordered`.
-- **atlas:** TexturePacker XML → shared-palette BOBs (`kind=bob` only); registers `<as>_palette` plus every frame label; options `planes`, `add_word`, `shared_palette`, `dedupe`, `sprites=a,b`, `atlas_png=…`.
+- **atlas:** TexturePacker XML plus its PNG atlas → shared-palette BOBs (`kind=bob` only); registers `<as>_palette` plus every frame label; supports trimmed sprites, rotated atlas entries, optional restoration of original dimensions, repeated-frame deduplication, selected frames, `planes`, `add_word`, `shared_palette`, and an explicit `atlas_png=…` path.
 - **tileset:** PNG grid → chip (`DATA_C`) row-interleaved tiles; `tile_w`/`tile_h` in **8|16|32**, `planes`, optional `match_palette=<label>` (import that palette/atlas first; omits a private palette copy).
-- **tilemap:** Tiled `.tmx` / `.json` → fast RAM (`DATA`) index grid; `layer=` (single, 0-based indices) or `layers=all` / `layers=A,B` (multi-layer directory, 1-based indices, bottom→top); also `allow_flip`, `index_size=b|w`, `firstgid=`, optional `tileset=` (documentation only). Draw with `lib/tilemap.s` (`DrawTilemapGrid` / `DrawTilemap` / `DrawTilemapMulti`) in **mode 0 only**.
+- **tilemap:** Tiled orthogonal `.tmx` / `.json` → fast RAM (`DATA`) index grid; reads CSV, array, base64, zlib, and gzip layer data; `layer=` (single, 0-based indices) or `layers=all` / `layers=A,B` (multi-layer directory, 1-based indices, bottom→top); also supports `allow_flip`, `index_size=b|w`, and `firstgid=`. Draw with `lib/tilemap.s` (`DrawTilemapGrid` / `DrawTilemap` / `DrawTilemapMulti`) in **mode 0 only**.
 
 How-to (import + draw): [docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps),
 API: [docs/LIBRARY_REFERENCE.md](docs/LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
@@ -801,7 +805,7 @@ Worked examples: `examples/tests/compiler/import_bob_load_test.has`,
   - Example: `python3 tools/bob_strip_importer.py player_walk.png 32 --planes 5 --label-prefix player`
   - Documentation: [BOB_STRIP_IMPORTER.md](docs/BOB_STRIP_IMPORTER.md), [SPRITE_TOOLS_OVERVIEW.md](docs/SPRITE_TOOLS_OVERVIEW.md)
 
-- **`texturepacker_atlas_importer.py`** - Convert TexturePacker XML/PNG atlases to shared-palette BOBs
+- **`texturepacker_atlas_importer.py`** - Convert [TexturePacker](https://www.codeandweb.com/texturepacker) XML/PNG atlases to shared-palette BOBs
   - Imports named BOB frames from TexturePacker atlases
   - Supports shared palette for all frames (eliminating palette duplication)
   - Handles repeated-frame aliases for animation optimization
@@ -816,7 +820,7 @@ Worked examples: `examples/tests/compiler/import_bob_load_test.has`,
   - Prefer `#import tileset …;` when possible; CLI for Makefile batch jobs
   - Example: `python3 tools/tile_importer.py tileset.png --tile-width 32 --tile-height 32 --outdir build/gen`
 
-- **`tiled_map_importer.py`** - Convert Tiled orthogonal TMX/JSON maps to index grids
+- **`tiled_map_importer.py`** - Convert [Tiled](https://www.mapeditor.org/) orthogonal TMX/JSON maps to index grids
   - Single layer: `DC.W width,height` + 0-based indices; multi: `--layers all` directory + `__lN`
   - Prefer `#import tilemap …;` when possible
   - Example: `python3 tools/tiled_map_importer.py level.tmx --layers all --outdir build/gen`
