@@ -403,6 +403,7 @@ MirrorBobHorizontally:
 .mbh_mask_copy_5planes:
     moveq #5,d0
 .mbh_mask_copy_have_planes:
+    move.l 8(a6),a0                ; reload source handle after data copy advanced a0
     move.l 4(a0),a0                ; source mask payload
     addq.l #4,a0
     lea 4(a2),a1                   ; destination mask payload
