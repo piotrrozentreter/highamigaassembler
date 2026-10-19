@@ -51,7 +51,7 @@
       }
     },
     {
-      "name": "Import kind (bob|palette|sprite|atlas|tileset|tilemap)",
+      "name": "Import kind (bob|palette|sprite|atlas|tileset|tilemap|font)",
       "scope": [
         "support.type.import-kind.highamigassembler"
       ],

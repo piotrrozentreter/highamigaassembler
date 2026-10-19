@@ -1,4 +1,4 @@
-"""Compile the three HAS #import bob/sprite load examples (both CPU targets)."""
+"""Compile HAS #import load examples (both CPU targets)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,6 +20,7 @@ BOTH_HAS = COMPILER_TESTS / "import_bob_sprite_load_test.has"
 ATLAS_HAS = COMPILER_TESTS / "import_atlas_load_test.has"
 TILES_HAS = COMPILER_TESTS / "import_tiles_load_test.has"
 TILES_LAYERS_HAS = COMPILER_TESTS / "import_tilemap_layers_test.has"
+FONT_HAS = COMPILER_TESTS / "import_font_load_test.has"
 
 
 def _compile_has(src_path: Path, out_dir: Path, cpu: str) -> str:
@@ -142,3 +143,20 @@ def test_import_tilemap_layers_load_has(tmp_path: Path, cpu: str):
     assert "level_map__l1:" in mmap
     assert "DC.L" in mmap
     assert "DATA_C" not in mmap
+
+
+@pytest.mark.parametrize("cpu", [CpuTarget.M68000.value, CpuTarget.M68020.value])
+def test_import_font_load_has(tmp_path: Path, cpu: str):
+    assert (ASSETS / "import_c64_font.bin").is_file()
+    asm = _compile_has(FONT_HAS, tmp_path / "font", cpu)
+
+    assert "SetFont" in asm
+    assert "lea import_c64_font" in asm
+    assert "INCLUDE" in asm
+    assert "import_c64_font.s" in asm
+    gen = (tmp_path / "font" / "gen" / "import_c64_font.s").read_text(encoding="utf-8")
+    assert "SECTION fonts,DATA" in gen.replace("\t", " ")
+    assert "DATA_C" not in gen
+    assert "import_c64_font:" in gen
+    tokens = [t for t in gen.replace(",", " ").split() if t.startswith("$")]
+    assert len(tokens) == 96 * 40

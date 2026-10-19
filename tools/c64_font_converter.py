@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Convert C64 font assembly (dc.b/db.b) into VASM-ready byte tables.
+"""Convert C64 charset (.s / .bin) into VASM-ready Amiga font tables.
 
-The parser mirrors the font handling logic used in codegen.py: it reads glyph
-rows from dc.b/db.b directives (8 bytes per glyph), maps C64 screen codes to
-ASCII 32..127, pads missing glyphs with zeros, interleaves into 5 bitplanes
-(plane 0 = glyph data, planes 1-4 = 0), and emits dc.b lines suitable for vasm.
+Reads glyph rows from assembly dc.b/db.b directives or raw chargen binaries
+(8 bytes per glyph), maps C64 screen codes to ASCII 32..127, pads missing
+glyphs with zeros, interleaves into 5 bitplanes (plane 0 = glyph data,
+planes 1-4 = 0), and emits dc.b lines suitable for vasm / SetFont.
 """
+
+from __future__ import annotations
 
 import argparse
 import re
 import sys
 from pathlib import Path
 from typing import Dict, List
+
+
+_ASM_SUFFIXES = {".s", ".asm"}
+_BIN_SUFFIXES = {".bin"}
 
 
 def parse_values(data_part: str) -> List[int]:
@@ -113,6 +119,40 @@ def read_c64_font(path: Path) -> Dict[int, List[int]]:
     return glyphs
 
 
+def read_c64_font_bin(path: Path) -> Dict[int, List[int]]:
+    """Read a raw C64 chargen .bin (8 bytes per screen-code glyph).
+
+    Accepts any length that is a multiple of 8 (typically 1024 / 2048 / 4096).
+    Glyph index ``i`` maps to screen code ``i``.
+    """
+    data = path.read_bytes()
+    if len(data) == 0:
+        raise ValueError(f"C64 font binary is empty: {path}")
+    if len(data) % 8 != 0:
+        raise ValueError(
+            f"C64 font binary length must be a multiple of 8 "
+            f"(got {len(data)} bytes from {path.name})"
+        )
+    glyphs: Dict[int, List[int]] = {}
+    for i in range(0, len(data), 8):
+        glyphs[i // 8] = list(data[i:i + 8])
+    return glyphs
+
+
+def load_c64_font(path: Path) -> Dict[int, List[int]]:
+    """Load glyphs from a C64 charset, dispatching by file extension."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix in _BIN_SUFFIXES:
+        return read_c64_font_bin(path)
+    if suffix in _ASM_SUFFIXES:
+        return read_c64_font(path)
+    raise ValueError(
+        f"unsupported C64 font source '{path.name}' "
+        f"(expected .bin, .s, or .asm)"
+    )
+
+
 def c64_map(code: int) -> int:
     """Map ASCII code to C64 screen code following codegen.py logic."""
     if 0x41 <= code <= 0x5A:
@@ -160,9 +200,29 @@ def emit_asm(interleaved: List[str], label: str, with_section: bool = True) -> s
     return "\n".join(lines) + "\n"
 
 
+def export_font_asm(
+    path: str | Path,
+    label: str,
+    *,
+    planes: int = 5,
+    with_section: bool = True,
+) -> str:
+    """Convert a C64 charset (.bin / .s / .asm) to a VASM font table string."""
+    source = Path(path)
+    glyphs = load_c64_font(source)
+    font_bytes = build_font_bytes(glyphs)
+    interleaved = interleave_planes(font_bytes, planes=planes)
+    return emit_asm(interleaved, label, with_section=with_section)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert C64 font assembly to vasm dc.b table.")
-    parser.add_argument('input', type=Path, help="Path to input C64 font assembly (.s)")
+    parser = argparse.ArgumentParser(
+        description="Convert C64 charset (.s/.asm/.bin) to vasm dc.b font table."
+    )
+    parser.add_argument(
+        'input', type=Path,
+        help="Path to C64 font assembly (.s/.asm) or raw chargen (.bin)",
+    )
     parser.add_argument('-l', '--label', default=None, help="Label to emit (default: fonts_<stem>)")
     parser.add_argument('--no-section', action='store_true', help="Skip emitting SECTION/EVEN prolog")
     parser.add_argument('-o', '--output', type=Path, default=None,
@@ -172,20 +232,15 @@ def main() -> None:
     label = args.label or f"fonts_{args.input.stem}"
 
     try:
-        glyphs = read_c64_font(args.input)
+        asm = export_font_asm(
+            args.input, label, with_section=not args.no_section,
+        )
     except Exception as exc:  # pragma: no cover - defensive
-        print(f"Failed to read font: {exc}", file=sys.stderr)
+        print(f"Failed to convert font: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if not glyphs:
-        print("Warning: no glyphs parsed; output will be empty", file=sys.stderr)
-
-    font_bytes = build_font_bytes(glyphs)
-    interleaved = interleave_planes(font_bytes)
-    asm = emit_asm(interleaved, label, with_section=not args.no_section)
     if args.output is not None:
         try:
-            # Ensure parent directory exists if provided
             if args.output.parent and not args.output.parent.exists():
                 args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(asm)

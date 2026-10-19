@@ -49,7 +49,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Macro System**: Define reusable code patterns
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
-- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap …;` converts PNGs and exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and [Tiled](https://www.mapeditor.org/) at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` (`lib/tilemap.s`)
+- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap|font …;` converts PNGs, [TexturePacker](https://www.codeandweb.com/texturepacker) / [Tiled](https://www.mapeditor.org/) exports, and C64 charsets at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` / `SetFont`
 - **Constants**: Compile-time constant evaluation
 - **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values; `#if IDENT OP EXPR` for comparison-based gating (`==`/`=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`)
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
@@ -723,13 +723,13 @@ This compiler is actively being developed. Current focus areas:
 
 ## 🛠️ Asset Conversion Tools
 
-The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap when possible; use the CLI tools for strips and Makefile batch jobs.
+The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap / font when possible; use the CLI tools for strips and Makefile batch jobs.
 
-### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap)
+### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap / font)
 
 HAS can read exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and
-[Tiled](https://www.mapeditor.org/) directly at compile time. The implemented import
-features are:
+[Tiled](https://www.mapeditor.org/) (and C64 charsets) directly at compile time. The
+implemented import features are:
 
 ```has
 #import bob "assets/player.png" as player_bob planes=5 add_word;
@@ -740,6 +740,7 @@ features are:
 #import tilemap "assets/level.tmx" as level_map layer=Ground;
 // Multi-layer (bottom→top): layers=all  or  layers=Ground,Objects
 // #import tilemap "assets/level.tmx" as level_map layers=all;
+#import font "assets/charset.bin" as c64_font;  // or .s / .asm
 
 code main:
     proc init() -> int {
@@ -750,24 +751,26 @@ code main:
         var f0: int = CreateBob(&walk_walk_0, 0);  // prefix + frame stem
         var tiles: int = &level_tiles;             // chip planar tiles
         var map: int = &level_map;                 // DATA index grid
+        call SetFont(&c64_font);
         return 0;
     }
 ```
 
 - Generates `.s` under `build/gen` (override with `--asset-outdir`); skips rebuild when cache is fresh (`--force-assets` to regenerate).
-- Pillow is required for image kinds (`bob` / `palette` / `sprite` / `atlas` / `tileset`); `tilemap` alone does not need Pillow.
+- Pillow is required for image kinds (`bob` / `palette` / `sprite` / `atlas` / `tileset`); `tilemap` and `font` do not need Pillow.
 - **bob:** `planes=1..5`, optional `add_word` (extra 16px word for blitter X-shift / cookie-cut), optional `dither=none|fs`.
 - **sprite:** fixed 2 bitplanes / 4 colours; PNG width must be exactly 16px (no silent resize).
 - **palette:** `colors=2..32` (typical `16`/`32`) or `planes=`; optional `dither=none|fs|ordered`.
 - **atlas:** TexturePacker XML plus its PNG atlas → shared-palette BOBs (`kind=bob` only); registers `<as>_palette` plus every frame label; supports trimmed sprites, rotated atlas entries, optional restoration of original dimensions, repeated-frame deduplication, selected frames, `planes`, `add_word`, `shared_palette`, and an explicit `atlas_png=…` path.
 - **tileset:** PNG grid → chip (`DATA_C`) row-interleaved tiles; `tile_w`/`tile_h` in **8|16|32**, `planes`, optional `match_palette=<label>` (import that palette/atlas first; omits a private palette copy).
 - **tilemap:** Tiled orthogonal `.tmx` / `.json` → fast RAM (`DATA`) index grid; reads CSV, array, base64, zlib, and gzip layer data; `layer=` (single, 0-based indices) or `layers=all` / `layers=A,B` (multi-layer directory, 1-based indices, bottom→top); also supports `allow_flip`, `index_size=b|w`, and `firstgid=`. Draw with `lib/tilemap.s` (`DrawTilemapGrid` / `DrawTilemap` / `DrawTilemapMulti`) in **mode 0 only**.
+- **font:** C64 charset `.bin` (raw chargen) or `.s`/`.asm` (`dc.b` / `.byte`) → 5-plane Amiga font table (`SECTION fonts,DATA`, ASCII 32–127); use with `SetFont(&label)`. No options.
 
 How-to (import + draw): [docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps),
 API: [docs/LIBRARY_REFERENCE.md](docs/LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).
 Worked examples: `examples/tests/compiler/import_bob_load_test.has`,
 `import_sprite_load_test.has`, `import_tiles_load_test.has`,
-`import_tilemap_layers_test.has`.
+`import_tilemap_layers_test.has`, `import_font_load_test.has`.
 
 ### Graphics & Sprite Tools
 
@@ -840,10 +843,11 @@ Worked examples: `examples/tests/compiler/import_bob_load_test.has`,
 ### Retro Computer Conversion Tools
 
 - **`c64_font_converter.py`** - Convert Commodore 64 fonts to Amiga format
-  - Parses C64 font assembly (dc.b/db.b directives)
+  - Accepts C64 font assembly (`.s`/`.asm` with dc.b/db.b) or raw chargen (`.bin`)
   - Maps C64 screen codes to ASCII 32-127 range
-  - Interleaves into 5 bitplanes for Amiga display
-  - Example: `python3 tools/c64_font_converter.py c64_font.s --label-prefix c64_font`
+  - Interleaves into 5 bitplanes for Amiga display / `SetFont`
+  - Prefer `#import font "charset.bin" as my_font;` when possible
+  - CLI example: `.venv/bin/python3 tools/c64_font_converter.py c64_font.bin -l c64_font -o out.s`
 
 - **`c64_sprites_to_bobs.py`** - Convert Commodore 64 multicolor sprite data to Amiga BOBs
   - Decodes C64 multicolor sprite format (24-bit rows, 21 pixels high)

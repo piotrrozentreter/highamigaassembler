@@ -396,6 +396,99 @@ class TestImportTilesetTilemap:
             parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
 
 
+class TestImportFont:
+    def _write_bin(self, path: Path) -> Path:
+        # Screen code 1 = crude 'A' (c64_map('A') → 1)
+        data = bytearray(16)
+        data[8:16] = bytes([0x18, 0x3C, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00])
+        path.write_bytes(data)
+        return path
+
+    def _write_asm(self, path: Path) -> Path:
+        path.write_text(
+            "\tdc.b $00,$00,$00,$00,$00,$00,$00,$00\n"
+            "\tdc.b $18,$3C,$66,$7E,$66,$66,$66,$00\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_font_bin_generates_data_section_and_label(self, tmp_path: Path):
+        bin_path = self._write_bin(tmp_path / "charset.bin")
+        src = (
+            f'#import font "{bin_path.name}" as my_font;\n'
+            "code main:\n"
+            "    proc main() -> int {\n"
+            "        var p: int = &my_font;\n"
+            "        return p;\n"
+            "    }\n"
+        )
+        mod, asm, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        assert len(mod.asset_imports) == 1
+        assert mod.asset_imports[0].kind == "font"
+        assert mod.asset_imports[0].label == "my_font"
+        gen = gen_dir / "my_font.s"
+        assert gen.exists()
+        text = gen.read_text(encoding="utf-8")
+        assert "SECTION fonts,DATA" in text.replace("\t", " ")
+        assert "DATA_C" not in text
+        assert "my_font:" in text
+        tokens = [t for t in text.replace(",", " ").split() if t.startswith("$")]
+        assert len(tokens) == 96 * 40
+        assert "INCLUDE" in asm
+        assert "my_font.s" in asm
+        assert "lea my_font" in asm
+
+    def test_font_asm_source(self, tmp_path: Path):
+        asm_path = self._write_asm(tmp_path / "charset.s")
+        src = (
+            f'#import font "{asm_path.name}" as asm_font;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        _, out_asm, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        text = (gen_dir / "asm_font.s").read_text(encoding="utf-8")
+        assert "asm_font:" in text
+        assert "SECTION fonts,DATA" in text.replace("\t", " ")
+        assert "asm_font.s" in out_asm
+
+    def test_font_rejects_unknown_extension(self, tmp_path: Path):
+        png = tmp_path / "font.png"
+        png.write_bytes(b"not-a-font")
+        src = (
+            f'#import font "{png.name}" as bad;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        with pytest.raises(SyntaxError, match=r"\.bin, \.s, or \.asm"):
+            parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
+
+    def test_font_rejects_unknown_options(self, tmp_path: Path):
+        self._write_bin(tmp_path / "c.bin")
+        src = (
+            '#import font "c.bin" as f planes=5;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        with pytest.raises(SyntaxError, match="unknown font import option"):
+            parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
+
+    def test_font_cache_reuse(self, tmp_path: Path):
+        self._write_bin(tmp_path / "c.bin")
+        src = (
+            '#import font "c.bin" as cached_font;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        _, _, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        gen = gen_dir / "cached_font.s"
+        first = gen.read_text(encoding="utf-8")
+        mtime1 = gen.stat().st_mtime
+        _, _, gen_dir2, _ = _compile(src, tmp_path, tmp_path, force=False)
+        assert gen_dir2 / "cached_font.s" == gen
+        assert gen.read_text(encoding="utf-8") == first
+        assert gen.stat().st_mtime == mtime1
+
+
 class TestAssetImportHelpers:
     def test_parse_import_line_flags(self):
         kind, path, label, opts = aim.parse_import_line(
@@ -405,6 +498,14 @@ class TestAssetImportHelpers:
         assert (kind, path, label) == ("bob", "a.png", "bob1")
         assert opts["planes"] == "4"
         assert opts["add_word"] is True
+
+    def test_parse_font_line(self):
+        kind, path, label, opts = aim.parse_import_line(
+            '#import font "charset.bin" as c64_font;',
+            1,
+        )
+        assert (kind, path, label) == ("font", "charset.bin", "c64_font")
+        assert opts == {}
 
     def test_parse_atlas_sprites_list(self):
         kind, path, label, opts = aim.parse_import_line(

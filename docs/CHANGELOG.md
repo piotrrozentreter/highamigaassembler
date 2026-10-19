@@ -22,6 +22,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`#import font`:** compile-time C64 charset import (`.bin` chargen or
+  `.s`/`.asm` with `dc.b`/`.byte`) via `tools/c64_font_converter.py`. Emits a
+  5-plane Amiga font table under `build/gen`, registers `&label` for
+  `SetFont`, and `INCLUDE`s like other asset kinds. No import options; Pillow
+  not required. Example:
+  `#import font "assets/charset.bin" as c64_font;`. Regression:
+  [import_font_load_test.has](../examples/tests/compiler/import_font_load_test.has).
+
 - **`PrintToBob` text-as-BOB (`lib/textbob.s`):** bake a single-line 8×8
   font string into a chip planar BOB (modes 0/1/3) and blit with `PasteBob`.
   Flags: mask, add_word, opaque cell. Returns a normal `CreateBob` handle;

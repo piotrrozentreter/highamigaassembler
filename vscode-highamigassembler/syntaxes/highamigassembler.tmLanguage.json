@@ -129,7 +129,7 @@
     "import-directive": {
       "patterns": [
         {
-          "begin": "^\\s*(#import)\\s+(bob|palette|sprite|atlas|tileset|tilemap)\\b",
+          "begin": "^\\s*(#import)\\s+(bob|palette|sprite|atlas|tileset|tilemap|font)\\b",
           "beginCaptures": {
             "1": { "name": "keyword.directive.import.highamigassembler" },
             "2": { "name": "support.type.import-kind.highamigassembler" }

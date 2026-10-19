@@ -144,7 +144,7 @@ TakeSystem:
 ## Version History
 
 ### 0.1.1
-- `#import bob|palette|sprite|atlas|tileset|tilemap` highlighting (directive, kind, `as`, options, labels)
+- `#import bob|palette|sprite|atlas|tileset|tilemap|font` highlighting (directive, kind, `as`, options, labels)
 - Distinct theme colors for language commands, sections, declarations, `#import`, m68k instructions, and assembler pseudo-ops
 - Case-insensitive asm mnemonics/pseudo-ops scoped to `asm { }` blocks (matches HAS semantics)
 - Theme registered as `vs-dark`

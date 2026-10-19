@@ -1054,14 +1054,14 @@ operands natively.
 
 #### Asset `#import`
 
-Compile-time conversion of PNGs, TexturePacker XML atlases, and Tiled maps.
-Generated `.s` files land under `build/gen` (override with `--asset-outdir`;
-force rebuild with `--force-assets`) and are `INCLUDE`d into the compiler
-output. Labels are addressable with `&label`.
+Compile-time conversion of PNGs, TexturePacker XML atlases, Tiled maps, and
+C64 charsets. Generated `.s` files land under `build/gen` (override with
+`--asset-outdir`; force rebuild with `--force-assets`) and are `INCLUDE`d into
+the compiler output. Labels are addressable with `&label`.
 
-Kinds: `bob`, `palette`, `sprite`, `atlas`, `tileset`, `tilemap`. Import a
+Kinds: `bob`, `palette`, `sprite`, `atlas`, `tileset`, `tilemap`, `font`. Import a
 palette/atlas **before** a tileset that uses `match_palette=`. Pillow is required
-for image kinds; `tilemap` alone does not need it. Full option tables:
+for image kinds; `tilemap` and `font` do not need it. Full option tables:
 [SPRITE_TOOLS_QUICK_REFERENCE.md](SPRITE_TOOLS_QUICK_REFERENCE.md) and the README
 Asset Conversion section.
 
@@ -1106,6 +1106,25 @@ code main:
 ```
 
 Working regression: [import_sprite_load_test.has](../examples/tests/compiler/import_sprite_load_test.has).
+
+##### Example: C64 font
+
+Accepts raw chargen `.bin` or assembly `.s`/`.asm`. No options. Use with
+`SetFont(&label)`.
+
+```has
+#import font "assets/charset.bin" as c64_font;
+
+code main:
+    extern func SetFont(font_ptr: int) -> int;
+
+    proc init() -> int {
+        call SetFont(&c64_font);
+        return 0;
+    }
+```
+
+Working regression: [import_font_load_test.has](../examples/tests/compiler/import_font_load_test.has).
 
 ##### Example: tileset + tilemap
 

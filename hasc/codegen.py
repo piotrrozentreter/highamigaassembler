@@ -4722,7 +4722,7 @@ class CodeGen:
 
         output_path = getattr(self, "output_path", None)
         self.emit("")
-        self.emit("; ---- #import bob|palette|sprite|atlas|tileset|tilemap assets (auto-generated) ----")
+        self.emit("; ---- #import bob|palette|sprite|atlas|tileset|tilemap|font assets (auto-generated) ----")
         for asset in assets:
             inc = asset_import_mod.include_path_for_output(asset.gen_path, output_path)
             self.emit(f'\tINCLUDE\t"{inc}"')

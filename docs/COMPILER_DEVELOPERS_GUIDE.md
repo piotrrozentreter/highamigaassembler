@@ -52,7 +52,7 @@ Use these constraints when implementing or reviewing compiler changes to prevent
 hasc/
 ├── cli.py                 # Command-line interface, orchestrates compilation
 ├── amiga_toolchain.py     # Optional --exe/--adf: vasm → vlink → bootable ADF
-├── asset_import.py        # #import bob|palette|sprite|atlas|tileset|tilemap
+├── asset_import.py        # #import bob|palette|sprite|atlas|tileset|tilemap|font
 ├── parser.py              # Lark-based parser, converts text → AST
 ├── ast.py                 # AST node definitions, type system
 ├── validator.py           # Semantic validation, symbol checking

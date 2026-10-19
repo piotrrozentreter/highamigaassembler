@@ -1,0 +1,17 @@
+// Compile/load regression: #import font → SetFont(&label).
+// Compile-only: hasc must emit INCLUDE for the generated font .s and lea of import_c64_font.
+
+#import font "assets/import_c64_font.bin" as import_c64_font;
+
+code main:
+    extern func SetFont(font_ptr: int) -> int;
+
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        call SetFont(&import_c64_font);
+        return 0;
+    }
