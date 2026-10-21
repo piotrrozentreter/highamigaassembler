@@ -1,6 +1,6 @@
 ﻿# HAS - High Assembler for Motorola 68000 (Amiga)
 
-**Version:** 0.9.9
+**Version:** 0.9.10
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
@@ -656,15 +656,14 @@ HAS follows Motorola 68000 standard calling convention:
 
 ## 🛠️ Development Status
 
-**Version 0.9.9** - Active Development
+**Version 0.9.10** - Active Development
 
 This compiler is actively being developed. Current focus areas:
 
-- Enhanced optimization passes
-- Improved error messages
-- Additional Amiga hardware abstractions
-- Extended standard library
-- Performance improvements
+- Correct and efficient code generation for both 68000 and opt-in 68020 targets
+- Asset imports for graphics, fonts, music, and sound
+- Amiga runtime libraries and practical game-development examples
+- Regression coverage and clearer compiler diagnostics
 
 ## 🐛 Known Limitations
 
@@ -761,6 +760,7 @@ code main:
 
 - Generates `.s` under `build/gen` (override with `--asset-outdir`); skips rebuild when cache is fresh (`--force-assets` to regenerate).
 - Pillow is required for image kinds (`bob` / `palette` / `sprite` / `atlas` / `tileset`); `tilemap` and `font` do not need Pillow.
+- **Audio:** `music` imports ProTracker `.mod` files; `sound` imports raw samples or uncompressed IFF 8SVX. Imports produce integer table IDs for `PlayMusic` / `PlaySound`, not addresses. Sound options are `period=`, `vol=`, `pri=`, and `channel=` (defaults: `443`, `32`, `64`, `-1`). For IFF extraction and the audio lifecycle, see [audio.s in the library reference](docs/LIBRARY_REFERENCE.md#audios--has-music--sfx-ptplayer-wrappers).
 - **bob:** `planes=1..5`, optional `add_word` (extra 16px word for blitter X-shift / cookie-cut), optional `dither=none|fs`.
 - **sprite:** fixed 2 bitplanes / 4 colours; PNG width must be exactly 16px (no silent resize).
 - **palette:** `colors=2..32` (typical `16`/`32`) or `planes=`; optional `dither=none|fs|ordered`.
