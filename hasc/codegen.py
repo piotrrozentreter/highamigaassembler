@@ -548,6 +548,12 @@ class CodeGen:
                                     fname = field.split('.')[0]
                             if fname:
                                 constants[f"{var.name}_{fname}"] = off
+        # #import music/sound labels are table-index constants (same indexing as validator).
+        from . import asset_import as asset_import_mod
+        for label, idx in asset_import_mod.assign_audio_ids(
+            getattr(module, "asset_imports", None)
+        ).items():
+            constants.setdefault(label, idx)
         return constants
 
     def _build_globals(self, module: ast.Module):
@@ -567,7 +573,10 @@ class CodeGen:
                             size = 'l'
                         globals_map[var.name] = {'size': size, 'signed': getattr(var, 'signed', False)}
         # #import labels: addressable symbols defined via INCLUDE at file end.
+        # music/sound are const IDs, not addressable globals — skip them here.
         for asset in getattr(module, "asset_imports", None) or []:
+            if getattr(asset, "kind", None) in ("music", "sound"):
+                continue
             symbols = list(getattr(asset, "labels", None) or []) or [asset.label]
             for sym in symbols:
                 globals_map.setdefault(sym, {'size': 'l', 'signed': False})
@@ -4719,13 +4728,30 @@ class CodeGen:
         if not assets:
             return
         from . import asset_import as asset_import_mod
+        from pathlib import Path
 
         output_path = getattr(self, "output_path", None)
         self.emit("")
-        self.emit("; ---- #import bob|palette|sprite|atlas|tileset|tilemap|font assets (auto-generated) ----")
+        self.emit(
+            "; ---- #import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound "
+            "assets (auto-generated) ----"
+        )
         for asset in assets:
             inc = asset_import_mod.include_path_for_output(asset.gen_path, output_path)
             self.emit(f'\tINCLUDE\t"{inc}"')
+
+        # Aggregated music_table / sfx_table when any audio import is present.
+        audio_assets = [
+            a for a in assets if getattr(a, "kind", None) in ("music", "sound")
+        ]
+        if audio_assets:
+            outdir = Path(audio_assets[0].gen_path).resolve().parent
+            tables_path = asset_import_mod.write_audio_tables(outdir, assets)
+            if tables_path is not None:
+                inc = asset_import_mod.include_path_for_output(
+                    str(tables_path), output_path
+                )
+                self.emit(f'\tINCLUDE\t"{inc}"')
 
     def _emit_interrupt_support(self):
         """Emit the shared VBlank dispatch table + master ISR + starti/endi runtime

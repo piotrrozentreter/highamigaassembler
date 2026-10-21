@@ -32,6 +32,7 @@ Libraries with dedicated documentation are listed first; libraries documented he
 | `dos.s`           | AmigaDOS CLI stdout output (text/numbers) | [DOS_LIBRARY.md](DOS_LIBRARY.md)                     |
 | `trackio.s`       | DOS-free raw floppy loader                | [TRACKIO_LIBRARY.md](TRACKIO_LIBRARY.md)             |
 | `ptplayer.s`      | ProTracker 2.3B music player              | this file                                            |
+| `audio.s`         | HAS-ABI music/SFX wrappers over ptplayer  | this file (`#import music` / `#import sound`)        |
 | `font8x8.s`       | 8×8 pixel bitmap font data               | used via `SetFont` in `graphics.s`                   |
 | `font8x8_2.s`     | Alternative 8×8 font data                | used via `SetFont` in `graphics.s`                   |
 
@@ -931,13 +932,51 @@ Do not destroy individual frame BOBs returned by `AnimateBob`; the animation own
 
 ---
 
+## audio.s — HAS music / SFX (ptplayer wrappers)
+
+Prefer this over raw `_mt_*` calls when using `#import music` / `#import sound`.
+Import labels are **integer table indices** (not addressable `&` pointers).
+
+```has
+#import music "assets/title.mod" as mus_title;
+#import sound "assets/laser.raw" as sfx_laser;           // defaults: period=443 vol=32 pri=64 channel=-1
+#import sound "assets/boom.iff" as sfx_boom vol=40 pri=120;
+
+#include "../includes/audio_defs.has";
+
+call InitAudio();
+call PlayMusic(mus_title);
+call PlaySound(sfx_laser);
+call PauseMusic();
+call ResumeMusic();
+call ChangeMusic(mus_title);
+call StopMusic();
+call SetMusicVolume(16);
+call QuitAudio();
+```
+
+| Function | Description |
+|----------|-------------|
+| `InitAudio()` | `_mt_install_cia` (PAL) + `_mt_musicmask` (channel 0 for music) |
+| `QuitAudio()` | `_mt_end` + `_mt_remove_cia` |
+| `PlayMusic(track_id)` | Index `music_table`, `_mt_init`, enable, master vol 16 |
+| `ChangeMusic(track_id)` | `_mt_end` then same as `PlayMusic` |
+| `StopMusic()` | `_mt_end` |
+| `PauseMusic()` / `ResumeMusic()` | `_mt_Enable` 0 / 1 (SFX still play while paused) |
+| `PlaySound(sfx_id)` | `play_sfx` one-shot (no loop) |
+| `SetMusicVolume(vol)` | `_mt_mastervol` (0–64) |
+
+Codegen emits CHIP sample/MOD fragments plus `music_table` / `sfx_table` whenever any music or sound import exists (empty table still `XDEF`'d for linking). Auto-link pulls in `ptplayer.s`. See [DEVELOPERS_GUIDE.md](DEVELOPERS_GUIDE.md) Asset `#import` and [import_audio_load_test.has](../examples/tests/compiler/import_audio_load_test.has).
+
+---
+
 ## ptplayer.s — ProTracker Music Player
 
 `ptplayer.s` is ProTracker 2.3B playroutine version 6.0 by Frank Wille (public domain).  
 It drives CIA-B timers for accurate tempo and supports 4-channel MOD playback plus sound effects.
 
 **All functions take `a6 = $DFF000` (CUSTOM base), not the stack frame convention used by HAS libs.**  
-Call them with inline assembly or native functions.
+Prefer [`audio.s`](#audios--has-music--sfx-ptplayer-wrappers) for new code; call these with inline assembly only when you need the low-level API.
 
 ### Playback lifecycle
 

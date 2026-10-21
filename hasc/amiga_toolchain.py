@@ -51,6 +51,7 @@ _DEFAULT_LIB_ORDER: Sequence[str] = (
     "textbob.s",
     "tilemap.s",
     "ptplayer.s",
+    "audio.s",
     "timer.s",
     "dos.s",
     "fileio.s",
@@ -74,6 +75,7 @@ _LIB_DEPS: Dict[str, Sequence[str]] = {
     "textbob.s": ("bob.s", "graphics.s", "heap.s"),
     "tilemap.s": ("graphics.s",),
     "ptplayer.s": ("takeover.s",),
+    "audio.s": ("ptplayer.s",),
     "fileio.s": ("dos.s",),
     "trackio.s": ("helpers.s",),
 }

@@ -1054,16 +1054,26 @@ operands natively.
 
 #### Asset `#import`
 
-Compile-time conversion of PNGs, TexturePacker XML atlases, Tiled maps, and
-C64 charsets. Generated `.s` files land under `build/gen` (override with
-`--asset-outdir`; force rebuild with `--force-assets`) and are `INCLUDE`d into
-the compiler output. Labels are addressable with `&label`.
+Compile-time conversion of PNGs, TexturePacker XML atlases, Tiled maps,
+C64 charsets, ProTracker MODs, and sound samples. Generated `.s` files land
+under `build/gen` (override with `--asset-outdir`; force rebuild with
+`--force-assets`) and are `INCLUDE`d into the compiler output. Graphics labels
+are addressable with `&label`. **`music` / `sound` labels are integer table
+IDs** for `PlayMusic` / `PlaySound` (not `&` pointers); see `lib/audio.s` and
+[LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#audios--has-music--sfx-ptplayer-wrappers).
 
-Kinds: `bob`, `palette`, `sprite`, `atlas`, `tileset`, `tilemap`, `font`. Import a
-palette/atlas **before** a tileset that uses `match_palette=`. Pillow is required
-for image kinds; `tilemap` and `font` do not need it. Full option tables:
+Kinds: `bob`, `palette`, `sprite`, `atlas`, `tileset`, `tilemap`, `font`,
+`music`, `sound`. Import a palette/atlas **before** a tileset that uses
+`match_palette=`. Pillow is required for image kinds; `tilemap`, `font`,
+`music`, and `sound` do not need it. Full option tables:
 [SPRITE_TOOLS_QUICK_REFERENCE.md](SPRITE_TOOLS_QUICK_REFERENCE.md) and the README
 Asset Conversion section.
+
+```has
+#import music "assets/title.mod" as mus_title;
+#import sound "assets/laser.raw" as sfx_laser;
+#import sound "assets/boom.iff" as sfx_boom vol=40 pri=120;
+```
 
 ##### Example: BOB
 

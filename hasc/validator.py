@@ -172,11 +172,14 @@ class Validator:
                     else:
                         self.extern_funcs[item.name] = []
 
-        # Register #import labels as addressable globals (no XREF; INCLUDE supplies defs).
-        # Atlas imports register palette + every frame label.
+        # Register #import labels. Graphics kinds → addressable globals (INCLUDE defs).
+        # music/sound → integer constants (table indices by source order per kind).
         seen_import_labels = set()
+        music_id = 0
+        sound_id = 0
         for asset in getattr(self.module, "asset_imports", None) or []:
             symbols = list(getattr(asset, "labels", None) or []) or [asset.label]
+            kind = getattr(asset, "kind", None)
             for sym in symbols:
                 if sym in seen_import_labels:
                     self.errors.append(f"Duplicate #import label '{sym}'")
@@ -193,6 +196,14 @@ class Validator:
                     self.errors.append(
                         f"Imported asset label '{sym}' conflicts with an existing symbol"
                     )
+                    continue
+                if kind in ("music", "sound"):
+                    if kind == "music":
+                        self.constants[sym] = music_id
+                        music_id += 1
+                    else:
+                        self.constants[sym] = sound_id
+                        sound_id += 1
                 else:
                     self.globals.add(sym)
         

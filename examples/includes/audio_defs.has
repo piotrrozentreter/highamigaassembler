@@ -1,0 +1,13 @@
+// HAS <-> lib/audio.s interop declarations.
+// HAS-ABI wrappers around ptplayer for #import music / #import sound.
+// Labels from those imports are integer table IDs (not &pointers).
+
+extern func InitAudio() -> void;
+extern func QuitAudio() -> void;
+extern func PlayMusic(track_id: int) -> void;
+extern func ChangeMusic(track_id: int) -> void;
+extern func StopMusic() -> void;
+extern func PauseMusic() -> void;
+extern func ResumeMusic() -> void;
+extern func PlaySound(sfx_id: int) -> void;
+extern func SetMusicVolume(vol: int) -> void;

@@ -2,25 +2,59 @@
 name: has-ptplayer-audio
 description: >-
   Wire ProTracker MOD music and IFF 8SVX sound effects into HAS Amiga games via
-  ptplayer. Use when adding music, SFX, PlayMusic/PlaySoundEffect, MOD/IFF assets,
-  extract_8svx, music_data.s/sounds_data.s, or linking the ptplayer library.
+  ptplayer. Use when adding music, SFX, PlayMusic/PlaySound, MOD/IFF assets,
+  extract_8svx, #import music/sound, lib/audio.s, or linking the ptplayer library.
 ---
 
 # HAS + ptplayer audio
 
-Pattern used by **Graveyard Shadows** and **astronautjetpac**. Prefer this over inventing a custom Paula mixer.
+**Prefer `#import music` / `#import sound` + `lib/audio.s`** for new code. The
+manual `music_data.s` / `sounds_data.s` + inline `_mt_*` pattern remains valid
+for existing games (Graveyard Shadows, astronautjetpac, launchers).
 
-## Pieces
+## Preferred path (`#import` + `audio.s`)
+
+```has
+#import music "assets/title.mod" as mus_title;
+#import sound "assets/laser.raw" as sfx_laser;
+#import sound "assets/boom.iff" as sfx_boom vol=40 pri=120;
+
+#include "../includes/audio_defs.has";
+
+call InitAudio();
+call PlayMusic(mus_title);     // mus_* are const track IDs
+call PlaySound(sfx_laser);     // sfx_* are const table indices
+call PauseMusic();
+call ResumeMusic();
+call ChangeMusic(mus_title);
+call StopMusic();
+call SetMusicVolume(16);
+call QuitAudio();
+```
+
+| Piece | Role |
+|---|---|
+| `#import music` | CHIP `DATA_C` MOD fragment + entry in `music_table` |
+| `#import sound` | CHIP sample (`dc.w 0` + PCM); `.iff`/`.8svx` via `tools/extract_8svx.py` |
+| `build/gen/audio_tables.s` | Aggregated `music_table` / `sfx_table` (codegen) |
+| `lib/audio.s` | HAS stack-ABI wrappers; auto-links `ptplayer.s` |
+| `examples/includes/audio_defs.has` | `extern func` decls |
+
+Sound defaults: `period=443` (~8 kHz PAL), `vol=32`, `pri=64`, `channel=-1`.
+Regression: `examples/tests/compiler/import_audio_load_test.has`.
+
+Lifecycle: call `InitAudio` + `PlayMusic` after successful gfx/asset init;
+`QuitAudio` before `ReleaseSystem`.
+
+## Legacy manual path (existing games)
 
 | Piece | Role |
 |---|---|
 | `ptplayer` | HAS lib (`lib/ptplayer.s` + `ptplayer.i`); link in Makefile `LIBRARY_NAMES` |
 | `assets/music_data.s` | `SECTION …,DATA_C`, `XDEF music`, `incbin` the `.mod` |
 | `assets/sounds_data.s` | CHIP samples + `sfx_table` (`SfxStructure`-style: ptr, len words, period, vol, channel, pri) |
-| `scripts/extract_8svx.py` | IFF 8SVX → raw PCM (`make sfx`) |
-| HAS procs | `InitSound`, `PlayMusic`, `PlaySoundEffect(sfx_id)`, `QuitSound` |
-
-## HAS API (minimal)
+| `tools/extract_8svx.py` | IFF 8SVX → raw PCM (`make sfx`) |
+| HAS procs | Hand-written `InitSound` / `PlayMusic` / `PlaySoundEffect` / `QuitSound` |
 
 ```has
 native proc InitSound() -> void {
@@ -46,39 +80,11 @@ proc PlaySoundEffect(sfx_id: int) -> void {
         movem.l    (sp)+,a6
     }
 }
-
-proc PlayMusic() -> void {
-    asm {
-        movem.l    a6,-(sp)
-        lea        music,a0
-        lea        $DFF000,a6
-        move.l     #0,a1
-        move.b     #0,d0
-        jsr        _mt_init
-        move.b     #1,_mt_Enable
-        lea        $DFF000,a6
-        move.w     #16,d0
-        jsr        _mt_mastervol
-        movem.l    (sp)+,a6
-    }
-}
-
-native proc QuitSound() -> void {
-    asm {
-        movem.l    a6,-(sp)
-        lea        $DFF000,a6
-        jsr        _mt_end
-        jsr        _mt_remove_cia
-        movem.l    (sp)+,a6
-    }
-}
 ```
 
-Lifecycle: call `InitSound` + `PlayMusic` after successful gfx/asset init; `QuitSound` before `ReleaseSystem`. Install CIA only when startup will continue (avoid orphan handlers on early failure).
+### Makefile checklist (legacy)
 
-## Makefile checklist
-
-1. Add `ptplayer` to `LIBRARY_NAMES`.
+1. Add `ptplayer` to `LIBRARY_NAMES` (or rely on `audio.s` → `ptplayer.s` auto-dep).
 2. `MUSIC_MOD` + rule: `music_data.o` depends on the `.mod`.
 3. `SFX_NAMES` + `assets/sfx_%.raw: assets/%.iff` via `extract_8svx.py`.
 4. `sounds_data.o` depends on all `SFX_RAW`.
@@ -86,12 +92,14 @@ Lifecycle: call `InitSound` + `PlayMusic` after successful gfx/asset init; `Quit
 
 Period for 8 kHz 8SVX: `≈ 3546895/8000 → 443`. Volume/priority per effect in `sfx_table`.
 
-## SFX IDs
+## SFX / track IDs
 
-Define `const SFX_… = N` matching `sfx_table` order. Call `PlaySoundEffect(SFX_…)` at the gameplay event (spawn, hit, throw, death).
+With `#import`, IDs are assigned in source order (separate counters for music
+vs sound). With hand-built tables, define `const SFX_… = N` matching
+`sfx_table` order.
 
 ## References
 
-- Working game: `graveyardshadowsamiga` (`graveyard.has`, `assets/music_data.s`, `assets/sounds_data.s`)
-- Multi-track + `SwitchMusic`: `astronautjetpac/jetpac.has`
+- Preferred API: [docs/LIBRARY_REFERENCE.md](../../../docs/LIBRARY_REFERENCE.md) (`audio.s`)
+- Working legacy games: `graveyardshadowsamiga`, `astronautjetpac/jetpac.has`, `examples/games/launchers`
 - Do not fight music channel 0; SFX use remaining Paula channels via `play_sfx`
