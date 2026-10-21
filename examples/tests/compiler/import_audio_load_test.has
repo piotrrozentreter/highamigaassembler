@@ -1,0 +1,23 @@
+// Compile/load regression: #import music|sound → const IDs + audio.s API.
+// Compile-only: hasc must emit DATA_C fragments, music_table/sfx_table, and
+// fold mus_title / sfx_laser as integer constants for PlayMusic/PlaySound.
+// Assets: relative paths into examples/games/launchers (no large copies).
+
+#import music "../../games/launchers/music2.mod" as mus_title;
+#import sound "../../games/launchers/sfx_laser.raw" as sfx_laser;
+
+#include "../../includes/audio_defs.has";
+
+code main:
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        call InitAudio();
+        call PlayMusic(mus_title);
+        call PlaySound(sfx_laser);
+        call QuitAudio();
+        return 0;
+    }

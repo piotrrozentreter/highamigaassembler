@@ -1,0 +1,17 @@
+// Compile regression: #import sound from IFF 8SVX
+#import sound "assets/import_sfx_beep.iff" as sfx_beep vol=40 pri=100;
+
+#include "../../includes/audio_defs.has";
+
+code main:
+    asm {
+        jsr main
+        rts
+    }
+
+    proc main() -> int {
+        call InitAudio();
+        call PlaySound(sfx_beep);
+        call QuitAudio();
+        return 0;
+    }

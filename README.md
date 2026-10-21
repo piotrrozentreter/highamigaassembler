@@ -49,7 +49,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Macro System**: Define reusable code patterns
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
-- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap|font …;` converts PNGs, [TexturePacker](https://www.codeandweb.com/texturepacker) / [Tiled](https://www.mapeditor.org/) exports, and C64 charsets at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` / `SetFont`
+- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound …;` converts PNGs, [TexturePacker](https://www.codeandweb.com/texturepacker) / [Tiled](https://www.mapeditor.org/) exports, C64 charsets, ProTracker MODs, and samples at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` / `SetFont`, or integer IDs with `PlayMusic` / `PlaySound` (`lib/audio.s`)
 - **Constants**: Compile-time constant evaluation
 - **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values; `#if IDENT OP EXPR` for comparison-based gating (`==`/`=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`)
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
@@ -723,9 +723,9 @@ This compiler is actively being developed. Current focus areas:
 
 ## 🛠️ Asset Conversion Tools
 
-The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap / font when possible; use the CLI tools for strips and Makefile batch jobs.
+The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap / font / music / sound when possible; use the CLI tools for strips and Makefile batch jobs.
 
-### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap / font)
+### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap / font / music / sound)
 
 HAS can read exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and
 [Tiled](https://www.mapeditor.org/) (and C64 charsets) directly at compile time. The
@@ -741,6 +741,9 @@ implemented import features are:
 // Multi-layer (bottom→top): layers=all  or  layers=Ground,Objects
 // #import tilemap "assets/level.tmx" as level_map layers=all;
 #import font "assets/charset.bin" as c64_font;  // or .s / .asm
+#import music "assets/title.mod" as mus_title;
+#import sound "assets/laser.raw" as sfx_laser;  // or .iff / .8svx → extract_8svx
+// call PlayMusic(mus_title); call PlaySound(sfx_laser);  // via lib/audio.s
 
 code main:
     proc init() -> int {

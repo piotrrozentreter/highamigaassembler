@@ -22,6 +22,19 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Added
 
+- **`#import music` / `#import sound` + `lib/audio.s`:** compile-time ProTracker
+  `.mod` and sample (`.raw` / uncompressed IFF 8SVX) imports. Labels become
+  integer table IDs (not `&` pointers). Codegen emits CHIP `DATA_C` fragments
+  plus aggregated `music_table` / `sfx_table` (`build/gen/audio_tables.s`).
+  `lib/audio.s` provides HAS-ABI wrappers (`InitAudio`, `PlayMusic`,
+  `PlaySound`, …) over ptplayer; auto-links `ptplayer.s`. Sound options:
+  `period=` / `vol=` / `pri=` / `channel=` (defaults 443 / 32 / 64 / -1).
+  Tool: `tools/extract_8svx.py`. Example:
+  `#import music "tune.mod" as mus_title;` /
+  `#import sound "laser.raw" as sfx_laser;`. Regression:
+  [import_audio_load_test.has](../examples/tests/compiler/import_audio_load_test.has);
+  decls: [audio_defs.has](../examples/includes/audio_defs.has).
+
 - **`#import font`:** compile-time C64 charset import (`.bin` chargen or
   `.s`/`.asm` with `dc.b`/`.byte`) via `tools/c64_font_converter.py`. Emits a
   5-plane Amiga font table under `build/gen`, registers `&label` for

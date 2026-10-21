@@ -62,13 +62,14 @@ def size_suffix(size_bytes: int) -> str:
 
 @dataclass
 class AssetImport:
-    """Compile-time #import bob|palette|sprite|atlas|tileset|tilemap|font record (preprocessor)."""
-    kind: str          # 'bob' | 'palette' | 'sprite' | 'atlas' | 'tileset' | 'tilemap' | 'font'
-    source_path: str   # absolute source path (PNG, XML, TMX, or C64 charset)
+    """Compile-time #import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound record (preprocessor)."""
+    kind: str          # 'bob' | 'palette' | 'sprite' | 'atlas' | 'tileset' | 'tilemap' | 'font' | 'music' | 'sound'
+    source_path: str   # absolute source path (PNG, XML, TMX, C64 charset, MOD, or sample)
     label: str         # primary / prefix symbol
     options: dict = field(default_factory=dict)
     gen_path: str = ""  # absolute path to generated .s (master include for atlas)
     # Extra addressable symbols (atlas frames + palette). Empty → use [label] only.
+    # music/sound keep [label] for const-ID identity (not addressable globals).
     labels: List[str] = field(default_factory=list)
 
 
