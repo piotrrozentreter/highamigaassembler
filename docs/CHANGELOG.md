@@ -4,6 +4,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-21
+
 ### Fixed
 
 - **Tileset `match_palette=` transparent index 0:**
@@ -29,7 +31,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   `lib/audio.s` provides HAS-ABI wrappers (`InitAudio`, `PlayMusic`,
   `PlaySound`, …) over ptplayer; auto-links `ptplayer.s`. Sound options:
   `period=` / `vol=` / `pri=` / `channel=` (defaults 443 / 32 / 64 / -1).
-  Tool: `tools/extract_8svx.py`. Example:
+  Generated `INCBIN` paths are absolute, so assembly works when vasm runs from
+  a different working directory. Tool: `tools/extract_8svx.py`. Example:
   `#import music "tune.mod" as mus_title;` /
   `#import sound "laser.raw" as sfx_laser;`. Regression:
   [import_audio_load_test.has](../examples/tests/compiler/import_audio_load_test.has);

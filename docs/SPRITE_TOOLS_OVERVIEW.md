@@ -391,5 +391,5 @@ Potential improvements to sprite tools:
 ---
 
 **Last Updated**: October 2026  
-**HAS Version**: 0.9.9  
+**HAS Version**: 0.9.10
 **Author**: HAS Development Team

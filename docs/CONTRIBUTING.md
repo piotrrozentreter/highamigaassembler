@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the HAS (High Assembler) project!
 
 ## Project Status
 
-**Version 0.9.9 - In Constant Development**
+**Version 0.9.10 - In Constant Development**
 
 This compiler is actively being developed. We welcome contributions, bug reports, and suggestions.
 
@@ -149,19 +149,17 @@ Explain the problem this commit solves and why this approach was chosen.
 
 ### Areas Needing Help
 
-Current focus areas (Version 0.9.9):
+Current focus areas (Version 0.9.10):
 
 #### High Priority
-- **Test Suite**: Automated testing framework
-- **Error Messages**: More informative validation errors
-- **Optimization**: Peephole optimizer improvements
-- **Documentation**: More examples and tutorials
+- **Regression Coverage**: Keep compiler and asset-import checks green on both CPU targets
+- **Code Generation**: Improve correctness, diagnostics, and optimization quality
+- **Asset Workflows**: Expand practical graphics, music, and sound examples
 
 #### Medium Priority
-- **Standard Library**: Common utility functions
-- **Code Samples**: Real-world Amiga programs
-- **Build Tools**: Improved build scripts
-- **VSCode Extension**: Syntax highlighting, snippets
+- **Standard Library**: Add reusable routines for Amiga applications
+- **Code Samples**: Validate more real-world programs on emulators and hardware
+- **Developer Tools**: Improve packaging, build scripts, and editor support
 
 #### Long-term
 - **Floating Point**: Software FP library integration
