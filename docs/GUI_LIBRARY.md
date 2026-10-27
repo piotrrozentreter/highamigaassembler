@@ -29,7 +29,7 @@ any other `gui.s` function while in dual-playfield mode.
    - [DrawGadget](#drawgadget) ← struct-based dispatch
 4. [Mouse event manager](#mouse-event-manager)
    - [GuiPollMouse](#guipollmouse)
-   - [GuiHitTestRect](#guihittestRect)
+   - [GuiHitTestRect](#guihittestrect)
    - [GuiHitTest](#guihittest) ← struct-based
    - [GetGuiMouseX / GetGuiMouseY](#getguimousex--getguimousey)
 5. [GADGET, EDITBOX, and COMBOBOX structs](#gadget-and-editbox-structs)

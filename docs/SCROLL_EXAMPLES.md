@@ -1,6 +1,10 @@
 # Scroll Function - Practical Code Examples
 
-This document provides ready-to-use code examples for common scrolling scenarios. All examples assume a graphics mode has been initialized with `SetGraphicsMode()` and the `Scroll` function is declared as external.
+This document provides code examples for common scrolling scenarios. Runtime
+use assumes `TakeSystem()` has established the custom-chip base in `a5`,
+`SetGraphicsMode()` has succeeded, and `Scroll` is declared as external. The
+test examples must be called on Amiga hardware or an emulator to exercise the
+library routine; compiling them only checks HAS/assembly generation.
 
 ## Quick Reference
 
@@ -47,7 +51,8 @@ code main:
 
 ## Example 2: Scroll Direction Variants
 
-Helper procedures for the four directional variants.
+Helper procedures for vertical and horizontal scrolling. Horizontal `Scroll`
+is limited to lores and dual-playfield modes and to full-width scanlines.
 
 ```has
 proc scroll_screen_up(pixels: int) -> int {
@@ -63,29 +68,28 @@ proc scroll_screen_down(pixels: int) -> int {
 }
 
 proc scroll_screen_left(pixels: int) -> int {
-    // Scroll entire screen left (STUBBED - currently does nothing)
-    // WARNING: This currently returns 0 but does NOT perform scrolling
+    // Horizontal pixel scroll: mode 0/3; x0=0, x1=319
     return Scroll(0, 0, 319, 255, -1, 0, pixels);
 }
 
 proc scroll_screen_right(pixels: int) -> int {
-    // Scroll entire screen right (STUBBED - currently does nothing)
-    // WARNING: This currently returns 0 but does NOT perform scrolling
+    // Horizontal pixel scroll: mode 0/3; x0=0, x1=319
     return Scroll(0, 0, 319, 255, 1, 0, pixels);
 }
 ```
 
-## Example 3: Scrolling a Sub-Region (Window)
+## Example 3: Scrolling a Vertical Band
 
-Scroll only part of the screen, leaving the rest unchanged.
+Scroll a range of rows while leaving rows above and below unchanged. Vertical
+`Scroll` always processes the full scanline width; `x0` and `x1` do not crop
+the operation.
 
 ```has
-proc scroll_game_window(window_y_top: int, window_y_bottom: int, pixels: int) -> int {
-    // Scroll only the game window (e.g., rows 32 to 224)
-    // The UI remains fixed at the top and bottom
+proc scroll_rows(y_top: int, y_bottom: int, pixels: int) -> int {
+    // Scroll full-width rows (e.g., 32 through 224); UI rows outside stay fixed.
     var result: int;
     
-    result = Scroll(0, window_y_top, 319, window_y_bottom, 0, -1, pixels);
+    result = Scroll(0, y_top, 319, y_bottom, 0, -1, pixels);
     
     if (result != 0) {
         return -1;  // Error
@@ -94,12 +98,11 @@ proc scroll_game_window(window_y_top: int, window_y_bottom: int, pixels: int) ->
     return 0;
 }
 
-proc scroll_menu_region(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
-    // Scroll a specific rectangular menu region
-    // Example: scroll items in a list box
+proc scroll_menu_rows(y0: int, y1: int, pixels: int) -> int {
+    // Scroll menu rows across the full screen width; this is not x-clipped.
     var result: int;
     
-    result = Scroll(x0, y0, x1, y1, 0, -1, pixels);
+    result = Scroll(0, y0, 319, y1, 0, -1, pixels);
     
     if (result != 0) {
         return -1;  // Region out of bounds or invalid
@@ -128,29 +131,28 @@ proc safe_scroll_up(pixels: int) -> int {
     var result: int = Scroll(0, 0, 319, 255, 0, -1, pixels);
     
     if (result != 0) {
-        // Scroll failed (graphics mode not initialized, or HAM6)
+        // Scroll failed (for example, invalid bounds or HAM6 mode)
         return -1;
     }
     
     return 0;  // Success
 }
 
-proc safe_scroll_region(x0: int, y0: int, x1: int, y1: int, 
-                        hor: int, vert: int, pixels: int) -> int {
-    // Validate all parameters before scrolling
+proc safe_scroll_rows(y0: int, y1: int, vert: int, pixels: int) -> int {
+    // Validate a vertical full-width row range before scrolling.
     
     // Check coordinates
-    if (x0 >= x1 || y0 >= y1) {
+    if (y0 < 0 || y0 >= y1) {
         return -1;  // Invalid region
     }
     
-    // Check bounds for lores mode (adjust for hires if needed)
-    if (x1 > 319 || y1 > 255) {
-        return -1;  // Coordinates out of bounds
+    // This helper targets lores/dual-playfield geometry.
+    if (y1 > 255) {
+        return -1;  // Bottom edge out of bounds
     }
     
     // Check direction values
-    if ((hor < -1 || hor > 1) || (vert < -1 || vert > 1)) {
+    if (vert < -1 || vert > 1) {
         return -1;  // Invalid direction
     }
     
@@ -160,7 +162,8 @@ proc safe_scroll_region(x0: int, y0: int, x1: int, y1: int,
     }
     
     // All checks passed, perform scroll
-    return Scroll(x0, y0, x1, y1, hor, vert, pixels);
+    // Use full-width bounds: vertical Scroll does not crop by x.
+    return Scroll(0, y0, 319, y1, 0, vert, pixels);
 }
 ```
 
@@ -230,7 +233,7 @@ proc robust_scroll(x0: int, y0: int, x1: int, y1: int,
         return -1;  // Invalid pixel count
     }
     
-    if (x0 >= x1 || y0 >= y1) {
+    if (x0 < 0 || y0 < 0 || x0 >= x1 || y0 >= y1) {
         return -1;  // Invalid region (must be x0 < x1 and y0 < y1)
     }
     
@@ -241,9 +244,9 @@ proc robust_scroll(x0: int, y0: int, x1: int, y1: int,
     if (result == 0) {
         return 0;  // Success
     } else if (result == -1) {
-        // Scroll failed - possible causes:
-        // - Graphics mode not initialized
+        // Scroll failed - possible causes include:
         // - Coordinates out of bounds for current mode
+        // - Unsupported horizontal bounds/mode
         // - HAM6 mode active (unsupported)
         return -1;
     } else {
@@ -253,17 +256,13 @@ proc robust_scroll(x0: int, y0: int, x1: int, y1: int,
 }
 ```
 
-## Example 7: Mode-Aware Scrolling
+## Example 7: Mode-Aware Vertical Scrolling
 
 Adjust scroll parameters based on current graphics mode.
 
 ```has
-extern func GetGraphicsMode() -> int;
-
-proc scroll_full_screen_adaptive(pixels: int) -> int {
-    // Scroll the full screen, adjusting coordinates for the current mode
-    
-    var mode: int = GetGraphicsMode();
+proc scroll_full_screen_adaptive(mode: int, pixels: int) -> int {
+    // Caller passes the current mode; there is no GetGraphicsMode API.
     var max_x: int;
     var result: int;
     
@@ -273,6 +272,9 @@ proc scroll_full_screen_adaptive(pixels: int) -> int {
     } else if (mode == 1) {
         // Hires: 640x256x16
         max_x = 639;
+    } else if (mode == 3) {
+        // Dual playfield: 320x256; only the active playfield is scrolled
+        max_x = 319;
     } else {
         return -1;  // HAM6 or unknown mode
     }
@@ -336,39 +338,21 @@ proc render_and_scroll_loop() -> int {
 }
 ```
 
-## Example 9: Bounded Scroll with Clipping
+## Example 9: Validate Scroll Bounds
 
-Scroll only within valid screen bounds (lores mode).
+Reject invalid coordinates for a lores vertical scroll. The helper does not
+clip or scroll a horizontally bounded window; vertical `Scroll` always
+processes full-width scanlines.
 
 ```has
-proc clipped_scroll(x0: int, y0: int, x1: int, y1: int, pixels: int) -> int {
-    // Ensure coordinates are within lores bounds
-    var clipped_x0: int = x0;
-    var clipped_y0: int = y0;
-    var clipped_x1: int = x1;
-    var clipped_y1: int = y1;
-    
-    // Clamp to screen bounds
-    if (clipped_x0 < 0) {
-        clipped_x0 = 0;
-    }
-    if (clipped_y0 < 0) {
-        clipped_y0 = 0;
-    }
-    if (clipped_x1 > 319) {
-        clipped_x1 = 319;
-    }
-    if (clipped_y1 > 255) {
-        clipped_y1 = 255;
+proc safe_lores_vertical_scroll(y0: int, y1: int, pixels: int) -> int {
+    // Validate bounds before calling Scroll; it does not reject negative y0.
+    if (y0 < 0 || y0 >= y1 || y1 > 255 || pixels <= 0) {
+        return -1;
     }
     
-    // Validate clamped coordinates
-    if (clipped_x0 >= clipped_x1 || clipped_y0 >= clipped_y1) {
-        return -1;  // Region collapsed to zero size
-    }
-    
-    // Perform scroll with clamped coordinates
-    return Scroll(clipped_x0, clipped_y0, clipped_x1, clipped_y1, 0, -1, pixels);
+    // Vertical movement uses full-width scanlines.
+    return Scroll(0, y0, 319, y1, 0, -1, pixels);
 }
 ```
 
@@ -450,15 +434,22 @@ if (result != 0) {
 }
 ```
 
-### ❌ Rely on Horizontal Scrolling
+### ✅ Use the supported horizontal pixel-scroll path
 
 ```has
-// DON'T: Horizontal scrolling is not implemented
-var result: int = Scroll(0, 0, 319, 255, -1, 0, 16);
-// result == 0, but NO SCROLLING ACTUALLY HAPPENED!
+// Scroll() shifts whole pixels in mode 0 or mode 3 across a full-width row.
+var result: int = Scroll(0, 0, 319, 255, -1, 0, 1);
 ```
 
-### ✅ Use Vertical Scrolling
+For hardware fine scrolling by up to 15 pixels, use the separate
+`ScrollHorizontalScreen(px)` API. It supports modes 0, 1, and 3; it changes
+`BPLCON1` but does not step bitplane pointers.
+
+Horizontal `Scroll()` is not supported in hires mode 1 and rejects partial
+horizontal regions. For the exact x-boundary rules, see
+[Scroll Function](SCROLL_FUNCTION.md#horizontal-pixel-scrolling-scroll).
+
+### ✅ Use Vertical Scrolling Across Full-Width Rows
 
 ```has
 // DO: Vertical scrolling is fully implemented
@@ -485,15 +476,15 @@ SetPixel(160, 255, 31);  // Draw white pixel at new bottom row
 
 ## Performance Tips
 
-1. **Batch scrolls:** If you need to scroll multiple regions, call `Scroll` multiple times rather than trying to optimize into one call.
+1. **Scroll by row range:** Vertical `Scroll` affects full-width scanlines; use y ranges to keep rows above or below fixed.
 
 2. **Use appropriate pixel counts:** Scrolling very small amounts (1–2 pixels) frequently is less efficient than scrolling larger amounts less often.
 
 3. **Call during VBlank:** For smooth animation, call `Scroll` during the VBlank interval to avoid visible tearing or flicker.
 
-4. **Minimize region size:** Scrolling a small sub-region is faster than scrolling the full screen.
+4. **Minimize the row range:** Vertical work scales with the selected rows, but it does not support horizontal clipping.
 
-5. **Avoid HAM6 mode:** HAM6 is not supported; stick to lores (mode 0) or hires (mode 1).
+5. **Avoid HAM6 mode:** HAM6 is not supported; vertical scrolling works in modes 0, 1, and 3.
 
 ## See Also
 

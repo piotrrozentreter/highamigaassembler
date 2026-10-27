@@ -6,7 +6,7 @@
 
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
-**HAS (High Assembler)** is a Python-based compiler that translates a high-level assembly language targeting the Motorola 68000 processor (Amiga). It provides modern programming constructs while maintaining full control over the generated assembly code.
+**HAS (High Assembler)** is a Python-based compiler that translates a high-level assembly language for the Motorola 68000 family. The 68000 target is the default; `--cpu 68020` opts into selected 68020 code-generation features. HAS provides modern programming constructs while keeping generated assembly inspectable.
 
 ## 🎯 What is HAS?
 
@@ -18,7 +18,7 @@ HAS bridges the gap between high-level languages and assembly programming. It of
 - **Macro system**: reusable code patterns
 - **Python integration**: generate code dynamically at compile-time
 - **Amiga-specific support**: hardware registers, graphics libraries, copper lists
-- **Clean output**: generates standard 68000 assembly compatible with `vasm` + `vlink`
+- **Assembly output**: generates Motorola assembly for the selected CPU target, compatible with `vasm` + `vlink`
 
 ## Vision and Boundaries
 
@@ -42,8 +42,8 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Control Flow**: if/else, for, while, do-while, repeat, countdown…until (DBcc), loop (endless, `break`-only exit), break, continue
 - **Operators**: Arithmetic, bitwise, logical, shift, comparison
 - **Q16.16 Fixed-Point**: Automatic conversion of floating-point literals (e.g., `2.5`, `0.98`) to Q16.16 format
-- **Memory Sections**: code, data, bss with automatic alignment
-- **Register Control**: `getreg()`/`setreg()` for direct register access
+- **Memory Sections**: code, data, bss with target-aware alignment
+- **Register Control**: `GetReg()`/`SetReg()` for direct register access
 - **Inline Assembly**: Full control with `asm { ... }` blocks
 
 ### Advanced Features
@@ -125,28 +125,30 @@ code main:
 hasc hello.has -o hello.s
 ```
 
-68000 is the default CPU target. Select the opt-in 68020 target when generating
-scaled indexed addressing for dynamic array, typed-pointer, struct-array, and
-two-dimensional accesses:
+68000 is the default CPU target. Select the opt-in 68020 target for selected
+68020 instructions and addressing forms, including scaled indexed addressing
+on supported dynamic array, typed-pointer, struct-array, and two-dimensional
+access paths:
 
 ```bash
 hasc hello.has --cpu 68020 -o hello-68020.s
 vasmm68k_mot -m68020 -Fhunkexe -o hello-68020.o hello-68020.s
 ```
 
-The compiler accepts only `--cpu 68000` and `--cpu 68020`. Without the option,
-and with explicit `--cpu 68000`, generated assembly is byte-for-byte identical.
-68020 output uses `.l` indexes with scale factors `*2`, `*4`, or `*8` where the
-selected access path and displacement are legal; byte-sized indexing remains
-unscaled. Unsupported strides and displacements use the existing arithmetic
-fallbacks. Constant indexes remain direct constant offsets.
+The compiler accepts only `--cpu 68000` and `--cpu 68020`. Omitting `--cpu`
+selects the same target as `--cpu 68000`. Under 68020, scale factors `*2`,
+`*4`, and `*8` are used where the selected access path and displacement are
+legal; byte-sized indexing remains unscaled. A `.w` index is selected only
+when the path proves the constant index is in signed 16-bit range; other cases
+retain `.l` indexes. Unsupported strides use arithmetic fallbacks, and
+constant indexes may use direct offsets.
 
 68020 output is not compatible with 68000/68010 hardware and must be assembled
-with the matching `vasmm68k_mot -m68020` flag. Source syntax, data layout, ABI,
-calling convention, alignment, and pointer representation are unchanged; inline
-assembly remains the programmer's responsibility. Full-extension addressing,
-memory-indirect forms, `.w` index selection, and other 68020 instruction-set
-optimizations are not enabled.
+with the matching `vasmm68k_mot -m68020` flag. Source syntax and pointer
+representation are shared, but target-dependent code generation (including
+alignment and selected instruction forms) can differ. Inline assembly remains
+the programmer's responsibility. Full-extension indexed displacements are
+supported on 68020; memory-indirect indexed addressing is not enabled.
 
 **One-shot Amiga executable** (requires `vasm` + `vlink` on `PATH`):
 
@@ -176,25 +178,27 @@ Legacy two-step scripts remain available: `./scripts/build.sh` and
 - **[docs/INSTALL.md](docs/INSTALL.md)** - Installation and quick verification
 - **[docs/COMPILER_DEVELOPERS_GUIDE.md](docs/COMPILER_DEVELOPERS_GUIDE.md)** - Architecture and internals
 - **[docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md)** - Language reference and usage patterns
+- **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** - Contributor workflow and checks
 
 ### Feature-Specific Documentation
 
 - **[docs/TERMINOLOGY.md](docs/TERMINOLOGY.md)** - Understanding `proc` vs `func` vs `extern func`
+- **[docs/GETREG_SETREG_IMPLEMENTATION.md](docs/GETREG_SETREG_IMPLEMENTATION.md)** - `GetReg` and `SetReg` register access reference
 - **[docs/NATIVE_KEYWORD.md](docs/NATIVE_KEYWORD.md)** - Zero-overhead native functions for performance-critical code
 - **[docs/INTERRUPT_KEYWORD.md](docs/INTERRUPT_KEYWORD.md)** - `interrupt`/`starti`/`endi`: software VBlank dispatch slots (AMOS AMAL/`EVERY`-style)
 - **[docs/OPERATORS.md](docs/OPERATORS.md)** - Complete operator reference
 - **[docs/BITWISE.md](docs/BITWISE.md)** - Bitwise and shift operations
 - **[docs/SHIFT_OPERATORS.md](docs/SHIFT_OPERATORS.md)** - Shift operation details
+- **[docs/SCROLL_FUNCTION.md](docs/SCROLL_FUNCTION.md)** - Pixel scrolling and hardware fine-scroll behavior
 - **[docs/PYTHON_INTEGRATION.md](docs/PYTHON_INTEGRATION.md)** - Using Python for code generation
 - **[docs/PYTHON_GENERATION_TUTORIAL.md](docs/PYTHON_GENERATION_TUTORIAL.md)** - Step-by-step Python integration
 - **[docs/MUSASHI_USER_GUIDE.md](docs/MUSASHI_USER_GUIDE.md)** - User guide: test generated code on a virtual m68k CPU (Linux-only)
 - **[docs/MUSASHI_RUNTIME_TESTING.md](docs/MUSASHI_RUNTIME_TESTING.md)** - Technical Musashi runtime integration overview
-- **[docs/TERMINOLOGY.md](docs/TERMINOLOGY.md)** - Language and architecture terminology
 
-### Implementation Details
+### Technical References
 
-- **[docs/ARRAY_ACCESS_IMPLEMENTATION.md](docs/ARRAY_ACCESS_IMPLEMENTATION.md)** - Array indexing details
-- **[docs/GETREG_SETREG_IMPLEMENTATION.md](docs/GETREG_SETREG_IMPLEMENTATION.md)** - Direct register manipulation
+- Indexed addressing and `GetReg`/`SetReg` behavior are covered in the
+  [compiler developer guide](docs/COMPILER_DEVELOPERS_GUIDE.md).
 - **[docs/EXTERNAL_MODULES.md](docs/EXTERNAL_MODULES.md)** - Include/module system details
 - **[docs/GRAPHICS_LIBRARY_INTERFACE.md](docs/GRAPHICS_LIBRARY_INTERFACE.md)** - Amiga graphics programming
 - **[docs/HAM6_SUPPORT.md](docs/HAM6_SUPPORT.md)** - HAM6 graphics mode implementation
@@ -429,7 +433,7 @@ hasc/                       # Compiler package
 ├── codegen.py              # 68000/68020 assembly generation
 ├── codegen_indexed_address.py, indexed_address.py  # Indexed addressing
 ├── target.py               # CPU capability definitions
-├── register_allocator.py   # Allocator helper (unused by CodeGen today; see codegen-quirks)
+├── register_allocator.py   # Scratch-register allocator used by code generation
 ├── peepholeopt.py          # Post-generation optimizations
 └── macro_expander.py, reachability.py, asm_substitution.py
 
@@ -579,64 +583,24 @@ code main:
     }
 ```
 
-### Register Locking with #pragma
+### Register Access and Locking
 
-The `#pragma lockreg(register)` directive prevents the compiler from using specific registers for temporary values or spilling operations. This is **critical** when interfacing with Amiga system libraries that expect certain registers to remain unchanged.
-
-#### Common Use Case: CUSTOM Chip Base Address
-
-Many Amiga libraries and system routines use register `a5` to hold the CUSTOM chip base address (`$DFF000`). When calling these libraries, you must ensure the compiler doesn't modify `a5`:
-
-```has
-// Lock register a5 to hold CUSTOM chip base address
-// HAS will not modify a5 across the code
-#pragma lockreg(a5);
-
-#include "includes/system_libs.has"
-
-code main:
-    asm {
-        jsr TakeSystem      ; Sets a5 = $DFF000 (CUSTOM base)
-        jsr main
-        jmp ReleaseSystem
-    }
-    
-    proc main() -> void {
-        // a5 remains untouched throughout execution
-        call graphics_init();  // External library uses a5
-        call sound_init();     // External library uses a5
-    }
-```
-
-**Why This Matters:**
-
-1. **System Libraries**: Amiga OS libraries often assume `a5` points to `$DFF000` (hardware registers)
-2. **Hardware Access**: Direct chipset manipulation requires a stable base pointer
-3. **External Code**: C libraries and assembly modules may rely on preserved registers
-4. **Register Allocator**: Without `lockreg`, the compiler might use `a5` for temporaries, corrupting the base pointer
-
-**Syntax:**
-
-```has
-#pragma lockreg(a5);        // Lock a single register
-#pragma lockreg(a5, a4);    // Lock multiple registers (comma-separated)
-```
-
-**Locked Registers Are:**
-
-- Never allocated for temporary values
-- Never used for register spilling
-- Never modified by compiler-generated code
-- Your responsibility to initialize and maintain
-
-**Best Practice:** Always use `#pragma lockreg(a5)` at the top of your file when calling external Amiga libraries or system routines that expect hardware register base pointers.
+`GetReg("d0")` and `SetReg("d0", value)` provide explicit register access.
+`#pragma lockreg(...)` excludes selected registers from the allocator's
+eligible scratch-register set; it does not save registers around calls or
+guarantee that every compiler-generated instruction avoids a register. In
+particular, it is not a mechanism for preserving a custom-chip base register
+across calls. Review generated assembly and the external routine's calling
+contract when sharing registers with inline assembly or library code. See the
+[compiler developer guide](docs/COMPILER_DEVELOPERS_GUIDE.md#code-generation-and-register-management)
+for the current allocator contract.
 
 ## 🔍 Type System
 
 | Type | Size | Signed | Description |
 | ------ | ------ | -------- | ------------- |
-| byte, i8 | 1 | Yes | 8-bit signed integer |
-| u8, char | 1 | No | 8-bit unsigned integer |
+| byte, i8, char | 1 | Yes | 8-bit signed integer / character |
+| u8 | 1 | No | 8-bit unsigned integer |
 | word, i16, short | 2 | Yes | 16-bit signed integer |
 | u16 | 2 | No | 16-bit unsigned integer |
 | long, i32, int | 4 | Yes | 32-bit signed integer |
@@ -647,20 +611,17 @@ code main:
 
 ## 🎯 Calling Convention
 
-HAS follows Motorola 68000 standard calling convention:
-
-- **Parameter Passing**: Stack-based (can use `__reg(regname)` for register parameters)
-- **Return Values**: d0 (integers), a0 (pointers)
-- **Caller-Save**: d0-d2, a0-a1
-- **Callee-Save**: d3-d7, a2-a6
-- **Frame Pointer**: a6 (established via `link`/`unlk`)
-- **Stack Pointer**: a7 (never allocated)
+HAS uses its own stack-based default parameter convention, with optional
+`__reg(...)` parameters. Return values are emitted through `d0`. See the
+[language guide's calling-convention section](docs/DEVELOPERS_GUIDE.md#procedures-and-functions)
+and the [compiler developer guide](docs/COMPILER_DEVELOPERS_GUIDE.md#code-generation-and-register-management);
+external assembly interfaces must match their declared ABI.
 
 ## 🛠️ Development Status
 
-**Version 0.9.10** - Active Development
+**Version 0.9.10** - Feature-frozen; stabilizing toward 1.0.0
 
-This compiler is actively being developed. Current focus areas:
+Current project work focuses on stabilization and regression coverage:
 
 - Correct and efficient code generation for both 68000 and opt-in 68020 targets
 - Asset imports for graphics, fonts, music, and sound

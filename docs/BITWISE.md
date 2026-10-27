@@ -12,17 +12,12 @@
 
 ## Operator Precedence
 
-Bitwise operators fall between comparison operators and arithmetic operators:
-
-1. Unary: `!` `-` `~` `&` `*`
-2. Multiplicative: `*` `/` `%`
-3. Additive: `+` `-`
-4. Bitwise OR: `|`
-5. Bitwise XOR: `^`
-6. Bitwise AND: `&`
-7. Comparison: `<` `<=` `>` `>=` `==` `!=`
-8. Logical AND: `&&`
-9. Logical OR: `||`
+In the current grammar, bitwise operators bind more tightly than shifts and
+comparisons, but less tightly than arithmetic. From highest to lowest, their
+relative levels are: multiplicative, additive, bitwise AND (`&`), bitwise XOR
+(`^`), bitwise OR (`|`), shifts (`<<`, `>>`), comparisons, logical AND
+(`&&`), and logical OR (`||`). See the complete grammar-aligned table in
+[Operators](OPERATORS.md#operator-precedence-highest-to-lowest).
 
 ## Assembly Implementation
 
@@ -80,7 +75,7 @@ var result: long = value & mask;
 ```
 
 The parser disambiguates based on position:
-- Prefix position (after operators like `=`, `(`, etc.) â†’ address-of
-- Infix position (between values) â†’ bitwise AND
+- Prefix position (after operators like `=`, `(`, etc.) → address-of
+- Infix position (between values) → bitwise AND
 
 See `examples/tests/compiler/bitwise_test.has` and `examples/bitwise_comprehensive.has` for more examples.

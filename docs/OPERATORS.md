@@ -72,7 +72,7 @@ fixed-point format and always uses the signed lowering.
 
 See `examples/cpu68020_unsigned_muldiv.has`.
 
-## Comparison Operators (all signed)
+## Comparison Operators
 - `==` - Equal (returns 1 or 0)
 - `!=` - Not equal
 - `<` - Less than
@@ -83,6 +83,14 @@ See `examples/cpu68020_unsigned_muldiv.has`.
 Comparison results are:
 - 1 (true) if condition holds
 - 0 (false) if condition doesn't hold
+
+The current code generator selects unsigned condition codes when either
+comparison operand is a local or parameter whose declared type is treated as
+unsigned; comparisons involving globals default to signed lowering because
+global signedness is not retained consistently across declaration forms. For
+mixed signed/unsigned values, use explicit conversions or inspect the generated
+assembly rather than assuming a common-language promotion rule. The 68000 and
+68020 targets share this comparison-selection rule.
 
 ## Logical Operators
 - `&&` - Logical AND (both operands must be non-zero)
@@ -104,13 +112,21 @@ Logical `!` is distinct from bitwise `~`: use `!value` when testing whether
 
 ## Operator Precedence (highest to lowest)
 
-1. Unary: `!` `-` `&` `*`
-2. Multiplicative: `*` `/` `%`
-3. Additive: `+` `-`
-4. Comparison: `<` `<=` `>` `>=`
-5. Equality: `==` `!=`
-6. Logical AND: `&&`
-7. Logical OR: `||`
+The order below follows `hasc/parser.py`. Relational and equality comparisons
+share one left-associative grammar level; use parentheses when chaining or
+mixing them.
+
+1. Postfix: `++` `--` member access (`.` / `->`)
+2. Unary: `!` `-` `~` `&` `*` prefix `++` / `--`
+3. Multiplicative: `*` `/` `%`
+4. Additive: `+` `-`
+5. Bitwise AND: `&`
+6. Bitwise XOR: `^`
+7. Bitwise OR: `|`
+8. Shifts: `<<` `>>`
+9. Comparisons: `<` `<=` `>` `>=` `==` `!=`
+10. Logical AND: `&&`
+11. Logical OR: `||`
 
 ## Assembly Implementation
 

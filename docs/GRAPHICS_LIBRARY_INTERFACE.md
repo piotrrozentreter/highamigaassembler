@@ -164,19 +164,25 @@ call ClearPlayfield(2);   // Wipe only Playfield 2, leaving Playfield 1 untouche
 #### ScrollHorizontalScreen(px: int) -> int
 Sets the OCS/ECS hardware fine horizontal scroll register (`BPLCON1`) directly for the active
 playfield, instead of moving pixel data like `Scroll()` does.
-- **px**: signed offset, `-15..15`. `px >= 0` scrolls right by `px` pixels; `px < 0` scrolls left
-  by `-px` pixels. Out-of-range values return `-1` without writing any register.
+- **px**: signed input, `-15..15`. The implementation writes `abs(px)` to the delay nibble, so
+  `px` and `-px` produce the same register value. Out-of-range values return `-1` without writing
+  the register.
 - **Modes 0, 1, 3** are supported (mode 3: active playfield only, via `SetActivePlayfield`); HAM6
   (mode 2) returns `-1`, same as `Scroll`.
 - **Mode 3 (dual playfield)**: only the active playfield's `BPLCON1` nibble changes - the sibling
   playfield's fine-scroll value is preserved untouched.
+- **Hardware setup**: writes `BPLCON1(a5)` directly; establish the custom-chip base in `a5`
+  (normally with `TakeSystem()`) before use.
 - Does not move bitplane pointers - see [SCROLL_FUNCTION.md](SCROLL_FUNCTION.md#scrollhorizontalscreen-hardware-fine-scroll)
   for full behavior and the classic OCS whole-word pointer-stepping technique this pairs with.
 - Returns 0 on success, -1 on error (`px` out of range or HAM6 mode).
+- **Direction caveat**: source comments and example comments describe opposite directions for
+  positive and negative inputs, but both signs map to the same hardware delay value. Treat `px`
+  as a delay magnitude until that direction convention is clarified.
 
 ```has
 call SetActivePlayfield(1);
-call ScrollHorizontalScreen(5);   // Playfield 1 fine-scrolled right by 5px
+call ScrollHorizontalScreen(5);   // Set Playfield 1 delay nibble to 5
 ```
 
 #### SwapScreen() -> int

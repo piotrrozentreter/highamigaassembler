@@ -1,4 +1,4 @@
-# External Module Support - Design Document
+# External Module Support
 
 ## Overview
 
@@ -215,7 +215,7 @@ proc internal_helper() -> int {
 1. **Type checking**: External function signatures are not verified at link time
 2. **Name mangling**: None - function names must match exactly
 3. **Calling convention**: Must match between HAS and external code
-4. **Register annotations on extern funcs**: The compiler currently emits `extern func` calls using stack-based argument passing, even when parameters are annotated with `__reg(...)`. This matches the hand-written stack-frame routines in `lib/` such as [bob.s](../lib/bob.s) and [graphics.s](../lib/graphics.s).
+4. **Register annotations**: For a known `extern func` declaration, each `__reg(...)` parameter is passed in its declared register; unannotated parameters are passed on the stack. The called assembly routine must implement the same contract. Internal non-native HAS procedures save their register parameters into the procedure frame before compiling the body, so register annotations do not by themselves promise a faster HAS-language body.
 5. **No C++ support**: No support for C++ name mangling or overloading
 
 ## Future Enhancements

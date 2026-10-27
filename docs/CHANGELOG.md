@@ -323,7 +323,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
     both playfields (all 6 bitplanes) at once rather than respecting the selector. `SwapScreen`
     and `Show`/`UpdateCopperList` correctly handle the dual-playfield double buffers and copper
     list.
-  - Not supported in mode 3 (returns `-1` without corrupting state): `BLITLINE` (the blitter
+  - At the point described by this entry, these functions did not support mode 3 (they returned
+    `-1` without corrupting state): `BLITLINE` (the blitter
     line-mode geometry table has no dual-playfield entry), `Scroll` (same restriction as
     HAM6/mode 2), and `CreateBob`/`MirrorBobHorizontally`/`MirrorBobVertically` in `lib/bob.s`
     (BOB storage's plane-count logic does not support dual playfield yet). `lib/gui.s` widgets
@@ -349,14 +350,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
   coordinates outside +/-4096 (where `LINE` would still clip and draw). `lib/hardware.i` gained
   the `BLTBDAT` and `BLTADAT` register definitions this needs.
 
-- **`Scroll(x0, y0, x1, y1, hor, vert, pixels)` in `lib/graphics.s`:** scrolls a rectangular
-  screen region vertically by copying scanlines and filling newly exposed rows with black (color 0).
-  Supports mode 0 (320×256×32 lores) and mode 1 (640×256×16 hires); returns `-1` for HAM6 mode
-  or invalid coordinates. Parameters are register-based (`d0`–`d6`) for minimal function-call overhead.
-  Input validation ensures `x0 < x1`, `y0 < y1`, `pixels > 0`, and `hor`/`vert` ∈ {-1, 0, 1}.
-  **Vertical scrolling:** fully implemented with CPU-based forward/backward copy to avoid data
-  corruption. **Horizontal scrolling:** stubbed (returns 0 but performs no operation); future versions
-  will accelerate with the Blitter. Fill color is always black; no option to customize. 
+- **`Scroll(x0, y0, x1, y1, hor, vert, pixels)` in `lib/graphics.s` (initial implementation):**
+  scrolls vertically by copying scanlines and filling newly exposed rows with black (color 0).
+  At that release it supported mode 0 (320×256×32 lores) and mode 1 (640×256×16 hires); it returned
+  `-1` for HAM6 mode or invalid coordinates. Parameters were register-based (`d0`–`d6`) for minimal
+  function-call overhead. Input validation ensured `x0 < x1`, `y0 < y1`, `pixels > 0`, and
+  `hor`/`vert` ∈ {-1, 0, 1}. **Vertical scrolling** used CPU-based forward/backward copies.
+  **Horizontal scrolling was stubbed** (returned 0 but performed no operation); future versions
+  were expected to accelerate with the Blitter. Fill color was always black; no option to customize.
   New docs: [SCROLL_FUNCTION.md](../docs/SCROLL_FUNCTION.md),
   [SCROLL_EXAMPLES.md](../docs/SCROLL_EXAMPLES.md), [examples/scroll_demo.has](../examples/scroll_demo.has),
   [examples/scroll_comprehensive_test.has](../examples/scroll_comprehensive_test.has).
@@ -1220,16 +1221,16 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 #### GUI Widget Library (`lib/gui.s` / `lib/gui.i`)
 - **`DrawButton(x, y, w, h, bg, border, label, tc)`**: Clickable button gadget with centred label.
   - Renders a **3D raised effect**: flat `bg` fill, `border`-coloured highlight on top and left edges, colour-0 (black) shadow on bottom and right edges.
-  - Horizontal centering: `cx = (x + (w âˆ’ label_px) / 2) / 8` (pixel-exact, snapped to char grid).
-  - Vertical centering: `cy = (y + h/2) / 8` (rounds to nearest char row; use `h â‰¥ 24` for perfect 7 px inner gap).
+  - Horizontal centering: `cx = (x + (w − label_px) / 2) / 8` (pixel-exact, snapped to char grid).
+  - Vertical centering: `cy = (y + h/2) / 8` (rounds to nearest char row; use `h ≥ 24` for perfect 7 px inner gap).
 - **`GuiPollMouse()`**: Per-frame mouse event accumulator.
   - Reads `GetMouseDX/DY` and accumulates into internal `gui_abs_mouse_x/y` (clamped to screen bounds; mode-aware).
-  - Leading-edge detection on left button â†’ `gui_lbtn_edge` flag.
+  - Leading-edge detection on left button → `gui_lbtn_edge` flag.
   - Must be called once per frame after `ReadMouse()`.
 - **`GuiHitTestRect(x, y, w, h)`**: Returns 1 if the left button was just pressed inside the given pixel rect. Suitable for inline buttons in HAS without a GADGET struct.
 - **`GuiHitTest(gadget_ptr)`**: Same click detection driven by a GADGET struct.
 - **`GetGuiMouseX()` / `GetGuiMouseY()`**: Zero-frame accessors returning the current accumulated absolute mouse pixel position as a signed long. Use these to feed a hardware sprite cursor.
-  - **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 â†’ `DrawMsgBox`, type 1 â†’ `DrawButton`.
+  - **`DrawGadget(gadget_ptr)`**: Struct-based widget dispatcher. Type 0 → `DrawMsgBox`, type 1 → `DrawButton`.
 - **GADGET struct** (20 bytes, defined in `lib/gui.i`): `X, Y, W, H, BG, BORDER, TEXT (long), TCOLOR, TYPE`.
 - **Hardware sprite mouse cursor** in `examples/msgbox_demo.has`:
   - 11-line classic arrow shape defined in a `data cursor_data:` section (fast RAM; `CreateSprite` copies to chip RAM).
@@ -1241,7 +1242,7 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ### Changed
 - **`DrawButton` rendering** changed from a uniform `DrawBox` border to a **3D raised gadget** style (bright top/left highlight, black bottom/right shadow). Visual appearance now clearly distinguishes buttons from message-box windows.
-- **`DrawButton` vertical centering** formula changed from `(y/8) + (h/8âˆ’1)/2` to `(y + h/2) / 8`, which rounds to the nearest character row rather than the topmost. For `h = 16`, text is now placed in the lower half of the button face instead of starting at the top border pixel.
+- **`DrawButton` vertical centering** formula changed from `(y/8) + (h/8−1)/2` to `(y + h/2) / 8`, which rounds to the nearest character row rather than the topmost. For `h = 16`, text is now placed in the lower half of the button face instead of starting at the top border pixel.
 - **`examples/msgbox_demo.has`** button dimensions updated from `(120, 240, 80, 16)` to `(100, 232, 120, 24)` to achieve perfect 7 px inner gap centering and give the button a standard Amiga gadget proportion. Window 4 height reduced from 48 to 40 px to accommodate the taller button within the 256-line screen.
 - **`lib/gui.i`** updated with `XREF` declarations and HAS `extern func` comment templates for `DrawButton`, `GuiPollMouse`, `GuiHitTest`, `GuiHitTestRect`, `GetGuiMouseX`, and `GetGuiMouseY`.
 

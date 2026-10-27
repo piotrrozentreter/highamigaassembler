@@ -300,4 +300,4 @@ p = &bullet[i+1];  // Better than pointer arithmetic
 
 - [Struct pointer compiler example](../examples/tests/compiler/struct_pointer_test.has)
 - [Advanced struct pointer example](../examples/struct_pointer_advanced.has)
-- [Array access code generation](ARRAY_ACCESS_IMPLEMENTATION.md)
+- [Array and pointer code generation](COMPILER_DEVELOPERS_GUIDE.md#indexed-addressing-and-cpu-targets)

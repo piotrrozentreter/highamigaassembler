@@ -1,6 +1,9 @@
 # CPU 68020 Implementation Plan
 
-Status: planning document for incremental 68020 support in HAS
+Status: living roadmap and capability reference for the opt-in 68020 target.
+Phases 0–2, the current 68020 arithmetic substitutions, and Phase 6 are
+implemented. Memory-indirect addressing and several optional ISA features remain
+deferred; see the phase statuses below.
 
 ## Purpose
 
@@ -9,8 +12,10 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
 ## Current Baseline
 
 - `--cpu` supports `68000` and `68020`, default is `68000`.
-- 68020 support currently covers scaled indexed addressing, full-extension
-  indexed addressing (Phase 1), and constant-index `.w` selection (Phase 2).
+- Phases 0–2 are implemented: target guardrails, scaled/full-extension indexed
+  addressing, and conservative constant-index `.w` selection. `.w` selection
+  is limited to constant indexes in the signed 16-bit range on supported 68020
+  access paths; bounded-loop range analysis is not implemented.
 - Phase 4 instruction substitution is implemented for arithmetic: `*`, `/`,
   `%` on `int`/`long` lower to native `muls.l`/`divsl.l` under `--cpu 68020`
   (`TargetSpec.supports_32bit_muldiv`), lifting the 68000-only signed 16-bit
@@ -42,10 +47,8 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
 - `PACK`/`UNPK` BCD: a digit lookup table beats them for score display.
 - 68881/68882 FPU: requires a coprocessor that plain 68020 A1200s lack;
   runtime Q16.16 (Phase 5.2) covers the same need without the dependency.
-- Memory-indirect addressing beyond Phase 3's scope: the mode costs multiple
-  bus cycles on real silicon, and HAS's arrow operator already lowers cleanly.
-  If Phase 3 cannot demonstrate a win, remove `supports_memory_indirect`
-  rather than leaving a permanently unused flag in `hasc/target.py`.
+- Memory-indirect addressing remains disabled; the capability flag is false
+  for both targets until a concrete use case and legality tests justify it.
 
 ## Guiding Constraints
 
@@ -54,92 +57,59 @@ Provide a practical, low-risk roadmap for expanding 68020 support while preservi
 - Prefer localized lowering changes over global peephole rewrites.
 - Gate each phase with compile+assemble checks.
 
-## Phase 0: Guardrails and Test Scaffolding
+## Phase 0: Guardrails and Test Scaffolding (implemented)
 
-Goal: lock in safety before adding new 68020 lowering behavior.
+The target model, paired CPU regression coverage, and shared indexed-address
+lowering contract are in place.
 
-Tasks:
-
-1. Add regression checks that ensure 68000 path stays unchanged.
-2. Add paired example checks (`--cpu 68000` vs `--cpu 68020`) for representative array/pointer/struct patterns.
-3. Document and enforce one canonical helper contract for indexed EA lowering.
-
-Primary files:
+Implementation references:
 
 - `hasc/indexed_address.py`
 - `hasc/codegen_indexed_address.py`
-- `docs/ARRAY_ACCESS_IMPLEMENTATION.md`
+- `docs/COMPILER_DEVELOPERS_GUIDE.md`
 
-Exit criteria:
+Regression coverage:
 
-- Existing 68000 example baseline unchanged.
-- Tests fail on accidental 68020 syntax in 68000 output.
+- Paired-target checks in `tests/test_cpu_target.py` and
+  `tests/test_codegen_68020_indexing.py` guard against accidental 68020
+  indexed forms in 68000 output.
 
-## Phase 1: Full-Extension Indexed Addressing (Highest ROI)
+## Phase 1: Full-Extension Indexed Addressing (implemented)
 
-Goal: support richer legal 68020 indexed forms and reduce fallback arithmetic.
+68020 scaled indexes and legal full-extension displacements are supported;
+68000 retains its unscaled fallback lowering.
 
-Tasks:
-
-1. Extend target capability model for 68020 full-extension support.
-2. Expand lowering API to carry:
-   - index size choice (`.w` or `.l`)
-   - displacement width handling
-   - extension metadata needed for legality checks
-3. Emit full-extension forms in dynamic indexing paths where legal.
-4. Keep 68000 path unchanged.
-
-Primary files:
+Implementation references:
 
 - `hasc/target.py`
 - `hasc/indexed_address.py`
 - `hasc/codegen_indexed_address.py`
 - `hasc/codegen.py`
 
-Tests/examples to add:
+Regression coverage is in `tests/test_codegen_68020_indexing.py`, including
+large displacements, struct fields, and expression evaluation order.
 
-1. Struct-array field offsets outside brief displacement range.
-2. Dynamic indexing with large effective displacements.
-3. 1D/2D array access and address-of paths with nested expressions.
+## Phase 2: `.w` Index Selection (implemented, constant-only)
 
-Exit criteria:
+The compiler selects `.w` only when a supported call site proves the original
+index is a constant in the signed 16-bit range. All uncertain/dynamic indexes
+remain `.l`; loop-bound or general value-range analysis is not present.
 
-- `-m68020` assembly succeeds for new forms.
-- Generated 68020 assembly uses fewer explicit scaling/arithmetic preludes where expected.
-- 68000 output remains stable.
-
-## Phase 2: `.w` Index Selection via Conservative Range Analysis
-
-Goal: use `.w` index when proven safe, otherwise keep `.l`.
-
-Tasks:
-
-1. Add conservative range metadata from validation/type analysis.
-2. Choose `.w` only when proof is strict (constants, bounded loops, safe casts).
-3. Fall back to `.l` for all uncertain cases.
-
-Primary files:
+Implementation references:
 
 - `hasc/validator.py`
 - `hasc/indexed_address.py`
 - `hasc/codegen_indexed_address.py`
 - `hasc/codegen.py`
 
-Tests/examples to add:
+Regression coverage checks signed-16-bit boundaries and verifies that dynamic
+indexes retain `.l`; see `tests/test_codegen_68020_indexing.py`.
 
-1. Safe bounded loops over small arrays.
-2. Signed boundary conditions around 16-bit limits.
-3. Negative cases where `.w` must not be selected.
+## Phase 3: Memory-Indirect Addressing (deferred; not implemented)
 
-Exit criteria:
-
-- No semantic regressions in index calculations.
-- `.w` appears only in proven-safe cases.
-- 68000 behavior unchanged.
-
-## Phase 3: Memory-Indirect Addressing (Medium ROI)
-
-Goal: add memory-indirect support for high-value patterns only.
+`TargetSpec.supports_memory_indirect` remains false for both targets. No
+memory-indirect form is emitted; retain the existing fallback unless a
+measurable user need justifies a separate implementation and test plan.
 
 Tasks:
 
@@ -163,9 +133,11 @@ Exit criteria:
 - Demonstrable instruction-count reduction in selected patterns.
 - Clean assembler acceptance with `-m68020`.
 
-## Phase 4: Targeted 68020 Instruction Substitutions (Optional)
+## Phase 4: Targeted 68020 Instruction Substitutions
 
-Goal: selective wins after addressing improvements are stable.
+Selected substitutions are implemented in codegen: 32-bit multiply/divide,
+signed byte extension, and other features listed in the baseline above and
+Phase 6 below. This is not a general "replace everything" pass.
 
 Good candidates:
 
@@ -186,165 +158,54 @@ Exit criteria:
 - Each substitution has focused tests and measurable benefit.
 - No broad regression risk from aggressive rewrites.
 
-## Phase 5: High-Value Follow-Ups (Planned)
+## Phase 5: Optional Follow-Ups
 
-Goal: close the remaining gaps that deliver measurable game-code wins, ordered
-by payoff-to-risk. Each step is independently shippable, gated on its own
-`TargetSpec` capability flag, and must leave `--cpu 68000` output byte-stable.
+Potential follow-ups that would need their own design, implementation, and
+tests. These are not current compiler capabilities.
 
 ### 5.1 Unsigned 32-bit `mulu.l` / `divul.l` (smallest gap, highest certainty)
 
-Status: implemented.
+Status: implemented. Explicitly unsigned local/parameter operands use
+`mulu.w`/`divu.w` under 68000 and `mulu.l`/`divul.l` under 68020 when the
+arithmetic operands qualify; mixed signed/unsigned operands retain signed
+lowering. Non-negative integer literals are neutral, but at least one operand
+must have an eligible unsigned type. See
+[OPERATORS.md](OPERATORS.md#unsigned-multiplydividemodulo) and
+`tests/test_codegen_68020_arithmetic.py` for the current contract.
 
-Problem: `TargetSpec.supports_32bit_muldiv` currently only drives the *signed*
-forms (`muls.l`, `divsl.l`) in `hasc/codegen.py`. Unsigned operands
-(`u8`/`u16`/`u32`/`UBYTE`/`UWORD`/`ULONG`) still take the signed 68020 path, so
-`u32` values above `$7FFFFFFF` compute incorrectly on both targets, and the
-68000 fallback still applies its signed 16-bit `_require_word_arith_operand()`
-restriction.
+### 5.2 Runtime fixed-point arithmetic
 
-Tasks:
-
-1. Reuse the existing `CodeGen._is_unsigned_expr()` helper (already used for
-   comparison lowering, `slo`/`sls`/`shi`/`shs`) to classify `*`, `/`, `%`.
-2. When both operands classify as unsigned and `supports_32bit_muldiv` is set,
-   emit `mulu.l` / `divul.l` instead of `muls.l` / `divsl.l`.
-3. On the 68000 path, emit `mulu.w` / `divu.w` for the unsigned case and relax
-   `_require_word_arith_operand()` to check the unsigned `0..65535` range
-   rather than the signed range.
-4. Mixed signed/unsigned operands keep the current signed lowering; record the
-   decision in a comment rather than silently widening.
-
-Primary files: `hasc/codegen.py`.
-
-Tests/examples: extend `tests/test_codegen_68020_arithmetic.py` with unsigned
-multiply/divide/modulo cases; add `examples/cpu68020_unsigned_muldiv.has`
-exercising `u32` values above the signed 32-bit boundary.
-
-Exit criteria: unsigned results correct on both targets; signed output for
-existing examples unchanged on both targets.
-
-Implementation notes:
-
-- `CodeGen._is_unsigned_arith_pair()` gates the unsigned lowering. A
-  non-negative integer literal is treated as signedness-neutral (representable
-  in both domains) so `u32_value * 10` still takes the unsigned path, but at
-  least one operand must be a declared unsigned value. A negative literal
-  forces the signed path.
-- The 68000 unsigned path uses `_require_unsigned_word_arith_operand()`, a
-  sibling of `_require_word_arith_operand()`, so signed diagnostics are
-  unchanged.
-- Verified: `--cpu 68000` and `--cpu 68020` output for all existing
-  `examples/*.has` is byte-identical to the pre-change output.
-
-### 5.2 64-bit `muls.l`/`divs.l` forms and runtime Q16.16 operators
-
-Problem: Q16.16 exists only as a compile-time literal conversion in
-`hasc/parser.py` (`_const_to_q16()`); there is no runtime fixed-point operator
-lowering at all. Games needing rotation, scaling, velocity integration, or
-perspective division must hand-write inline assembly today.
-
-The 68020 makes this cheap: `muls.l Dn,Dh:Dl` yields a full 64-bit product, and
-`divs.l Dr,Dq:Dr` accepts a 64-bit dividend, so an exact Q16.16 multiply is
-three instructions (multiply, shift the 64-bit result right by 16 across the
-register pair, keep the low long) instead of a shift/mask approximation.
-
-This is the largest item in Phase 5 and the only one that changes the language
-surface, so it splits into two independently reviewable steps:
-
-1. **Codegen capability first**: add `TargetSpec.supports_64bit_muldiv` and a
-   lowering helper that emits the `Dh:Dl` register-pair forms. The register
-   allocator must be able to reserve an adjacent scratch data register for the
-   high half; extend `_muldiv_remainder_reg()` or add a sibling helper rather
-   than hardcoding a pair.
-2. **Language surface second**: decide how a Q16.16 *runtime type* is spelled
-   (a distinct `q16` type is preferable to overloading `int`, because operator
-   semantics differ and silent reinterpretation of `int` would be a breaking
-   change). Then lower `*` and `/` on that type to the fixed-point sequence,
-   with a documented 68000 fallback using `muls.w` partial products.
-
-Do not start step 2 until step 1 is merged and tested in isolation.
-
-Primary files: `hasc/target.py`, `hasc/register_allocator.py`,
-`hasc/codegen.py`, then `hasc/parser.py`, `hasc/ast.py`, `hasc/validator.py`.
-
-Tests/examples: precision tests comparing the 68000 fallback against the 68020
-path for identical inputs (they must agree bit-for-bit, or the difference must
-be documented); overflow and negative-operand boundary cases; an
-`examples/q16_runtime_math.has` demo.
-
-Exit criteria: identical numeric results on both targets for the supported
-input range; no change to any program that does not use the new type.
+Status: deferred. HAS converts supported decimal literals to Q16.16 values at
+compile time, but has no runtime `q16` type or target-specific fixed-point
+operator lowering. Any future proposal must define overflow, precision,
+runtime-type, and 68000 fallback semantics before choosing an instruction
+sequence. Do not treat this section as an implemented CPU feature.
 
 ### 5.3 Bitfield instructions (`bfextu`/`bfexts`/`bfins`/`bfffo`/`bfset`/`bfclr`/`bftst`)
 
-Status: **blocked on language surface** (not a silent peephole).
+Status: **not implemented; requires a language surface** (not a silent peephole).
 
-Problem: packed-bit access currently lowers to shift/mask sequences on both
-targets. The 68020 does this in one instruction against a memory operand.
-
-Corpus evidence against a speculative rewriter: entity structs use one whole
-byte per flag (`move.b`/`tst.b` is already optimal; `bfextu` would be slower);
-HAM6 control bits are decoded offline in the Python importer; a repo-wide grep
-for mask patterns finds almost nothing that would fire. Do **not** ship
-shift+mask → BF* recognition until HAS gains an explicit packed-bit surface
-(struct bitfield syntax such as `flags:3`, or extract/insert builtins). Then:
-
-1. Add `TargetSpec.supports_bitfield_ops`.
-2. Lower constant offset/width to `bfextu`/`bfexts`/`bfins`/`bfset`/`bfclr`/
-   `bftst` on 68020; keep shift/mask on 68000.
-3. Keep `bfffo` out until there is a real bitmap-allocator API.
-
-Until that language work exists, optional CPU-neutral polish is `bset`/`bclr`
-for `x |= 1<<n` / `x &= ~(1<<n)` with constant `n` (both targets).
+No bitfield syntax or bitfield-instruction lowering is implemented. A future
+68020-only lowering needs an explicit language surface and tests; do not infer
+support from ordinary bitwise expressions.
 
 ### 5.4 Instruction-cache-aware alignment
 
-Status: **partial — data only (see Phase 6.3)**; loop-head I-cache padding cut.
+Status: **data-label alignment implemented; loop-head I-cache padding cut.**
 
-Section `cnop 0,4` after every `SECTION` already exists. Aligning `long`/`ptr`
-data labels to 4 bytes under `prefers_long_alignment` is implemented in Phase
-6.3. Emitting `cnop 0,4` before generated loop-head / branch-target labels is
-**cut**: compiler-generated loop bodies (~450+ bytes) overflow the 256-byte
-I-cache every iteration regardless of head alignment; the save is noise versus
-peephole regression risk. Hand-written `asm` blocks that would benefit already
-emit verbatim. Enabling CACR belongs in startup `asm`, not codegen.
+Long/pointer data-label alignment for 68020 is implemented in Phase 6.3.
+Compiler-generated loop-head instruction-cache padding and automatic cache
+control-register setup are not implemented and remain out of scope.
 
-### Phase 5 dependency order
+### Phase 5 status
 
 ```
-5.1 (done)
-5.2 step 1 ──> 5.2 step 2   (strictly sequential; step 2 deferred, see below)
-5.3 ──> blocked on bitfield language surface
-5.4 loop I-cache ──> cut; data align shipped as Phase 6.3
-Phase 6 (done) ──> long branches, stride mulu.l, long data align
+5.1 implemented
+5.2 deferred (runtime fixed-point design needed)
+5.3 not implemented (bitfield language surface needed)
+5.4 data alignment implemented; loop I-cache padding cut
+Phase 6 implemented
 ```
-
-### Post-5.1 reprioritisation (evidence from the game/demo corpus)
-
-After 5.1 landed, the remaining items were re-assessed against the actual code
-in `examples/games/` and `examples/demos/` rather than against the instruction
-set in the abstract. The original ordering did not survive that check.
-
-**5.2 is demoted to step 1 only.** `lib/math.s` already implements a software
-`Q16Mul` using the exact `muls.w` partial-product approach proposed as the
-68000 fallback, and `robots`, `caveride`, and `launchers` all declare the Q16
-API via `extern func` - with **zero call sites** between them. The only
-fixed-point physics in the repo (`examples/games/launchers/launchers.has`)
-deliberately uses **8.8 in a plain `int`**, which needs no new type and no
-64-bit multiply. 16 fractional bits only pay off for rotation, scaling, and
-perspective, none of which exist here. The 68000 fallback costs roughly 450-550
-cycles per multiply (~17% of a PAL frame at 50 multiplies), so a `q16` type
-would be 68020-only in practice - a poor shape for the one item that changes
-the language surface. Do step 1 (the `Dh:Dl` capability) because it is reusable
-and capability-gated; revisit step 2 only when a demo needs rotation or scaling.
-
-**5.3 is language-gated (not silently cut forever).** Corpus still has no
-packed-bit patterns that would fire a rewriter; revisit only after bitfield
-syntax or builtins exist. See §5.3 status above.
-
-**5.4 loop I-cache padding remains cut.** Data-side long alignment shipped as
-Phase 6.3. CACR / cache-enable stays a non-goal for the compiler.
 
 ## Phase 6: Emitted-code efficiency (implemented)
 
@@ -358,18 +219,18 @@ CPU-neutral branch-size selection (prefer `.s` when the displacement fits).
 (`_select_branch_sizes`) estimates PC-relative distances after other peephole
 passes and selects:
 
-- `.s` when |disp| ≤ 126 (both CPUs)
-- `.w` when |disp| fits a word displacement
+- `.s` when the conservative estimated displacement magnitude is at most 124
+  bytes (both CPUs)
+- `.w` when the estimate is at most 32766 bytes
 - `.l` when |disp| exceeds the word range **and** `supports_long_branches`
 
 Primary files: `hasc/target.py`, `hasc/peepholeopt.py`.
 
-### 6.2 Arbitrary-stride `mulu.l` — done
+### 6.2 Arbitrary-stride multiplication
 
-Non-`{1,2,4,8}` strides that fit in 16-bit immediates previously always used
-`mulu.w`, truncating large indices. On 68020 they now use `mulu.l #stride,Dn`
-gated by existing `supports_32bit_muldiv`. Real game structs (10–29 bytes)
-hit this path.
+For non-`{1,2,4,8,16,32}` strides through `32767`, 68020 uses
+`mulu.l #stride,Dn` so the index is not truncated to a word. The 68000
+fallback uses `mulu.w`; larger strides use full-width shift/add lowering.
 
 Primary file: `hasc/indexed_address.py`.
 
@@ -385,87 +246,17 @@ Primary files: `hasc/target.py`, `hasc/codegen.py`.
 Tests: `tests/test_codegen_68020_efficiency.py`, plus updated indexing /
 `test_cpu_target` coverage.
 
-### Higher-value work found during the 5.1 review (target-independent)
+### Deferred work
 
-The 68020 is not the bottleneck in generated game code; the code generator is.
-Measured against one `UpdateMissiles` loop iteration at `--cpu 68020`, each of
-these outranks everything remaining in Phase 5, and each benefits stock 68000
-most:
+- Runtime Q16.16 arithmetic and 64-bit multiply/divide are not implemented;
+  compile-time decimal-literal conversion is not a runtime fixed-point type.
+- Bitfield instructions need an explicit HAS bitfield representation before
+  they can be lowered safely.
+- Memory-indirect indexed addressing remains disabled by the target model.
+- Loop-head I-cache padding and compiler-managed CACR setup are out of scope.
 
-1. **68000 `ext.l` handling in 32-bit multiply lowering.**
-
-   *Inert `ext.l` removal: DONE.* The `ext.l` pair before `muls.w` and the
-   divisor `ext.l` before `divs.w` could never affect the result (those
-   instructions read only the low word of their source and overwrite the whole
-   destination), so they were removed - two instructions per multiply, one per
-   divide/modulo. Verified: `--cpu 68020` output unchanged apart from the
-   generated timestamp, `--cpu 68000` differs in 26 of the 114 examples that
-   compile for that target with every changed line an `ext.l` removal (105
-   removals, zero additions), and no example changed compile status.
-
-   *Making `strict16arith(on)` the default: BLOCKED.* With the default forced
-   on, 28 of 120 examples fail to compile on `--cpu 68000` (6 of those by
-   design: 5 negative-test fixtures plus the intentionally 68020-only
-   `cpu68020_32bit_arithmetic.has`). Strengthening the width prover was tried
-   first and is not sufficient, because the blocker is not the prover - it is
-   how narrow values are read:
-
-   - **(i) Global array element reads leave the upper register bits
-     undefined: DONE.** `emit_1d_array_read` / `emit_2d_array_read` used to emit
-     a bare `move.b`/`move.w` with no `clr.l`, mask, or extension, so bits above
-     the element width held whatever was in the register. This was a wrong-code
-     bug for *any* 32-bit use of a global `.b`/`.w` array element - `add.l`,
-     comparisons, argument passing - not just for mul/div. `emit_typed_pointer_read`
-     had the same defect and was fixed in the same pass. Narrow reads now
-     sign-extend (`ext.w`+`ext.l`, or `extb.l` on 68020) or zero-extend
-     (`clr.l` before the load, `andi.l` when the destination aliases the live
-     index register) according to the element type. See
-     [ARRAY_ACCESS_IMPLEMENTATION.md](ARRAY_ACCESS_IMPLEMENTATION.md).
-
-   - **(ii) Struct `.w`/`.b` fields are unconditionally zero-extended.** A
-     field holding `-1` reads back as `65535`. The root cause is that
-     `_build_struct_info` records only a size suffix and never signedness, so
-     HAS currently cannot express a signed word field at all. This affects
-     comparisons and `add.l` today, independently of strict mode. It is also
-     precisely why a word field such as `snake_body[i].x` cannot be proven to
-     fit signed 16-bit: the read genuinely yields `0..65535`, which `muls.w`
-     would reinterpret as negative above `32767`.
-
-   Fix (i) and (ii) first - both are real correctness bugs worth doing on their
-   own merits - then re-measure the blast radius and revisit the default.
-
-2. **`dbra` + register-allocated loop counters.** Bounded `for` counters live in
-   the stack frame and are reloaded and stored back every iteration - 6
-   instructions and 4 memory accesses for what `dbra` does in one. The compiler
-   emits no `dbra` anywhere.
-3. **Loop-invariant hoisting / CSE for address computation.** `&entity[i]` is
-   recomputed from scratch five times per iteration (~20 wasted instructions,
-   ~20% of the loop). This also neuters Phase 1: a 32-byte stride falls back to
-   `lsl.l #5`, so the scaled-index modes never engage on the very structures
-   they were built for.
-4. **Direct branch lowering for `&&`/`||` and comparisons** - replace the
-   `slt`/`andi.l`/`neg.b`/`bne` materialise-then-test pattern and the `-(a7)`
-   spills around immediate operands.
-5. **`bra.s`/`bcc.s` short-displacement selection** where a byte displacement
-   suffices.
-
-### Known latent defect (prerequisite for any new numeric type)
-
-`CodeGen._is_unsigned_expr` still classifies signedness as `not
-ast.is_signed(type)`, an allowlist *complement*. 5.1 replaced this with an
-explicit `UNSIGNED_ARITH_TYPES` allowlist for arithmetic, but comparison
-lowering was deliberately left alone to keep that change output-neutral.
-
-Today the bug is unreachable: `ast.is_signed()`'s enumeration happens to cover
-every signed type currently declarable, and the types that fall through
-(`ptr`, `APTR`, `bool`, `T*`) are ones where unsigned comparison is correct or
-immaterial. But the classification is deny-by-omission, so the moment a `q16`,
-`float`, `fixed`, or `i64` type is added to the type table without also editing
-`is_signed()`, every `<`/`>`/`<=`/`>=` on it silently becomes an unsigned
-branch. Harden `_is_unsigned_expr` to the same explicit allowlist (with an
-explicit pointer branch) before starting 5.2 step 2. Expected to be
-byte-identical on both targets today, so it is cheap to land and cheap to
-verify.
+Keep future proposals tied to a concrete language/runtime need, and update
+their target scope and tests before describing them as supported behavior.
 
 ## Validation Matrix (Run Per Phase)
 
@@ -486,19 +277,11 @@ vasmm68k_mot -m68020 -Fhunkexe -o /tmp/add-68020.o /tmp/add-68020.s
 
 ## Documentation Update Checklist Per Implementation PR
 
-1. Update feature behavior notes in `docs/ARRAY_ACCESS_IMPLEMENTATION.md`.
+1. Update indexed-addressing behavior in
+   `docs/COMPILER_DEVELOPERS_GUIDE.md#indexed-addressing-and-cpu-targets`.
 2. Update user-facing target notes in `docs/DEVELOPERS_GUIDE.md`.
 3. Add user-visible changes to `docs/CHANGELOG.md`.
 4. Include one minimal before/after assembly example in PR notes.
-
-## Suggested Delivery Order
-
-1. Phase 0 + Phase 1 together.
-2. Phase 2 after Phase 1 stabilizes.
-3. Phase 3 only if pattern-level wins are demonstrated.
-4. Phase 4, one substitution at a time.
-5. Phase 5 in the order 5.1, 5.3, 5.4 (any order, independent), then 5.2
-   step 1, then 5.2 step 2.
 
 ## Definition of Done (Overall)
 

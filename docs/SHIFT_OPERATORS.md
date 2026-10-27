@@ -48,17 +48,11 @@ offset = base + (index << 2);      // Array indexing by long size
 
 ## Common Use Cases
 
-### Fast Multiplication/Division
-```has
-x * 2  →  x << 1     (faster)
-x * 4  →  x << 2
-x * 8  →  x << 3
-x * 16 →  x << 4
-
-x / 2  →  x >> 1     (faster)
-x / 4  →  x >> 2
-x / 8  →  x >> 3
-```
+Shifts are useful for bit-field manipulation, masks, and explicit scaling where
+the desired semantics are a bit shift. The compiler also strength-reduces
+multiplication by selected powers of two. Do not replace signed division with
+an arithmetic right shift without checking negative-value rounding: the two
+operations are not generally equivalent.
 
 ### Bit Manipulation
 ```has
@@ -114,37 +108,20 @@ python -m hasc.cli examples/shift_operators_demo.has -o /tmp/shift_operators_dem
 python -m hasc.cli examples/bitwise_comprehensive.has -o /tmp/bitwise_comprehensive.s
 ```
 
-## Performance Notes
-
-Shift operations are very efficient on 68000:
-- Single cycle per shift amount
-- Prefer shifts over multiplication/division for powers of 2
-- `lsl.l #n,d0` (immediate shift) is faster than shift by register
-- Use constants where possible for best performance
-
 ## Operator Precedence
 
-Shift operators have higher precedence than comparison and bitwise operators:
-
-1. Postfix: `++` `--`
-2. Unary: `!` `-` `~` `&` `*`
-3. Multiplicative: `*` `/` `%`
-4. Additive: `+` `-`
-5. **Shift: `<<` `>>`**
-6. Bitwise AND: `&`
-7. Bitwise XOR: `^`
-8. Bitwise OR: `|`
-9. Comparison: `<` `<=` `>` `>=` `==` `!=`
-10. Logical AND: `&&`
-11. Logical OR: `||`
+Shifts bind less tightly than bitwise operators and more tightly than
+comparisons in the current grammar. See the complete table in
+[Operators](OPERATORS.md#operator-precedence-highest-to-lowest).
 
 Use parentheses for clarity when mixing operators:
 ```has
 result = (a << 2) + (b >> 1);    // Clear intent
 ```
 
-## Limitations
+## Semantics and Limits
 
-- Shift count must be 0-63 (hardware limit of 68000)
-- Right shift is arithmetic (sign-extending), not logical
+- The compiler does not range-check a runtime shift count. Use a value in the
+  Motorola 68k long-shift count range (0–63) when that is the intended result.
+- Right shift is arithmetic (sign-extending), not logical.
 - For unsigned right shift, use bitwise AND after shift: `(value >> 1) & 0x7FFFFFFF`

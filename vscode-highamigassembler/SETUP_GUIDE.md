@@ -27,7 +27,7 @@ cd vscode-highamigassembler
 vsce package
 
 # Install the .vsix file
-code --install-extension vscode-highamigassembler-0.1.0.vsix
+code --install-extension vscode-highamigassembler-0.1.1.vsix
 ```
 
 ### 2. Verify Installation

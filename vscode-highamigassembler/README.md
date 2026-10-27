@@ -2,7 +2,7 @@
 
 VS Code syntax highlighting and code navigation for the High Assembler (HAS) language targeting Motorola 68000 (Amiga).
 
-This extension provides a complete development environment for HAS language, including syntax highlighting, intelligent code navigation, and hover information for cross-file procedure lookups.
+This extension provides editor support for HAS, including syntax highlighting, code navigation, and hover information for procedure signatures.
 
 ## About This Extension
 
@@ -18,7 +18,7 @@ The extension enables developers to work efficiently with HAS source files by of
 ### Syntax Highlighting
 - Language commands vs declarations vs sections each use distinct colors (`call`/`if`/`return`, `proc`/`func`/`interrupt`, `code`/`data`/`bss`)
 - Preprocessor directives: `#include`, `#warning`/`#error`/`#pragma`, conditionals (`#if`/`#ifdef`/`#ifndef`/`#else`/`#endif`), and `#import`
-- `#import` kinds (`bob`/`palette`/`sprite`/`atlas`/`tileset`/`tilemap`), `as`, options (`planes=`, `add_word`, `match_palette=`, …), and labels
+- `#import` highlighting for `bob`/`palette`/`sprite`/`atlas`/`tileset`/`tilemap`/`font`, plus `as`, options, and labels
 - Inside `asm { }`: m68k instructions (e.g. `move`/`jsr`) vs assembler pseudo-ops (`dc`/`ds`/`xdef`/`section`) — different colors; case-insensitive
 - Number formats: decimal, `$`/`0x` hex, and `%` binary
 - Strings, comments (`//`), size suffixes (`.b`, `.w`, `.l`), registers (`d0`–`d7`, `a0`–`a7`, `sp`/`pc`)
@@ -138,6 +138,7 @@ TakeSystem:
 - Case sensitive (procedure names must match exactly)
 - Pattern matching only (simple regex, not full AST)
 - Workspace scope only (no external libraries)
+- `#import image`, `#import music`, and `#import sound` are not yet highlighted as import kinds
 - Shift+F12 opens only the first raw match; declarations may be counted twice
 - No rename refactoring yet
 
@@ -164,7 +165,7 @@ Issues, feature requests, and contributions are welcome! Please refer to the mai
 
 ## Related Resources
 
-- [High Amiga Assembler Main Project](https://github.com/highamiga/highamigassembler)
+- [High Amiga Assembler Main Project](https://github.com/rozensoftware/highamigaassembler)
 - [Amiga Motorola 68000 Documentation](https://en.wikipedia.org/wiki/Amiga)
 
 ## License

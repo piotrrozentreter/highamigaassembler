@@ -84,8 +84,8 @@ The extension searches in three locations:
 
 When you press Ctrl+Click or F12:
 1. Search current file
-2. Search all `.has` files in workspace
-3. Search all `.s` files in workspace
+2. Search up to 100 `.has` files in workspace
+3. Search up to 100 `.s` files in workspace
 4. Return first match found
 
 ---

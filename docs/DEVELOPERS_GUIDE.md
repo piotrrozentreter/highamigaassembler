@@ -237,12 +237,12 @@ External variables can be declared with optional type annotation:
 ```has
 code external_vars:
     extern var screen_buffer: byte*;        ; Pointer (no type annotation)
-    extern var frame_counter: int;          ; Typed: 32-bit signed
+    extern var frame_counter: int;          ; Typed: 32-bit signed longword
     extern var velocity_x: i16;             ; Typed: 16-bit signed, sign-extends
     extern var palette: u8*;                ; Typed: unsigned byte pointer
     
     proc update_frame() -> long {
-        frame_counter = frame_counter + 1;  ; Loads with sign-extension
+        frame_counter = frame_counter + 1;  ; Read as a 32-bit signed value
         return frame_counter;
     }
 ```
@@ -318,6 +318,26 @@ proc vec_add(__reg(d0) a: long, __reg(d1) b: long) -> long {
 - Use `__reg()` for **external functions** (library calls) where calling convention is fixed
 - Use `__reg()` with **native assembly-only procedures** where you directly access registers
 - For **HAS-body procedures**: Register parameters provide no optimization, stick with stack parameters
+
+---
+
+### Direct Register Access
+
+The `GetReg` and `SetReg` intrinsics read and write a register as a longword.
+The compiler accepts `d0`–`d7` and `a0`–`a3`:
+
+```has
+proc read_counter() -> long {
+    SetReg("d3", 42);
+    return GetReg("d3");
+}
+```
+
+`SetReg` can also be used as an expression; it evaluates to the value written.
+These operations do not preserve registers around calls. Use them only when
+you understand the generated code and the calling convention of any external
+routine involved. The supported register set and code-generation details are
+in the [compiler developer guide](COMPILER_DEVELOPERS_GUIDE.md#register-intrinsics).
 
 ---
 
@@ -1026,7 +1046,7 @@ code inline_asm:
 
 #error "Platform not supported for this build";
 
-#pragma lockreg(a5, a4);
+#pragma lockreg(d3);
 
 #pragma strict16arith(on);
 code math_safe:

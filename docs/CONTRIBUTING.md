@@ -4,9 +4,11 @@ Thank you for your interest in contributing to the HAS (High Assembler) project!
 
 ## Project Status
 
-**Version 0.9.10 - In Constant Development**
+**Version 0.9.10 - Feature-frozen; stabilizing toward 1.0.0**
 
-This compiler is actively being developed. We welcome contributions, bug reports, and suggestions.
+Bug reports, documentation improvements, examples, and regression fixes are
+welcome. Proposals that expand compiler behavior should account for the
+project's feature-frozen stabilization phase.
 
 ## How to Contribute
 
@@ -14,7 +16,7 @@ This compiler is actively being developed. We welcome contributions, bug reports
 
 When reporting bugs, please include:
 
-1. **HAS version**: Check with `python -m hasc.cli --help`
+1. **HAS version**: Check with `hasc --version` or `python -m hasc.cli --version`
 2. **Minimal reproducible example**: A small `.has` file that demonstrates the issue
 3. **Expected behavior**: What you expected to happen
 4. **Actual behavior**: What actually happened
@@ -44,7 +46,7 @@ For feature requests:
 
 ```bash
 # Clone the repository
-git clone [repository-url]
+git clone https://github.com/rozensoftware/highamigaassembler.git
 cd highamigaassembler
 
 # Create virtual environment
@@ -76,10 +78,12 @@ python -m hasc.cli examples/add.has -o test.s
 - Test with both valid and invalid inputs
 
 **Code Generator Changes** (`hasc/codegen.py`):
-- Follow 68000 calling convention
-- Use RegisterAllocator for register management
-- Generate comments in assembly for debugging
-- Test generated assembly with vasm
+- Preserve the declared HAS/external calling convention and use the register
+  allocator for scratch allocation where appropriate
+- Keep 68000 output free of 68020-only instructions; add paired target checks
+  when code generation may differ
+- Add or update tests for generated assembly; assemble with the matching vasm
+  CPU flag when available
 
 **Testing**:
 - Add new examples in `examples/` directory
@@ -149,7 +153,7 @@ Explain the problem this commit solves and why this approach was chosen.
 
 ### Areas Needing Help
 
-Current focus areas (Version 0.9.10):
+Useful stabilization and contribution areas:
 
 #### High Priority
 - **Regression Coverage**: Keep compiler and asset-import checks green on both CPU targets
@@ -161,10 +165,11 @@ Current focus areas (Version 0.9.10):
 - **Code Samples**: Validate more real-world programs on emulators and hardware
 - **Developer Tools**: Improve packaging, build scripts, and editor support
 
-#### Long-term
-- **Floating Point**: Software FP library integration
+#### Future proposals
+- **Runtime fixed-point operations**: Existing Q16.16 literal conversion is
+  compile-time; runtime arithmetic would need a separate design
 - **Nested Structs**: Enhanced struct support
-- **Cross-procedure Optimization**: Inlining, dead code elimination
+- **Cross-procedure Optimization**: For example, inlining
 - **Debugger Support**: Debug symbol generation
 
 ## Project Structure
@@ -176,24 +181,35 @@ hasc/
 ├── cli.py              # Command-line interface
 ├── parser.py           # Lark grammar and AST builder
 ├── ast.py              # AST node definitions
-├── validator.py        # Semantic analysis (2-pass)
-├── codegen.py          # Code generation
+├── validator.py        # Semantic validation and resolution
+├── target.py           # CPU target capabilities
+├── indexed_address.py  # Target-aware effective-address lowering
+├── codegen.py          # Code generation and register management
+├── codegen_indexed_address.py
+├── register_allocator.py
 ├── macro_expander.py   # Macro expansion support
 └── reachability.py     # Dead-procedure reachability analysis
 ```
 
 ### Compilation Pipeline
 
-1. **Parse**: Lark converts `.has` source to parse tree
-2. **Transform**: ASTBuilder creates typed AST
-3. **Validate**: Two-pass semantic checking
-4. **Generate**: Walk AST emitting 68000 assembly
+1. **Preprocess and parse**: Handle includes, conditional compilation, and
+   asset imports; Lark and `ASTBuilder` create the AST.
+2. **Validate and resolve**: Check declarations/uses and apply constant-resolved
+   dimensions and sizes.
+3. **Prune (optional)**: `--strip-unused-procs` performs conservative
+   call-graph reachability analysis.
+4. **Generate**: Emit assembly for `--cpu 68000` (default) or `--cpu 68020`.
+5. **Build (optional)**: `--exe`/`--adf` invoke the separately installed
+   assembler/linker and ADF tools.
 
 Key concepts:
 - **proc vs func**: `proc` defines, `func` forward-declares
 - **Sections**: code, data, bss separated
-- **Register Allocation**: d0-d7 (data), a0-a6 (address)
-- **Calling Convention**: Stack-based with register parameters
+- **Scratch Registers**: The allocator manages d0-d6 and a0-a2; d7 is reserved
+  for DBcc loop counters, while a6/a7 have frame/stack roles.
+- **Calling Convention**: Stack arguments by default; declared `__reg(...)`
+  parameters use registers.
 
 ## Questions?
 

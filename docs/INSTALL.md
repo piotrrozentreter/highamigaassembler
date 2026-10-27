@@ -21,7 +21,7 @@ py -m pipx ensurepath
 Open a new terminal, then install the wheel attached to the selected GitHub Release:
 
 ```powershell
-pipx install https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+pipx install https://github.com/rozensoftware/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
 ```
 
 Replace `X.Y.Z` with the release version. To upgrade, run `pipx upgrade hasc`; to remove HAS, run
@@ -30,7 +30,7 @@ Replace `X.Y.Z` with the release version. To upgrade, run `pipx upgrade hasc`; t
 As an alternative when pipx is unavailable:
 
 ```powershell
-py -m pip install --user https://github.com/piotrrozentreter/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
+py -m pip install --user https://github.com/rozensoftware/highamigaassembler/releases/download/vX.Y.Z/high_amiga_assembler-X.Y.Z-py3-none-any.whl
 ```
 
 ### 2. Verify Installation
