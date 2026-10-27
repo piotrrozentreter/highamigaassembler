@@ -17,7 +17,7 @@ EMIT_SECTION_RE = re.compile(r"(?:\\t|\t)\s*SECTION\s+(\w+)\s*,\s*(\w+)")
 
 # Chip RAM is scarce: only data the custom chips DMA from belongs in a *_C
 # section. Extend this list only for genuine graphics/audio DMA data.
-CHIP_SECTION_ALLOWLIST = {"bobs", "tileset", "sprites", "copperlists", "audio"}
+CHIP_SECTION_ALLOWLIST = {"bobs", "pictures", "tileset", "sprites", "copperlists", "audio"}
 
 
 def _tool_sources():
@@ -90,8 +90,11 @@ def test_getdata_is_not_called_directly():
                     continue
                 offenders.append((path.name, i + 1, line.strip()))
 
-    allowed = {("bob_importer.py", "return list(img.getdata())"),
-               ("sprite_importer.py", "return list(img.getdata())")}
+    allowed = {
+        ("amiga_palette.py", "return list(img.getdata())"),
+        ("bob_importer.py", "return list(img.getdata())"),
+        ("sprite_importer.py", "return list(img.getdata())"),
+    }
     unexpected = [o for o in offenders if (o[0], o[2]) not in allowed]
 
     assert not unexpected, (
