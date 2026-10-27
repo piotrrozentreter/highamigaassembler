@@ -1,4 +1,4 @@
-"""Tests for #import bob|palette preprocessor directive."""
+"""Tests for #import bob|palette|sprite|…|image preprocessor directives."""
 from pathlib import Path
 
 import pytest
@@ -487,6 +487,99 @@ class TestImportFont:
         assert gen_dir2 / "cached_font.s" == gen
         assert gen.read_text(encoding="utf-8") == first
         assert gen.stat().st_mtime == mtime1
+
+
+class TestImportImage:
+    def test_lores_generates_interleaved_and_palette(self, tmp_path: Path):
+        png = make_png(tmp_path / "title.png", 64, 48)
+        src = (
+            f'#import image "{png.name}" as title mode=lores dither=fs;\n'
+            "code main:\n"
+            "    proc main() -> int {\n"
+            "        var p: int = &title;\n"
+            "        var pal: int = &title_palette;\n"
+            "        return p;\n"
+            "    }\n"
+        )
+        mod, asm, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        assert mod.asset_imports[0].kind == "image"
+        assert mod.asset_imports[0].options["mode"] == "lores"
+        assert mod.asset_imports[0].options["dither"] == "fs"
+        assert set(mod.asset_imports[0].labels) == {"title", "title_palette"}
+        text = (gen_dir / "title.s").read_text(encoding="utf-8")
+        assert "SetGraphicsMode(0)" in text or "320x256" in text
+        assert "title_palette:" in text
+        assert "title:" in text
+        assert "line-interleaved" in text
+        assert text.count("DC.W") == 32
+        # 320*256*5/8 = 51200 bitmap bytes
+        assert "51200 bytes" in text
+        assert "lea title" in asm
+        assert "title_palette" in asm
+        assert "INCLUDE" in asm
+
+    def test_hires_size_and_16_colors(self, tmp_path: Path):
+        png = make_png(tmp_path / "wide.png", 80, 40)
+        src = (
+            f'#import image "{png.name}" as hi mode=hires dither=none;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        _, _, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        text = (gen_dir / "hi.s").read_text(encoding="utf-8")
+        assert "640x256" in text
+        assert "81920 bytes" in text
+        assert text.count("DC.W") == 16
+
+    def test_ham6_planar_size(self, tmp_path: Path):
+        png = make_png(tmp_path / "ham.png", 40, 30)
+        src = (
+            f'#import image "{png.name}" as pic mode=ham6;\n'
+            "code main:\n"
+            "    proc main() -> int {\n"
+            "        var p: int = &pic;\n"
+            "        return 0;\n"
+            "    }\n"
+        )
+        mod, _, gen_dir, _ = _compile(src, tmp_path, tmp_path)
+        assert mod.asset_imports[0].options["mode"] == "ham6"
+        text = (gen_dir / "pic.s").read_text(encoding="utf-8")
+        assert "HAM6" in text or "ham6" in text.lower() or "SetGraphicsMode(2)" in text
+        assert "61440 bytes" in text
+        assert "planar" in text.lower()
+        assert text.count("DC.W") == 16
+        # Denise reloads COLOR0 each scanline; encoder hold starts at black.
+        assert "\tDC.W\t$000\t; COLOR0" in text
+
+    def test_mode_alias_320x256x32(self, tmp_path: Path):
+        png = make_png(tmp_path / "a.png", 8, 8)
+        src = (
+            f'#import image "{png.name}" as pic mode=320x256x32;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        mod, _, _, _ = _compile(src, tmp_path, tmp_path)
+        assert mod.asset_imports[0].options["mode"] == "lores"
+
+    def test_rejects_bad_mode(self, tmp_path: Path):
+        png = make_png(tmp_path / "a.png", 8, 8)
+        src = (
+            f'#import image "{png.name}" as pic mode=ega;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        with pytest.raises(SyntaxError, match="image mode"):
+            parser.parse(src, base_dir=str(tmp_path), asset_outdir=str(tmp_path / "gen"))
+
+    def test_default_dither_is_fs(self, tmp_path: Path):
+        png = make_png(tmp_path / "a.png", 8, 8)
+        src = (
+            f'#import image "{png.name}" as pic mode=lores;\n'
+            "code main:\n"
+            "    proc main() -> int { return 0; }\n"
+        )
+        mod, _, _, _ = _compile(src, tmp_path, tmp_path)
+        assert mod.asset_imports[0].options["dither"] == "fs"
 
 
 class TestAssetImportHelpers:

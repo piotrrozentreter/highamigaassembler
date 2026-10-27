@@ -49,7 +49,7 @@ If a feature cannot preserve predictable assembly behavior, it belongs in toolin
 - **Macro System**: Define reusable code patterns
 - **@python Directive**: Execute Python code during compilation
 - **Include System**: Modular code organization with `#include`
-- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound …;` converts PNGs, [TexturePacker](https://www.codeandweb.com/texturepacker) / [Tiled](https://www.mapeditor.org/) exports, C64 charsets, ProTracker MODs, and samples at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` / `SetFont`, or integer IDs with `PlayMusic` / `PlaySound` (`lib/audio.s`)
+- **Asset Import**: `#import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound|image …;` converts PNGs, [TexturePacker](https://www.codeandweb.com/texturepacker) / [Tiled](https://www.mapeditor.org/) exports, C64 charsets, ProTracker MODs, samples, and full-screen pictures at compile time (via `tools/`), caches under `build/gen`, and `INCLUDE`s them into the output object — use `&label` with `CreateBob` / `LoadPalette` / `CreateSprite` / `DrawTilemap*` / `SetFont` / `ShowPicture`, or integer IDs with `PlayMusic` / `PlaySound` (`lib/audio.s`)
 - **Constants**: Compile-time constant evaluation
 - **Conditional Compilation**: `#ifdef`, `#ifndef`, `#else`, `#endif` gates using `const` values; `#if IDENT OP EXPR` for comparison-based gating (`==`/`=`, `!=`/`<>`, `>`, `<`, `>=`, `<=`)
 - **Pointer Arithmetic**: Address-of (`&`) and dereference (`*`) operators
@@ -722,9 +722,9 @@ This compiler is actively being developed. Current focus areas:
 
 ## 🛠️ Asset Conversion Tools
 
-The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap / font / music / sound when possible; use the CLI tools for strips and Makefile batch jobs.
+The `tools/` directory contains Python utilities for converting graphics and assets into Amiga-compatible formats. All tools generate assembly `.s` files. Prefer in-language `#import` for bob / palette / sprite / atlas / tileset / tilemap / font / music / sound / image when possible; use the CLI tools for strips and Makefile batch jobs.
 
-### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap / font / music / sound)
+### In-language `#import` (bob / palette / sprite / atlas / tileset / tilemap / font / music / sound / image)
 
 HAS can read exports from [TexturePacker](https://www.codeandweb.com/texturepacker) and
 [Tiled](https://www.mapeditor.org/) (and C64 charsets) directly at compile time. The
@@ -742,7 +742,9 @@ implemented import features are:
 #import font "assets/charset.bin" as c64_font;  // or .s / .asm
 #import music "assets/title.mod" as mus_title;
 #import sound "assets/laser.raw" as sfx_laser;  // or .iff / .8svx → extract_8svx
+#import image "assets/title.png" as title_pic mode=lores;  // or hires / ham6
 // call PlayMusic(mus_title); call PlaySound(sfx_laser);  // via lib/audio.s
+// call SetGraphicsMode(0); LoadPalette(&title_pic_palette, 32); ShowPicture(&title_pic);
 
 code main:
     proc init() -> int {
@@ -759,7 +761,7 @@ code main:
 ```
 
 - Generates `.s` under `build/gen` (override with `--asset-outdir`); skips rebuild when cache is fresh (`--force-assets` to regenerate).
-- Pillow is required for image kinds (`bob` / `palette` / `sprite` / `atlas` / `tileset`); `tilemap` and `font` do not need Pillow.
+- Pillow is required for image kinds (`bob` / `palette` / `sprite` / `atlas` / `tileset` / `image`); `tilemap` and `font` do not need Pillow.
 - **Audio:** `music` imports ProTracker `.mod` files; `sound` imports raw samples or uncompressed IFF 8SVX. Imports produce integer table IDs for `PlayMusic` / `PlaySound`, not addresses. Sound options are `period=`, `vol=`, `pri=`, and `channel=` (defaults: `443`, `32`, `64`, `-1`). For IFF extraction and the audio lifecycle, see [audio.s in the library reference](docs/LIBRARY_REFERENCE.md#audios--has-music--sfx-ptplayer-wrappers).
 - **bob:** `planes=1..5`, optional `add_word` (extra 16px word for blitter X-shift / cookie-cut), optional `dither=none|fs`.
 - **sprite:** fixed 2 bitplanes / 4 colours; PNG width must be exactly 16px (no silent resize).
@@ -768,6 +770,7 @@ code main:
 - **tileset:** PNG grid → chip (`DATA_C`) row-interleaved tiles; `tile_w`/`tile_h` in **8|16|32**, `planes`, optional `match_palette=<label>` (import that palette/atlas first; omits a private palette copy).
 - **tilemap:** Tiled orthogonal `.tmx` / `.json` → fast RAM (`DATA`) index grid; reads CSV, array, base64, zlib, and gzip layer data; `layer=` (single, 0-based indices) or `layers=all` / `layers=A,B` (multi-layer directory, 1-based indices, bottom→top); also supports `allow_flip`, `index_size=b|w`, and `firstgid=`. Draw with `lib/tilemap.s` (`DrawTilemapGrid` / `DrawTilemap` / `DrawTilemapMulti`) in **mode 0 only**.
 - **font:** C64 charset `.bin` (raw chargen) or `.s`/`.asm` (`dc.b` / `.byte`) → 5-plane Amiga font table (`SECTION fonts,DATA`, ASCII 32–127); use with `SetFont(&label)`. No options.
+- **image:** PNG/JPEG/GIF/BMP/IFF → full-screen chip picture for `ShowPicture` (+ `label_palette` for `LoadPalette`). `mode=lores|hires|ham6` (default `lores`; aliases `320x256x32`, `640x256x16`, `mode0|1|2`). Lores = mode 0 (320×256×32, 5 planes, line-interleaved, 51200 bytes); hires = mode 1 (640×256×16, 4 planes, line-interleaved, 81920 bytes); ham6 = mode 2 (320×256, 6 planes, pure planar, 61440 bytes). Optional `dither=none|fs|ordered` (default **`fs`** / Floyd–Steinberg). Source is resized to the target resolution. Not a BOB — do not pass to `CreateBob`.
 
 How-to (import + draw): [docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md#guide-multi-layer-tiled-maps),
 API: [docs/LIBRARY_REFERENCE.md](docs/LIBRARY_REFERENCE.md#tilemaps--tiled-map-blit).

@@ -1,0 +1,22 @@
+// Regression: #import image → ShowPicture-ready planar + palette
+#import image "assets/import_image_tiny.png" as title_pic mode=lores dither=fs;
+
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func LoadPalette(palette: ptr, count: int) -> int;
+    extern func ShowPicture(picture: ptr) -> int;
+    extern func UpdateCopperList() -> int;
+
+    public main;
+
+    proc main() -> int {
+        var r: int;
+        r = SetGraphicsMode(0);
+        if (r < 0) {
+            return -1;
+        }
+        call LoadPalette(&title_pic_palette, 32);
+        call ShowPicture(&title_pic);
+        call UpdateCopperList();
+        return 0;
+    }

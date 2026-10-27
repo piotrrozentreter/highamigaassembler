@@ -494,6 +494,8 @@ def export_iff_as_bob(iff_path: str, out_label: str, add_word: bool = False, ham
                     base_palette.append((r >> 4, g >> 4, b >> 4))
                 else:
                     base_palette.append((0, 0, 0))
+            # HAM scanlines reload COLOR0; encoder starts hold at black — keep COLOR0 $000.
+            base_palette[0] = (0, 0, 0)
 
             asm = f"; HAM6 picture data for mode 2 (320x256, 6 bitplanes, 61440 bytes)\n"
             asm += f"; Converted from HAM8 source to HAM6 planar layout\n"

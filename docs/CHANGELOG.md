@@ -4,6 +4,17 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- **`#import image`:** compile-time full-screen picture import (PNG/JPEG/GIF/BMP/IFF)
+  via `tools/image_importer.py`. Emits chip `DATA_C` bitmap + `label_palette` for
+  `SetGraphicsMode` + `LoadPalette` + `ShowPicture` (not `CreateBob`). Modes:
+  `lores` / `320x256x32` (mode 0, 5 planes, line-interleaved), `hires` /
+  `640x256x16` (mode 1, 4 planes, line-interleaved), `ham6` (mode 2, planar).
+  Default dither is Floyd–Steinberg (`dither=fs`; also `none`/`ordered`). Example:
+  `#import image "title.png" as title_pic mode=lores;`. Regression:
+  [import_image_load_test.has](../examples/tests/compiler/import_image_load_test.has).
+
 ## [0.9.10] - 2026-10-21
 
 ### Fixed

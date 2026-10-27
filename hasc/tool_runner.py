@@ -55,6 +55,10 @@ def iff_importer() -> None:
     _run_tool("iff_importer.py")
 
 
+def image_importer() -> None:
+    _run_tool("image_importer.py")
+
+
 def q16_helper() -> None:
     _run_tool("q16_helper.py")
 

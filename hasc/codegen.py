@@ -4733,7 +4733,7 @@ class CodeGen:
         output_path = getattr(self, "output_path", None)
         self.emit("")
         self.emit(
-            "; ---- #import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound "
+            "; ---- #import bob|palette|sprite|atlas|tileset|tilemap|font|music|sound|image "
             "assets (auto-generated) ----"
         )
         for asset in assets:

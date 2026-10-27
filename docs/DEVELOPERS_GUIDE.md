@@ -1063,9 +1063,9 @@ IDs** for `PlayMusic` / `PlaySound` (not `&` pointers); see `lib/audio.s` and
 [LIBRARY_REFERENCE.md](LIBRARY_REFERENCE.md#audios--has-music--sfx-ptplayer-wrappers).
 
 Kinds: `bob`, `palette`, `sprite`, `atlas`, `tileset`, `tilemap`, `font`,
-`music`, `sound`. Import a palette/atlas **before** a tileset that uses
-`match_palette=`. Pillow is required for image kinds; `tilemap`, `font`,
-`music`, and `sound` do not need it. Full option tables:
+`music`, `sound`, `image`. Import a palette/atlas **before** a tileset that uses
+`match_palette=`. Pillow is required for image kinds (including `image`);
+`tilemap`, `font`, `music`, and `sound` do not need it. Full option tables:
 [SPRITE_TOOLS_QUICK_REFERENCE.md](SPRITE_TOOLS_QUICK_REFERENCE.md) and the README
 Asset Conversion section.
 
@@ -1074,6 +1074,35 @@ Asset Conversion section.
 #import sound "assets/laser.raw" as sfx_laser;
 #import sound "assets/boom.iff" as sfx_boom vol=40 pri=120;
 ```
+
+##### Example: full-screen `#import image`
+
+PNG/IFF → chip planar picture for `ShowPicture` (not a BOB). Modes match
+`SetGraphicsMode`: `lores` (0 / 320×256×32), `hires` (1 / 640×256×16),
+`ham6` (2). Default dither is Floyd–Steinberg (`fs`).
+
+```has
+#import image "assets/title.png" as title_pic mode=lores;
+
+code main:
+    extern func SetGraphicsMode(mode: int) -> int;
+    extern func LoadPalette(palette: ptr, count: int) -> int;
+    extern func ShowPicture(picture: ptr) -> int;
+    extern func UpdateCopperList() -> int;
+
+    proc show() -> int {
+        if (SetGraphicsMode(0) < 0) {
+            return -1;
+        }
+        call LoadPalette(&title_pic_palette, 32);
+        call ShowPicture(&title_pic);
+        call UpdateCopperList();
+        return 0;
+    }
+```
+
+Working regression: [import_image_load_test.has](../examples/tests/compiler/import_image_load_test.has).
+See also [HAM6_SUPPORT.md](HAM6_SUPPORT.md).
 
 ##### Example: BOB
 

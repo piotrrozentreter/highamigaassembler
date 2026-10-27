@@ -122,12 +122,38 @@ proc main() -> int {
 - 0: Success
 - -1: Error (null pointer, no screen selected, or invalid mode)
 
+## `#import image` (preferred)
+
+Prefer the in-language directive for full-screen pictures (PNG/JPEG/IFF → chip planar):
+
+```has
+#import image "assets/title.png" as title_pic mode=ham6;       // SetGraphicsMode(2)
+#import image "assets/lores.png" as lores_pic mode=lores;     // SetGraphicsMode(0), 32 colours
+#import image "assets/hires.png" as hires_pic mode=hires;     // SetGraphicsMode(1), 16 colours
+
+code main:
+    proc show() -> void {
+        call SetGraphicsMode(2);
+        call LoadPalette(&title_pic_palette, 16);
+        call ShowPicture(&title_pic);
+        call UpdateCopperList();
+    }
+```
+
+- `mode=lores|hires|ham6` (aliases `320x256x32`, `640x256x16`, `mode0|1|2`); default `lores`
+- `dither=none|fs|ordered` (default `fs` / Floyd–Steinberg)
+- Emits `&label` (bitmap) and `&label_palette`; use with `ShowPicture` / `LoadPalette`, not `CreateBob`
+- HAM6 always forces palette COLOR0 to `$000` (black): Denise reloads COLOR0 each
+  scanline, and the encoder starts hold-and-modify from black — a non-black COLOR0
+  causes left-edge colour stripes
+- Tool/CLI: `tools/image_importer.py` (`has-image-importer`)
+
 ## IFF ILBM HAM6 Import
 
-The `iff_importer.py` tool now supports reading and importing HAM6 IFF files:
+The `iff_importer.py` tool still supports reading and importing HAM6 IFF files:
 
 ```bash
-python tools/iff_importer.py image.iff --label-prefix bob
+.venv/bin/python3 tools/iff_importer.py image.iff --label-prefix bob
 ```
 
 ### Features
