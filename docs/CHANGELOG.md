@@ -4,6 +4,8 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-27
+
 ### Added
 
 - **`#import image`:** compile-time full-screen picture import (PNG/JPEG/GIF/BMP/IFF)
