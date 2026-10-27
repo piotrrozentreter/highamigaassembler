@@ -2,6 +2,8 @@
 
 **Version:** 0.9.10
 
+**Release status:** Feature-frozen; stabilizing toward 1.0.0.
+
 **We invite you to join the community!** If you're interested in Amiga development, compiler design, or just want to contribute to an exciting project, we'd love to have you on board. Whether you're fixing bugs, adding features, improving documentation, or testing - all contributions are welcome!
 
 **HAS (High Assembler)** is a Python-based compiler that translates a high-level assembly language targeting the Motorola 68000 processor (Amiga). It provides modern programming constructs while maintaining full control over the generated assembly code.
