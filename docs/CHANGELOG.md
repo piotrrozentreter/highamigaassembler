@@ -4,6 +4,14 @@ All notable changes to the HAS (High Assembler) project will be documented in th
 
 ## [Unreleased]
 
+### Added
+
+- [Compiler diagnostic reference](COMPILER_DIAGNOSTICS.md) covering warnings,
+  errors, asset-helper and toolchain failures, with causes, remedies and source
+  links. Clarifies the pointer-parameter warning's naming heuristic and why
+  integer-held heap addresses must not blindly be changed to address-of arguments.
+  Documentation only; compiler behavior is unchanged.
+
 ## [0.9.11] - 2026-10-27
 
 ### Added
