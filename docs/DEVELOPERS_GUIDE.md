@@ -184,7 +184,7 @@ code procedures:
     
     proc main() -> long {
         var result: long = add(5, 3);
-        return result;  ; Returns 8
+        return result;  // Returns 8
     }
 ```
 
@@ -196,21 +196,21 @@ code multi_param:
     }
     
     proc main() -> long {
-        return multiply(2, 3, 4);  ; Returns 24
+        return multiply(2, 3, 4);  // Returns 24
     }
 ```
 
 ### Forward Declarations
 ```has
 code forward_decl:
-    ; Declare function before defining it
+    // Declare function before defining it
     func helper(n: long) -> long;
     
     proc main() -> long {
         return helper(10);
     }
     
-    ; Define it later in the code section
+    // Define it later in the code section
     proc helper(n: long) -> long {
         return n * 2;
     }
@@ -219,7 +219,7 @@ code forward_decl:
 ### External Functions
 ```has
 code external:
-    ; Import from external module
+    // Import from external module
     extern func print_int(value: long) -> long;
     extern func get_time() -> long;
     
@@ -236,13 +236,13 @@ External variables can be declared with optional type annotation:
 
 ```has
 code external_vars:
-    extern var screen_buffer: byte*;        ; Pointer (no type annotation)
-    extern var frame_counter: int;          ; Typed: 32-bit signed longword
-    extern var velocity_x: i16;             ; Typed: 16-bit signed, sign-extends
-    extern var palette: u8*;                ; Typed: unsigned byte pointer
+    extern var screen_buffer: byte*;        // Pointer (no type annotation)
+    extern var frame_counter: int;          // Typed: 32-bit signed longword
+    extern var velocity_x: i16;             // Typed: 16-bit signed, sign-extends
+    extern var palette: u8*;                // Typed: unsigned byte pointer
     
     proc update_frame() -> long {
-        frame_counter = frame_counter + 1;  ; Read as a 32-bit signed value
+        frame_counter = frame_counter + 1;  // Read as a 32-bit signed value
         return frame_counter;
     }
 ```
@@ -255,14 +255,14 @@ code external_vars:
 Sign-extension is crucial for correct comparisons on signed extern globals:
 
 ```has
-extern var dx: i8;     ; Signed displacement - sign-extends on load
-extern var flags: u8;  ; Unsigned flags - zero-extends on load
+extern var dx: i8;     // Signed displacement - sign-extends on load
+extern var flags: u8;  // Unsigned flags - zero-extends on load
 
 proc check() -> int {
-    if (dx < 0) {      ; Correctly detects negative displacement
+    if (dx < 0) {      // Correctly detects negative displacement
         return -1;
     }
-    if (flags < 0) {   ; Always false: zero-extended value is always >= 0
+    if (flags < 0) {   // Always false: zero-extended value is always >= 0
         return -1;
     }
     return 0;
@@ -274,9 +274,9 @@ See [examples/extern_signed_byte_test.has](../examples/extern_signed_byte_test.h
 ### Register Parameters (Performance)
 ```has
 code register_params:
-    ; Allocate parameters to specific registers for speed
+    // Allocate parameters to specific registers for speed
     proc fast_add(__reg(d0) a: long, __reg(d1) b: long) -> long {
-        return a + b;  ; Arguments already in d0 and d1
+        return a + b;  // Arguments already in d0 and d1
     }
     
     proc main() -> long {
@@ -307,9 +307,9 @@ When used with HAS (high-level) code bodies, register parameters provide **minim
 
 ```has
 proc vec_add(__reg(d0) a: long, __reg(d1) b: long) -> long {
-    ; d0 and d1 are saved to stack in prologue
-    ; Compiler loads them from stack for each use
-    ; No performance advantage over stack parameters
+    // d0 and d1 are saved to stack in prologue
+    // Compiler loads them from stack for each use
+    // No performance advantage over stack parameters
     return a + b;
 }
 ```
@@ -394,15 +394,15 @@ This applies to:
 
 ```has
 data globals:
-    signed_byte: i8 = 0xFB      ; -5 (sign-extended on load)
-    legacy_byte.b = 0xFB        ; 251 (zero-extended on load)
+    signed_byte: i8 = 0xFB      // -5 (sign-extended on load)
+    legacy_byte.b = 0xFB        // 251 (zero-extended on load)
 
 code checks:
     proc test() -> int {
-        if (signed_byte < 0) {   ; TRUE: signed_byte loads as -5
+        if (signed_byte < 0) {   // TRUE: signed_byte loads as -5
             return -1;
         }
-        if (legacy_byte < 0) {   ; FALSE: legacy_byte loads as 251 (always >= 0)
+        if (legacy_byte < 0) {   // FALSE: legacy_byte loads as 251 (always >= 0)
             return 0;
         }
         return 0;
@@ -420,12 +420,12 @@ HAS supports two forms of global variable declaration in `data` sections, each w
 #### Legacy Form (Zero-Extends)
 ```has
 data globals:
-    counter = 100        ; Initialize with value (always zero-extends)
-    name = "Game"        ; String data
+    counter = 100        // Initialize with value (always zero-extends)
+    name = "Game"        // String data
 
 code variables:
     proc increment() -> long {
-        ; Access global from data section
+        // Access global from data section
         return counter;
     }
     
@@ -438,8 +438,8 @@ The legacy form uses no type annotation. When loaded, byte/word values are alway
 
 ```has
 data legacy_globals:
-    myByte.b = 0xFB     ; 0xFB is loaded as 251 (unsigned)
-    myWord.w = 0xFFFF   ; 0xFFFF is loaded as 65535 (unsigned)
+    myByte.b = 0xFB     // 0xFB is loaded as 251 (unsigned)
+    myWord.w = 0xFFFF   // 0xFFFF is loaded as 65535 (unsigned)
 ```
 
 #### Typed Form (Sign-Extends for Signed Types)
@@ -448,10 +448,10 @@ data legacy_globals:
 
 ```has
 data typed_globals:
-    signedByte: i8 = 0xFB    ; -5 (sign-extended)
-    signedWord: i16 = 0xFFFF ; -1 (sign-extended)
-    unsignedByte: u8 = 0xFB  ; 251 (zero-extended)
-    counter: int = 100       ; 32-bit signed (no extension needed)
+    signedByte: i8 = 0xFB    // -5 (sign-extended)
+    signedWord: i16 = 0xFFFF // -1 (sign-extended)
+    unsignedByte: u8 = 0xFB  // 251 (zero-extended)
+    counter: int = 100       // 32-bit signed (no extension needed)
 ```
 
 When loaded, signed-typed values use sign-extension:
@@ -467,16 +467,16 @@ When loaded, signed-typed values use sign-extension:
 **Example: Sign Difference**
 ```has
 data values:
-    signed: i8 = -5      ; 0xFB, loads as -5 → comparisons like "if (signed < 0)" work
-    legacy: byte.b = -5  ; 0xFB, loads as 251 → comparisons like "if (legacy < 0)" fail
+    signed: i8 = -5      // 0xFB, loads as -5 → comparisons like "if (signed < 0)" work
+    legacy: byte.b = -5  // 0xFB, loads as 251 → comparisons like "if (legacy < 0)" fail
 
 code checks:
     proc test() -> int {
         if (signed < 0) {
-            return -1;   ; Executes: signed loads as -5
+            return -1;   // Executes: signed loads as -5
         }
         if (legacy < 0) {
-            return -1;   ; Never executes: legacy loads as 251
+            return -1;   // Never executes: legacy loads as 251
         }
         return 0;
     }
@@ -496,7 +496,7 @@ code locals:
     }
     
     proc main() -> long {
-        return process(8);  ; Returns 50
+        return process(8);  // Returns 50
     }
 ```
 
@@ -505,12 +505,12 @@ code locals:
 const MAX_SIZE = 1024;
 const BUFFER_SIZE = 256;
 const TOTAL_SIZE = MAX_SIZE + BUFFER_SIZE;
-const TRUE = 1;      ; Boolean constants for readability
+const TRUE = 1;      // Boolean constants for readability
 const FALSE = 0;
 
 code with_constants:
     proc allocate() -> long {
-        ; Constants substituted at compile time
+        // Constants substituted at compile time
         return MAX_SIZE;
     }
 ```
@@ -523,12 +523,12 @@ representation.
 ### Variable Initialization
 ```has
 data initialized:
-    x = 10              ; Initialize to value
-    y[10]               ; Array uninitialized
-    z = { 1, 2, 3 }    ; Array initialized
+    x = 10              // Initialize to value
+    y[10]               // Array uninitialized
+    z = { 1, 2, 3 }    // Array initialized
 
 bss uninitialized:
-    temp[100]           ; Uninitialized memory
+    temp[100]           // Uninitialized memory
 ```
 
 ---
@@ -538,8 +538,8 @@ bss uninitialized:
 ### Single-Dimensional Arrays
 ```has
 data arrays:
-    numbers[10]                      ; Declare array of 10 longs
-    scores = { 100, 200, 300 }      ; Initialize with values
+    numbers[10]                      // Declare array of 10 longs
+    scores = { 100, 200, 300 }      // Initialize with values
 
 code array_access:
     proc get_element(index: long) -> long {
@@ -586,7 +586,7 @@ data grid:
 
 code array_const_dims:
     proc init_grid() -> long {
-        ; Array dimensions can reference constants
+        // Array dimensions can reference constants
         return ROWS;
     }
 ```
@@ -600,9 +600,9 @@ code array_const_dims:
 code pointer_basics:
     proc pointers() -> long {
         var value: long = 42;
-        var ptr: long* = &value;    ; Get address of value
+        var ptr: long* = &value;    // Get address of value
         
-        return *ptr;                 ; Dereference: returns 42
+        return *ptr;                 // Dereference: returns 42
     }
     
     proc main() -> long {
@@ -619,9 +619,9 @@ code pointer_arithmetic:
         arr[1] = 200;
         
         var ptr: long* = &arr[0];
-        var next_elem: long = *(ptr + 1);  ; Next element via pointer
+        var next_elem: long = *(ptr + 1);  // Next element via pointer
         
-        return next_elem;  ; Returns 200
+        return next_elem;  // Returns 200
     }
 ```
 
@@ -629,14 +629,14 @@ code pointer_arithmetic:
 ```has
 code dereferencing:
     proc modify_via_pointer(ptr: long*) -> long {
-        *ptr = 999;      ; Modify value at pointer
-        return *ptr;     ; Read modified value
+        *ptr = 999;      // Modify value at pointer
+        return *ptr;     // Read modified value
     }
     
     proc main() -> long {
         var x: long = 1;
         modify_via_pointer(&x);
-        return x;        ; Returns 999
+        return x;        // Returns 999
     }
 ```
 
@@ -645,9 +645,9 @@ code dereferencing:
 code null_checks:
     proc safe_deref(ptr: long*) -> long {
         if (ptr == 0) {
-            return -1;      ; Null pointer
+            return -1;      // Null pointer
         }
-        return *ptr;        ; Safe dereference
+        return *ptr;        // Safe dereference
     }
 ```
 
@@ -671,14 +671,14 @@ code game_logic:
     proc update_player(index: int) -> void {
         var p: Player*;
         
-        p = &player[index];     ; Get pointer to array element
+        p = &player[index];     // Get pointer to array element
         
-        ; Arrow operator (recommended - clean and readable)
+        // Arrow operator (recommended - clean and readable)
         p->x = p->x + 5;
         p->y = p->y + 10;
         p->health = p->health - 1;
         
-        ; Equivalent explicit dereference (also works)
+        // Equivalent explicit dereference (also works)
         (*p).x = (*p).x + 5;
         (*p).y = (*p).y + 10;
     }
@@ -687,12 +687,12 @@ code game_logic:
 **Performance Benefit:** Struct pointers cache the address calculation, reducing code size and execution time when accessing multiple fields:
 
 ```has
-; Without pointer: 6 array index calculations
+// Without pointer: 6 array index calculations
 player[i].x = 10;
 player[i].y = 20;
 player[i].health = 100;
 
-; With pointer: 1 address calculation + reuse
+// With pointer: 1 address calculation + reuse
 p = &player[i];
 p->x = 10;
 p->y = 20;
@@ -754,7 +754,7 @@ code while_loops:
         while (n > 0) {
             n = n - 1;
         }
-        return n;  ; Returns 0
+        return n;  // Returns 0
     }
     
     proc sum_series(limit: long) -> long {
@@ -775,7 +775,7 @@ code do_while:
     proc run_once(n: long) -> long {
         do {
             n = n * 2;
-        } while (n < 0);  ; Body always executes once
+        } while (n < 0);  // Body always executes once
         
         return n;
     }
@@ -787,7 +787,7 @@ code do_while:
     proc run_once(n: long) -> long {
         do {
             n = n * 2;
-        } while (n < 0);  ; Body always executes once
+        } while (n < 0);  // Body always executes once
 
         return n;
     }
@@ -806,7 +806,7 @@ code for_loops:
     
     proc countdown(start: long) -> long {
         for i = start downto 0 {
-            ; Process each i
+            // Process each i
         }
         return 0;
     }
@@ -818,7 +818,7 @@ code loop_control:
     proc find_value(arr: long*, len: long, target: long) -> long {
         for i = 0 to len {
             if (arr[i] == target) {
-                break;      ; Exit loop early
+                break;      // Exit loop early
             }
         }
         return i;
@@ -828,7 +828,7 @@ code loop_control:
         var sum: long = 0;
         for i = 0 to limit {
             if (i % 2 == 0) {
-                continue;   ; Skip to next iteration
+                continue;   // Skip to next iteration
             }
             sum = sum + i;
         }
@@ -844,12 +844,12 @@ code loop_control:
 ```has
 code arithmetic:
     proc math_ops(a: long, b: long) -> long {
-        var add: long = a + b;        ; Addition
-        var sub: long = a - b;        ; Subtraction
-        var mul: long = a * b;        ; Multiplication
-        var div: long = a / b;        ; Division
-        var mod: long = a % b;        ; Modulo
-        var neg: long = -a;           ; Negation
+        var add: long = a + b;        // Addition
+        var sub: long = a - b;        // Subtraction
+        var mul: long = a * b;        // Multiplication
+        var div: long = a / b;        // Division
+        var mod: long = a % b;        // Modulo
+        var neg: long = -a;           // Negation
         
         return add;
     }
@@ -859,12 +859,12 @@ code arithmetic:
 ```has
 code comparisons:
     proc compare(a: long, b: long) -> long {
-        if (a == b) { return 1; }       ; Equal
-        if (a != b) { return 1; }       ; Not equal
-        if (a < b) { return 1; }        ; Less than
-        if (a <= b) { return 1; }       ; Less or equal
-        if (a > b) { return 1; }        ; Greater than
-        if (a >= b) { return 1; }       ; Greater or equal
+        if (a == b) { return 1; }       // Equal
+        if (a != b) { return 1; }       // Not equal
+        if (a < b) { return 1; }        // Less than
+        if (a <= b) { return 1; }       // Less or equal
+        if (a > b) { return 1; }        // Greater than
+        if (a >= b) { return 1; }       // Greater or equal
         
         return 0;
     }
@@ -874,13 +874,13 @@ code comparisons:
 ```has
 code logical:
     proc logic(a: long, b: long) -> long {
-        if (a > 0 && b > 0) {           ; Logical AND
+        if (a > 0 && b > 0) {           // Logical AND
             return 1;
         }
-        if (a < 0 || b < 0) {           ; Logical OR
+        if (a < 0 || b < 0) {           // Logical OR
             return 2;
         }
-        if (!a) {                        ; Logical NOT
+        if (!a) {                        // Logical NOT
             return 3;
         }
         return 0;
@@ -891,12 +891,12 @@ code logical:
 ```has
 code bitwise:
     proc bit_ops(a: long, b: long) -> long {
-        var and: long = a & b;        ; Bitwise AND
-        var or: long = a | b;         ; Bitwise OR
-        var xor: long = a ^ b;        ; Bitwise XOR
-        var not: long = ~a;           ; Bitwise NOT
-        var lshift: long = a << 2;    ; Left shift
-        var rshift: long = a >> 2;    ; Right shift
+        var and: long = a & b;        // Bitwise AND
+        var or: long = a | b;         // Bitwise OR
+        var xor: long = a ^ b;        // Bitwise XOR
+        var not: long = ~a;           // Bitwise NOT
+        var lshift: long = a << 2;    // Left shift
+        var rshift: long = a >> 2;    // Right shift
         
         return xor;
     }
@@ -907,15 +907,15 @@ code bitwise:
 code assignments:
     proc assign_ops() -> long {
         var x: long = 10;
-        x = x + 5;          ; x = 15
-        x += 3;             ; x = 18
-        x -= 2;             ; x = 16
-        x *= 2;             ; x = 32
-        x /= 4;             ; x = 8
-        x %= 3;             ; x = 2
-        x &= 255;           ; x = x & 255
-        x |= 128;           ; x = x | 128
-        x ^= 64;            ; x = x ^ 64
+        x = x + 5;          // x = 15
+        x += 3;             // x = 18
+        x -= 2;             // x = 16
+        x *= 2;             // x = 32
+        x /= 4;             // x = 8
+        x %= 3;             // x = 2
+        x &= 255;           // x = x & 255
+        x |= 128;           // x = x | 128
+        x ^= 64;            // x = x ^ 64
         
         return x;
     }
@@ -926,10 +926,10 @@ code assignments:
 code increment:
     proc counters() -> long {
         var x: long = 10;
-        x++;                ; Postfix increment
-        ++x;                ; Prefix increment
-        x--;                ; Postfix decrement
-        --x;                ; Prefix decrement
+        x++;                // Postfix increment
+        ++x;                // Prefix increment
+        x--;                // Postfix decrement
+        --x;                // Prefix decrement
         
         return x;
     }
@@ -992,7 +992,7 @@ code python_demo:
             emit(code)
         }
         
-        return table[5];  ; Accesses generated variable
+        return table[5];  // Accesses generated variable
     }
 ```
 
@@ -1032,7 +1032,7 @@ python -m hasc.cli program.has --generate generator.py -o out.s
 code inline_asm:
     proc raw_code() -> long {
         asm {
-            move.l #$12345678,d0    // Raw 68000 instructions
+            move.l #$12345678,d0    ; Raw 68000 instructions
             add.l d0,d1
             rts
         }
@@ -1358,19 +1358,19 @@ When you load and run a compiled HAS program:
 
 ```has
 code example:
-    ; This instruction executes FIRST when program starts
+    // This instruction executes FIRST when program starts
     asm "move.l #42,d0";
     
-    ; This procedure will NOT run unless called
+    // This procedure will NOT run unless called
     proc helper() -> long {
         return 100;
     }
     
-    ; If execution reaches here, this runs next
+    // If execution reaches here, this runs next
     asm "move.l #1,d1";
     
-    ; A procedure named "main" has NO special meaning
-    ; It only runs if called or if execution reaches it
+    // A procedure named "main" has NO special meaning
+    // It only runs if called or if execution reaches it
     proc main() -> long {
         return 0;
     }
@@ -1380,11 +1380,11 @@ code example:
 
 ```has
 code program:
-    ; Program entry point - starts HERE
-    call main();  ; Explicitly call main
-    asm "rts";    ; Return to OS
+    // Program entry point - starts HERE
+    call main();  // Explicitly call main
+    asm "rts";    // Return to OS
     
-    ; This only runs when called above
+    // This only runs when called above
     proc main() -> long {
         var result: long = 42;
         return result;
@@ -1401,14 +1401,14 @@ code execution_order:
     }
     
     proc main() -> long {
-        ; This does NOT run automatically!
-        ; It only runs if execution reaches here or if explicitly called
+        // This does NOT run automatically!
+        // It only runs if execution reaches here or if explicitly called
         var val: long = setup();
         return val;
     }
     
     proc cleanup() -> long {
-        ; This only executes if called explicitly
+        // This only executes if called explicitly
         return 0;
     }
 ```
@@ -1428,11 +1428,11 @@ data settings:
     counter = 0
 
 code app:
-    ; Execution starts HERE (first instruction)
-    call main();  ; Explicitly call main
-    asm "rts";    ; Return to OS
+    // Execution starts HERE (first instruction)
+    call main();  // Explicitly call main
+    asm "rts";    // Return to OS
     
-    ; Procedure definitions (only run when called)
+    // Procedure definitions (only run when called)
     proc setup() -> long {
         return VERSION;
     }
@@ -1441,10 +1441,10 @@ code app:
         return input * 2;
     }
     
-    ; This does NOT auto-execute - must be called
+    // This does NOT auto-execute - must be called
     proc main() -> long {
-        var x: long = setup();     ; Call setup
-        var y: long = process(x);  ; Call process
+        var x: long = setup();     // Call setup
+        var y: long = process(x);  // Call process
         return y;
     }
     
@@ -1466,13 +1466,13 @@ While `main()` has no special meaning in HAS, you can follow this pattern for cl
 
 ```has
 code program:
-    ; Entry point - execution starts here
+    // Entry point - execution starts here
     call main();
     asm "rts";
     
-    ; Main application logic
+    // Main application logic
     proc main() -> long {
-        ; Your code here
+        // Your code here
         return 0;
     }
 ```
@@ -1487,7 +1487,7 @@ code program:
 
 ```has
 code startup:
-    ; Direct execution - no procedure call
+    // Direct execution - no procedure call
     var result: long = 42;
     asm "rts";
 ```
@@ -1496,10 +1496,10 @@ or
 
 ```has
 code app:
-    asm "jsr _init";  ; Call your initialization
-    asm "jsr _run";   ; Call your main loop
-    asm "jsr _quit";  ; Call cleanup
-    asm "rts";        ; Return to OS
+    asm "jsr _init";  // Call your initialization
+    asm "jsr _run";   // Call your main loop
+    asm "jsr _quit";  // Call cleanup
+    asm "rts";        // Return to OS
 ```
 
 See [examples/execution_order_demo.has](../examples/execution_order_demo.has) for a complete demonstration.
@@ -1545,7 +1545,7 @@ const TRUE = 1;
 const FALSE = 0;
 
 code game:
-    ; Entry point - execution starts here
+    // Entry point - execution starts here
     call main();
     asm "rts";
 
@@ -1595,7 +1595,7 @@ data game_state:
     frame_count = 0
 
 code game:
-    ; Entry point - execution starts here
+    // Entry point - execution starts here
     call main();
     asm "rts";
 
@@ -1671,7 +1671,7 @@ extern func WaitMs(ms: int) -> void;
 
 code timing:
     proc wait_one_second() -> void {
-        WaitMs(1000);  ; Wait 1000 milliseconds
+        WaitMs(1000);  // Wait 1000 milliseconds
     }
     
     proc animation_loop() -> void {
@@ -1709,10 +1709,10 @@ extern func WaitMs(ms: int) -> void;
 code timing:
     proc pulse_led(count: int) -> void {
         for i = 0 to count {
-            write_led(1);     ; Turn on
-            WaitMs(500);      ; On for 500ms
-            write_led(0);     ; Turn off
-            WaitMs(500);      ; Off for 500ms
+            write_led(1);     // Turn on
+            WaitMs(500);      // On for 500ms
+            write_led(0);     // Turn off
+            WaitMs(500);      // Off for 500ms
         }
     }
 ```
@@ -1739,7 +1739,7 @@ code main:
         if (cpu >= CPUTYPE_68020) {
             return setup_fast_path();  ; 68020+ specific code
         } else {
-            return setup_baseline();   ; Fallback for 68000
+            return setup_baseline();   // Fallback for 68000
         }
     }
 ```
@@ -1779,7 +1779,7 @@ code features:
     proc multiply(a: long, b: long) -> long {
         var cpu: long = GetCPUType();
         if (cpu >= CPUTYPE_68020) {
-            return fast_multiply(a, b);   ; Native 32-bit muls.l
+            return fast_multiply(a, b);   // Native 32-bit muls.l
         } else {
             return slow_multiply(a, b);   ; 16-bit sequence
         }
@@ -1913,14 +1913,14 @@ Example (`--cpu 68020` only):
 struct Enemy {
     x: word;
     y: word;
-    health: byte;  ; offset +4
+    health: byte;  // offset +4
 }
 
 data enemies[100];
 
 proc check() -> int {
     var i: int = 5;
-    if (enemies[i].health < 10) {  ; Folds offset 4 into indexed operand
+    if (enemies[i].health < 10) {  // Folds offset 4 into indexed operand
         return -1;
     }
     return 0;
@@ -1942,9 +1942,9 @@ code math:
     proc calc() -> long {
         var a: long = 1000000;
         var b: long = 2000000;
-        var result: long = a * b;      ; Uses muls.l (native 32-bit)
-        var quotient: long = a / b;    ; Uses divsl.l
-        var remainder: long = a % b;   ; Uses divsl.l + remainder extraction
+        var result: long = a * b;      // Uses muls.l (native 32-bit)
+        var quotient: long = a / b;    // Uses divsl.l
+        var remainder: long = a % b;   // Uses divsl.l + remainder extraction
         return result;
     }
 ```
@@ -2012,7 +2012,7 @@ On `--cpu 68020`, signed byte-to-long sign extension uses the single-instruction
 code signed_ops:
     proc load_byte() -> long {
         var b: i8 = -5;
-        return b;  ; Uses single "extb.l" on 68020, two instructions on 68000
+        return b;  // Uses single "extb.l" on 68020, two instructions on 68000
     }
 ```
 
@@ -2093,7 +2093,7 @@ Legacy helpers: `./scripts/build.sh` and `./scripts/create_disk.sh`.
 
 ### 1. Use Meaningful Names
 ```has
-; Good
+// Good
 proc calculate_factorial(n: long) -> long {
     var result: long = 1;
     for i = 2 to n {
@@ -2102,7 +2102,7 @@ proc calculate_factorial(n: long) -> long {
     return result;
 }
 
-; Avoid
+// Avoid
 proc calc(a: long) -> long {
     var r: long = 1;
     for i = 2 to a {
