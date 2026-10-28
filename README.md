@@ -177,6 +177,7 @@ Legacy two-step scripts remain available: `./scripts/build.sh` and
 
 - **[docs/INSTALL.md](docs/INSTALL.md)** - Installation and quick verification
 - **[docs/COMPILER_DEVELOPERS_GUIDE.md](docs/COMPILER_DEVELOPERS_GUIDE.md)** - Architecture and internals
+- **[docs/CODE_GENERATOR_WALKTHROUGH.md](docs/CODE_GENERATOR_WALKTHROUGH.md)** - Visual emission flow and three worked HAS-to-assembly examples
 - **[docs/DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md)** - Language reference and usage patterns
 - **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** - Contributor workflow and checks
 - **[docs/COMPILER_DIAGNOSTICS.md](docs/COMPILER_DIAGNOSTICS.md)** - Compiler warnings and errors, causes, remedies, and source evidence
